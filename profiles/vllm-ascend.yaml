@@ -1,0 +1,135 @@
+apiVersion: cann-ebpf/v1
+kind: Profile
+metadata:
+  name: vllm-ascend
+
+spec:
+  extends: ../configs/base.yaml
+
+  match:
+    priority: 90
+    any:
+      - cmdline_contains: vllm
+      - cmdline_contains: vllm_ascend
+      - maps_contains: libtorch_npu.so
+      - container_image_contains: vllm-ascend
+    all:
+      - maps_contains: libascendcl.so
+    exclude:
+      - comm: orinfer
+      - cmdline_contains: start-orinfer.sh
+      - container_name: orinfer-cann920
+
+  target:
+    selector: all_matching
+    max_processes: 128
+    process_tree: true
+    include_children: true
+    proc_root: /proc/{pid}/root
+
+  cann:
+    launch_layer: auto
+    symbol_overrides:
+      sync:
+        - aclrtSynchronizeStream
+        - aclrtSynchronizeStreamWithTimeout
+        - aclrtSynchronizeEvent
+      event:
+        - aclrtRecordEvent
+        - aclrtStreamWaitEvent
+        - aclrtQueryEventStatus
+        - aclrtQueryEventWaitStatus
+        - aclrtQueryEvent
+      handle:
+        - aclrtSetDevice
+        - aclrtGetDevice
+        - aclrtSetCurrentContext
+        - aclrtCreateStream
+        - aclrtDestroyStream
+        - aclrtCreateEvent
+        - aclrtCreateEventWithFlag
+        - aclrtResetEvent
+        - aclrtDestroyEvent
+      memory:
+        - aclrtMalloc
+        - aclrtFree
+        - aclrtMallocHost
+        - aclrtFreeHost
+        - aclrtHostRegister
+        - aclrtHostUnregister
+        - aclrtGetMemInfo
+        - rtMemGetInfoEx
+      submit:
+        - aclrtMemcpyAsync
+        - aclrtLaunchKernel
+        - rtKernelLaunch
+        - rtKernelLaunchWithFlagV2
+        - rtMemcpyAsync
+      hccl:
+        - HcclAllReduce
+        - HcclAlltoAll
+        - HcclAllGather
+        - HcclReduceScatter
+        - HcclBroadcast
+        - HcclSend
+        - HcclRecv
+
+  probes:
+    sync:
+      enabled: true
+      mode: full
+      min_duration_us: 1000
+    event:
+      enabled: true
+      mode: aggregate
+      min_duration_us: 1000
+    memory:
+      enabled: true
+      mode: full
+      min_duration_us: 500
+    submit:
+      enabled: true
+      mode: sample
+      sample_rate: 64
+      min_duration_us: 500
+    hccl:
+      enabled: auto
+      mode: sample
+      sample_rate: 16
+      min_duration_us: 1000
+    sched:
+      enabled: true
+      mode: aggregate
+    futex:
+      enabled: true
+      mode: aggregate
+    ioctl:
+      enabled: false
+      mode: aggregate
+
+  context:
+    mode: plugin
+    batch: true
+    attribution_level: batch
+    plugin:
+      transport: unix_socket
+      socket: /run/cann-ebpf/vllm-ascend.sock
+      events:
+        - batch_begin
+        - batch_end
+        - request_begin
+        - request_end
+      fallback: tid
+
+  mspti:
+    mode: shared
+    activity:
+      - API
+      - KERNEL
+      - MEMCPY
+      - HCCL
+
+  notes:
+    - "vLLM continuous batching：一次 ACL 调用可能对应多条请求，必须用 batch_id + request_ids[]"
+    - "优先用插件/USDT 注入上下文；没有插件时回退到 tid，并标记 attribution.level=thread"
+    - "vLLM 可能多进程（frontend/engine/worker），target.process_tree 必须开启"

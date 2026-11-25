@@ -1,0 +1,180 @@
+apiVersion: cann-ebpf/v1
+kind: Config
+metadata:
+  name: base
+
+spec:
+  target:
+    pid: 0
+    # first_match: 每个 profile 只 attach 第一个命中的进程
+    # all_matching: attach 所有命中的 worker（vLLM 多进程时用）
+    selector: first_match
+    max_processes: 64
+    process_tree: true
+    include_children: true
+    discovery_window_ms: 5000
+    proc_root: /proc/{pid}/root
+
+  preflight:
+    require_btf: true
+    require_uprobe_events: true
+    require_bpf_syscall: true
+    allow_missing_symbols: true
+    check_perf_event_paranoid: true
+
+  cann:
+    version: auto
+    library_globs:
+      - /usr/local/Ascend/**/lib64/libascendcl.so
+      - /usr/local/Ascend/**/lib64/libruntime.so
+      - /usr/local/Ascend/**/lib64/libhccl.so
+    symbol_policy: fail_soft
+    # auto: 用 5 秒计数探针选择 ACL/Runtime 层；acl/runtime/off: 强制或关闭
+    launch_layer: auto
+
+  probes:
+    # H1：真正阻塞 host 的调用，全量采集
+    # enabled: true / false / auto；mode: full / sample / aggregate
+    sync:
+      enabled: true
+      template: host_blocking
+      mode: full
+      min_duration_us: 1000
+
+    # H2：事件/依赖，主要是入队和轮询，不是 host 阻塞
+    event:
+      enabled: true
+      template: event_dependency
+      # 事件 API 可能高频；聚合仍保留 entry，慢事件和错误照常输出
+      mode: aggregate
+      min_duration_us: 1000
+
+    # M：HBM/主机内存配额，低频全量
+    memory:
+      enabled: true
+      template: memory_alloc
+      mode: full
+      min_duration_us: 500
+
+    # 关联键生命周期：device/stream/event handle
+    handle:
+      enabled: true
+      template: handle_lifecycle
+      mode: full
+      min_duration_us: 0
+
+    # H2：异步提交，高频，默认 1/64 采样
+    # sample 只控制正常 span 输出；entry 仍记录，错误/慢调用强制输出
+    submit:
+      enabled: true
+      template: submit
+      mode: sample
+      sample_rate: 64
+      min_duration_us: 500
+
+    # C：HCCL，按需开启；设备侧时长看 msPTI
+    hccl:
+      enabled: auto
+      template: hccl
+      mode: sample
+      sample_rate: 16
+      min_duration_us: 1000
+
+    # D：归因层
+    sched:
+      enabled: true
+      template: sched
+      mode: aggregate
+    futex:
+      enabled: true
+      template: futex
+      mode: aggregate
+    ioctl:
+      enabled: false
+      template: ioctl
+      mode: aggregate
+
+  # E 硬件层：优先 DCMI，其次 npu-exporter，最后 npu-smi
+  hardware:
+    enabled: auto
+    source: auto
+    interval_s: 10
+    metrics:
+      - hbm_free
+      - hbm_total
+      - aicore_util
+      - temperature
+      - power
+    npu_smi_fallback: true
+
+  context:
+    # tid: 零改动；usdt/plugin/otel: 需要应用侧配合
+    mode: tid
+    batch: auto
+    attribution_level: auto
+
+  mspti:
+    # off / exclusive / shared
+    # 必须加引号：YAML 1.1 会把未加引号的 off 解析成布尔 false
+    mode: "off"
+    # auto: 用 library_globs 在目标进程 root 下解析
+    library: auto
+    library_globs:
+      - /usr/local/Ascend/**/lib64/libmspti.so
+      - /usr/local/Ascend/**/tools/mspti/lib64/libmspti.so
+    activity:
+      - API
+      - KERNEL
+      - MEMCPY
+      - HCCL
+
+  classify:
+    sync_slow_us: 1000000
+    submit_slow_us: 10000
+    offcpu_ratio: 0.5
+    futex_ratio: 0.3
+    device_overlap_ratio: 0.8
+    device_idle_ratio: 0.2
+    hbm_free_pct: 5
+    stuck_threshold_ms: 30000
+
+  output:
+    # 绝对路径，避免 systemd 的 cwd=/ 把数据写到 /runs
+    dir: /var/lib/cann-ebpf/runs/{run_id}
+    jsonl: spans.jsonl
+    report: summary.md
+    manifest: manifest.json
+    ringbuf_mb: 8
+    batch_size: 128
+    format: jsonl
+    rotate_mb: 256
+    retention_days: 7
+    min_free_gb: 5
+
+  maps:
+    target_pids_max: 256
+    inflight_max: 65536
+    handle_max: 65536
+    agg_max: 4096
+
+  self_metrics:
+    enabled: true
+    interval_s: 5
+    listen: 127.0.0.1:9464
+    metrics:
+      - attach_success
+      - probe_hits
+      - ringbuf_lost
+      - map_full
+      - consumer_lag
+      - dropped_spans
+      - active_pids
+
+  safety:
+    max_overhead_pct: 3
+    max_ringbuf_loss_pct: 0.1
+    max_rss_mb: 512
+    max_cpu_pct: 20
+    max_duration_s: 300
+    auto_detach_on_overhead: true
+    dry_run: false

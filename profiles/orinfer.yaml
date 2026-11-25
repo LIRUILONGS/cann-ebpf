@@ -1,0 +1,124 @@
+apiVersion: cann-ebpf/v1
+kind: Profile
+metadata:
+  name: orinfer
+
+spec:
+  extends: ../configs/base.yaml
+
+  match:
+    priority: 100
+    any:
+      - comm: orinfer
+      - cmdline_contains: start-orinfer.sh
+      - container_name: orinfer-cann920
+    all:
+      - maps_contains: libascendcl.so
+
+  target:
+    process_tree: true
+    include_children: true
+    proc_root: /proc/{pid}/root
+
+  cann:
+    version: "9.2.0"
+    launch_layer: auto
+    symbol_overrides:
+      sync:
+        - aclrtSynchronizeStream
+        - aclrtSynchronizeStreamWithTimeout
+        - aclrtSynchronizeEvent
+      event:
+        - aclrtRecordEvent
+        - aclrtStreamWaitEvent
+        - aclrtQueryEventStatus
+        - aclrtQueryEventWaitStatus
+        - aclrtQueryEvent
+      handle:
+        - aclrtSetDevice
+        - aclrtGetDevice
+        - aclrtSetCurrentContext
+        - aclrtCreateStream
+        - aclrtDestroyStream
+        - aclrtCreateEvent
+        - aclrtCreateEventWithFlag
+        - aclrtResetEvent
+        - aclrtDestroyEvent
+      memory:
+        - aclrtMalloc
+        - aclrtFree
+        - aclrtMallocHost
+        - aclrtFreeHost
+        - aclrtHostRegister
+        - aclrtHostUnregister
+        - aclrtGetMemInfo
+        - rtMemGetInfoEx
+      submit:
+        - aclrtMemcpyAsync
+        - aclrtLaunchKernel
+        - rtKernelLaunch
+        - rtKernelLaunchWithFlagV2
+        - rtMemcpyAsync
+      hccl:
+        - HcclAllReduce
+        - HcclAlltoAll
+        - HcclAllGather
+        - HcclReduceScatter
+        - HcclBroadcast
+        - HcclSend
+        - HcclRecv
+
+  probes:
+    sync:
+      enabled: true
+      mode: full
+      min_duration_us: 1000
+    event:
+      enabled: true
+      mode: aggregate
+      min_duration_us: 1000
+    memory:
+      enabled: true
+      mode: full
+      min_duration_us: 500
+    submit:
+      enabled: true
+      mode: sample
+      sample_rate: 64
+      min_duration_us: 500
+    hccl:
+      enabled: auto
+      mode: sample
+      sample_rate: 16
+      min_duration_us: 1000
+    sched:
+      enabled: true
+      mode: aggregate
+    futex:
+      enabled: true
+      mode: aggregate
+    ioctl:
+      enabled: false
+      mode: aggregate
+
+  context:
+    mode: tid
+    batch: auto
+    attribution_level: auto
+    notes: "Orinfer 当前没有稳定 request hook，先用 tid/时间窗；拿到入口符号后再升级"
+
+  mspti:
+    mode: exclusive
+    library: /usr/local/Ascend/cann-9.2.0/aarch64-linux/lib64/libmspti.so
+    headers: /usr/local/Ascend/cann-9.2.0/tools/mspti/include
+    activity:
+      - API
+      - KERNEL
+      - MEMCPY
+      - HCCL
+
+  notes:
+    - "Orinfer 运行在长容器 orinfer-cann920 中，host network，端口 8000"
+    - "listen_port=8000 只作为人工提示，不作为单独匹配条件，避免误 attach 其他 8000 服务"
+    - "容器镜像虽然是 vllm-ascend，但运行时是 Orinfer；禁止按镜像名判断框架"
+    - "M1/M2 不允许重启服务；只 attach 已存在的 PID"

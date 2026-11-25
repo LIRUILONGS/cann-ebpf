@@ -1,0 +1,31 @@
+apiVersion: cann-ebpf/v1
+kind: Profile
+metadata:
+  name: cann-generic
+
+spec:
+  extends: ../configs/base.yaml
+
+  match:
+    priority: 0
+    any:
+      - maps_contains: libascendcl.so
+
+  cann:
+    launch_layer: auto
+
+  probes:
+    hccl:
+      enabled: auto
+
+  context:
+    mode: tid
+    batch: auto
+    attribution_level: auto
+
+  mspti:
+    mode: exclusive
+
+  notes:
+    - "兜底 profile：只保证 host span，不强求 request/batch 上下文"
+    - "未知框架先跑 discover --dry-run，再决定是否启用 H2/HCCL"

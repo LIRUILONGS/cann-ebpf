@@ -1,0 +1,300 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cann-ebpf.local/schema/config.schema.json",
+  "title": "cann-ebpf configuration",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["apiVersion", "kind", "metadata", "spec"],
+  "properties": {
+    "apiVersion": { "const": "cann-ebpf/v1" },
+    "kind": { "enum": ["Config", "Profile"] },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "description": { "type": "string" }
+      }
+    },
+    "spec": { "$ref": "#/$defs/spec" }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "kind": { "const": "Profile" } },
+        "required": ["kind"]
+      },
+      "then": {
+        "properties": {
+          "spec": { "required": ["extends"] }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "kind": { "const": "Config" } },
+        "required": ["kind"]
+      },
+      "then": {
+        "properties": {
+          "spec": { "not": { "required": ["extends"] } }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "stringArray": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "uniqueItems": true
+    },
+    "matchExpr": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "comm": { "type": "string", "minLength": 1 },
+        "cmdline_contains": { "type": "string", "minLength": 1 },
+        "maps_contains": { "type": "string", "minLength": 1 },
+        "container_name": { "type": "string", "minLength": 1 },
+        "container_image_contains": { "type": "string", "minLength": 1 },
+        "listen_port": { "type": "integer", "minimum": 1, "maximum": 65535 }
+      }
+    },
+    "match": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "priority": { "type": "integer", "minimum": 0, "maximum": 1000 },
+        "any": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/matchExpr" } },
+        "all": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/matchExpr" } },
+        "exclude": { "type": "array", "items": { "$ref": "#/$defs/matchExpr" } }
+      },
+      "anyOf": [
+        { "required": ["any"] },
+        { "required": ["all"] }
+      ]
+    },
+    "probe": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "oneOf": [
+            { "type": "boolean" },
+            { "const": "auto" }
+          ]
+        },
+        "template": {
+          "enum": [
+            "host_blocking",
+            "event_dependency",
+            "handle_lifecycle",
+            "memory_alloc",
+            "submit",
+            "hccl",
+            "sched",
+            "futex",
+            "ioctl"
+          ]
+        },
+        "mode": { "enum": ["full", "sample", "aggregate"] },
+        "sample_rate": { "type": "integer", "minimum": 1 },
+        "min_duration_us": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "probes": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "sync": { "$ref": "#/$defs/probe" },
+        "event": { "$ref": "#/$defs/probe" },
+        "memory": { "$ref": "#/$defs/probe" },
+        "handle": { "$ref": "#/$defs/probe" },
+        "submit": { "$ref": "#/$defs/probe" },
+        "hccl": { "$ref": "#/$defs/probe" },
+        "sched": { "$ref": "#/$defs/probe" },
+        "futex": { "$ref": "#/$defs/probe" },
+        "ioctl": { "$ref": "#/$defs/probe" }
+      }
+    },
+    "spec": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "extends": { "type": "string", "minLength": 1 },
+        "match": { "$ref": "#/$defs/match" },
+        "notes": { "type": "array", "items": { "type": "string" } },
+        "target": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "pid": { "type": "integer", "minimum": 0 },
+            "selector": { "enum": ["first_match", "all_matching", "explicit"] },
+            "max_processes": { "type": "integer", "minimum": 1 },
+            "process_tree": { "type": "boolean" },
+            "include_children": { "type": "boolean" },
+            "discovery_window_ms": { "type": "integer", "minimum": 0 },
+            "proc_root": { "type": "string", "minLength": 1 }
+          }
+        },
+        "preflight": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "require_btf": { "type": "boolean" },
+            "require_uprobe_events": { "type": "boolean" },
+            "require_bpf_syscall": { "type": "boolean" },
+            "allow_missing_symbols": { "type": "boolean" },
+            "check_perf_event_paranoid": { "type": "boolean" }
+          }
+        },
+        "cann": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "version": { "type": ["string", "number"] },
+            "library_globs": { "$ref": "#/$defs/stringArray" },
+            "symbol_policy": { "enum": ["fail_soft", "fail_fast"] },
+            "launch_layer": { "enum": ["auto", "acl", "runtime", "off"] },
+            "symbol_overrides": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "sync": { "$ref": "#/$defs/stringArray" },
+                "event": { "$ref": "#/$defs/stringArray" },
+                "handle": { "$ref": "#/$defs/stringArray" },
+                "memory": { "$ref": "#/$defs/stringArray" },
+                "submit": { "$ref": "#/$defs/stringArray" },
+                "hccl": { "$ref": "#/$defs/stringArray" }
+              }
+            }
+          }
+        },
+        "probes": { "$ref": "#/$defs/probes" },
+        "hardware": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "oneOf": [
+                { "type": "boolean" },
+                { "const": "auto" }
+              ]
+            },
+            "source": { "enum": ["auto", "dcmi", "npu-exporter", "npu-smi"] },
+            "interval_s": { "type": "integer", "minimum": 1 },
+            "metrics": { "$ref": "#/$defs/stringArray" },
+            "npu_smi_fallback": { "type": "boolean" }
+          }
+        },
+        "context": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "mode": { "enum": ["tid", "usdt", "plugin", "otel"] },
+            "batch": {
+              "oneOf": [
+                { "type": "boolean" },
+                { "const": "auto" }
+              ]
+            },
+            "attribution_level": {
+              "enum": ["auto", "request", "batch", "batch_window", "thread", "process"]
+            },
+            "plugin": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "transport": { "enum": ["unix_socket", "usdt"] },
+                "socket": { "type": "string", "minLength": 1 },
+                "events": { "$ref": "#/$defs/stringArray" },
+                "fallback": { "enum": ["tid", "batch_window", "process"] }
+              }
+            },
+            "notes": { "type": "string" }
+          }
+        },
+        "mspti": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "mode": { "enum": ["off", "exclusive", "shared", "auto"] },
+            "library": { "type": "string", "minLength": 1 },
+            "library_globs": { "$ref": "#/$defs/stringArray" },
+            "headers": { "type": "string", "minLength": 1 },
+            "activity": {
+              "type": "array",
+              "items": { "enum": ["API", "KERNEL", "MEMCPY", "HCCL"] },
+              "uniqueItems": true
+            }
+          }
+        },
+        "classify": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "sync_slow_us": { "type": "integer", "minimum": 0 },
+            "submit_slow_us": { "type": "integer", "minimum": 0 },
+            "offcpu_ratio": { "type": "number", "minimum": 0, "maximum": 1 },
+            "futex_ratio": { "type": "number", "minimum": 0, "maximum": 1 },
+            "device_overlap_ratio": { "type": "number", "minimum": 0, "maximum": 1 },
+            "device_idle_ratio": { "type": "number", "minimum": 0, "maximum": 1 },
+            "hbm_free_pct": { "type": "number", "minimum": 0, "maximum": 100 },
+            "stuck_threshold_ms": { "type": "integer", "minimum": 1 }
+          }
+        },
+        "output": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "dir": { "type": "string", "minLength": 1 },
+            "jsonl": { "type": "string", "minLength": 1 },
+            "report": { "type": "string", "minLength": 1 },
+            "manifest": { "type": "string", "minLength": 1 },
+            "ringbuf_mb": { "type": "integer", "minimum": 1 },
+            "batch_size": { "type": "integer", "minimum": 1 },
+            "format": { "enum": ["jsonl"] },
+            "rotate_mb": { "type": "integer", "minimum": 1 },
+            "retention_days": { "type": "integer", "minimum": 1 },
+            "min_free_gb": { "type": "integer", "minimum": 1 }
+          }
+        },
+        "maps": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "target_pids_max": { "type": "integer", "minimum": 1 },
+            "inflight_max": { "type": "integer", "minimum": 1 },
+            "handle_max": { "type": "integer", "minimum": 1 },
+            "agg_max": { "type": "integer", "minimum": 1 }
+          }
+        },
+        "self_metrics": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "interval_s": { "type": "integer", "minimum": 1 },
+            "listen": { "type": "string", "minLength": 1 },
+            "metrics": { "$ref": "#/$defs/stringArray" }
+          }
+        },
+        "safety": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "max_overhead_pct": { "type": "number", "minimum": 0 },
+            "max_ringbuf_loss_pct": { "type": "number", "minimum": 0, "maximum": 100 },
+            "max_rss_mb": { "type": "integer", "minimum": 1 },
+            "max_cpu_pct": { "type": "number", "minimum": 0, "maximum": 100 },
+            "max_duration_s": { "type": "integer", "minimum": 1 },
+            "auto_detach_on_overhead": { "type": "boolean" },
+            "dry_run": { "type": "boolean" }
+          }
+        }
+      }
+    }
+  }
+}
