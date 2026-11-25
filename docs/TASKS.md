@@ -1,6 +1,6 @@
 # cann-ebpf 开发任务
 
-状态：M0 进行中
+状态：M0 本机完成；V4 服务器 discovery 通过；Orinfer 待运行窗口
 
 ## M0 骨架与发现
 
