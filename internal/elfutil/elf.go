@@ -37,6 +37,11 @@ func Resolve(path string, wanted []string) ([]Symbol, []string, error) {
 
 	byName := map[string][]elf.Symbol{}
 	for _, s := range syms {
+		// Dynamic symbol tables also contain imports. An undefined symbol is
+		// not an exported target we can uprobe in this library.
+		if s.Section == elf.SHN_UNDEF {
+			continue
+		}
 		base, _ := splitVersion(s.Name)
 		byName[base] = append(byName[base], s)
 	}
