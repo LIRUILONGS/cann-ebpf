@@ -8,7 +8,14 @@ spec:
 
   match:
     priority: 90
+    # M1 目标拓扑（PID 会变化，profile 只按稳定特征选择）：
+    #   8 x VLLM::Worker_TP + 8 个 python3 子进程
+    #   1 x frontend（cmdline 含 vllm serve）
+    #   1 x VLLM::EngineCor（kernel comm 最长 15 字符，不能写成 EngineCore）
+    # 进程树和 include_children 覆盖后续 fork；all_matching 覆盖当前已经存在的 worker。
     any:
+      - comm: "VLLM::Worker_TP"
+      - comm: "VLLM::EngineCor"
       - cmdline_contains: vllm
       - cmdline_contains: vllm_ascend
       - maps_contains: libtorch_npu.so
@@ -25,21 +32,25 @@ spec:
     max_processes: 128
     process_tree: true
     include_children: true
+    discovery_window_ms: 15000
     proc_root: /proc/{pid}/root
 
   cann:
     launch_layer: auto
+    # H1：真正阻塞 host 的同步调用。
     symbol_overrides:
       sync:
         - aclrtSynchronizeStream
         - aclrtSynchronizeStreamWithTimeout
         - aclrtSynchronizeEvent
+      # H2：event 依赖/轮询，主要看入队与依赖，不等价于设备执行时间。
       event:
         - aclrtRecordEvent
         - aclrtStreamWaitEvent
         - aclrtQueryEventStatus
         - aclrtQueryEventWaitStatus
         - aclrtQueryEvent
+      # M/关联键：device、stream、event 生命周期，用于把后续 span 归到线程/stream。
       handle:
         - aclrtSetDevice
         - aclrtGetDevice
@@ -59,12 +70,14 @@ spec:
         - aclrtHostUnregister
         - aclrtGetMemInfo
         - rtMemGetInfoEx
+      # H2：异步提交，入口延迟不是设备 kernel 执行时长。
       submit:
         - aclrtMemcpyAsync
         - aclrtLaunchKernel
         - rtKernelLaunch
         - rtKernelLaunchWithFlagV2
         - rtMemcpyAsync
+      # C：HCCL host 入队；设备侧 activity 需要 M3 的 msPTI。
       hccl:
         - HcclAllReduce
         - HcclAlltoAll
@@ -122,6 +135,8 @@ spec:
       fallback: tid
 
   mspti:
+    # 保留 M0/M3 的设备侧配置；M1 tracefs attach 用 --only sync,memory,handle
+    # 限定 host 探针，不初始化 msPTI。
     mode: shared
     activity:
       - API
@@ -132,4 +147,6 @@ spec:
   notes:
     - "vLLM continuous batching：一次 ACL 调用可能对应多条请求，必须用 batch_id + request_ids[]"
     - "优先用插件/USDT 注入上下文；没有插件时回退到 tid，并标记 attribution.level=thread"
-    - "vLLM 可能多进程（frontend/engine/worker），target.process_tree 必须开启"
+    - "vLLM 是多进程：frontend + EngineCore + 8 x Worker_TP + spawn 子进程；必须 all_matching + process_tree"
+    - "不要把 PID 写死；PID 会随服务重启变化，profile 按 comm/cmdline/maps 选择"
+    - "M1 tracefs attach 默认只启用 sync,memory,handle；msPTI 配置保留给 M3，M1 不初始化"

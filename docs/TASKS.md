@@ -1,6 +1,6 @@
 # cann-ebpf 开发任务
 
-状态：M0 本机完成；V4 服务器 discovery 通过；Orinfer 待运行窗口
+状态：M0 完成；M1 eBPF 已在 V4 实测（单 PID 2s、8 worker 2s/30s）；M3 msPTI 与 M4 未完成；Orinfer 待运行窗口
 
 ## M0 骨架与发现
 
@@ -15,13 +15,14 @@
 - [x] 服务器只读验证：V4 vLLM（不 attach）
 - [ ] 服务器只读验证：Orinfer（当前未运行，等待授权窗口）
 
-## M1 Orinfer host core
+## M1 host core（V4 采集已验证）
 
-- [ ] H1/M 探针
-- [ ] ringbuf / entry-exit 配对
-- [ ] JSONL + manifest
+- [x] H1 `sync` 与 event/submit/HCCL 核心探针（memory 探针未实现）
+- [x] ringbuf / entry-exit 配对
+- [x] JSONL + manifest
 - [ ] `top` / `why` 初版
-- [ ] 30 秒试跑，不重启 Orinfer
+- [x] 30 秒试跑（V4，不重启服务）
+- [x] V4 eBPF：单 PID 2s 70 spans；8 worker 2s 487 spans；最终件 8 worker 30s 2088 spans（回归批次 2665 spans）；health 前后 200；uprobe 无残留
 
 ## M2 off-CPU 与锁归因
 
@@ -31,11 +32,15 @@
 
 ## M3 msPTI join
 
+状态：未实现；M1 不初始化 msPTI。
+
 - [ ] msPTI collector：API/KERNEL/MEMCPY/HCCL
 - [ ] 时钟校准、`(device_id, correlationId)` join
 - [ ] 对齐率报告、未匹配原因
 
 ## M4 vLLM-Ascend profile
+
+状态：未完成。M1 的 8 worker host 采集不等同于 M4 完成；batch/request 插件、请求级归因和设备侧关联仍未实现。
 
 - [ ] 真实 V4 服务 discovery：`vllm-ds4-8905`
 - [ ] 8 worker + engine core + API server 覆盖
@@ -43,6 +48,8 @@
 - [ ] 等 `healthy` 后再 attach，不在 loading/compile 阶段计时
 
 ## M5 V4/Orinfer A/B（需要人工窗口）
+
+状态：等待 Orinfer 运行窗口；当前只有 V4 基线。
 
 - [ ] 先采 V4 稳态
 - [ ] 授权窗口停 V4、起 Orinfer

@@ -16,7 +16,7 @@ import (
 	"cann-ebpf/internal/elfutil"
 )
 
-const toolVersion = "0.1.0-m0"
+const toolVersion = "0.1.0-m1"
 
 func main() {
 	os.Exit(run(os.Args[1:]))
@@ -32,6 +32,10 @@ func run(args []string) int {
 		return cmdValidate(args[1:])
 	case "discover":
 		return cmdDiscover(args[1:])
+	case "attach":
+		return cmdAttach(args[1:])
+	case "attach-tracefs":
+		return cmdAttachTracefs(args[1:])
 	case "version":
 		fmt.Printf("cann-ebpf %s %s/%s\n", toolVersion, runtime.GOOS, runtime.GOARCH)
 		return 0
@@ -43,7 +47,7 @@ func run(args []string) int {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: cann-ebpf <validate|discover|version> [flags]")
+	fmt.Fprintln(os.Stderr, "usage: cann-ebpf <validate|discover|attach|attach-tracefs|version> [flags]")
 }
 
 func cmdValidate(args []string) int {
