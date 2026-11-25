@@ -12,7 +12,8 @@
 - [x] `discover --dry-run`：JSON/human 输出、候选库、候选符号
 - [x] 单元测试：配置合并、match 语义、stat/maps 解析、ELF offset、容器 root 回退
 - [x] `linux/arm64` 交叉编译
-- [ ] 服务器只读验证：V4 vLLM + Orinfer（不 attach）
+- [x] 服务器只读验证：V4 vLLM（不 attach）
+- [ ] 服务器只读验证：Orinfer（当前未运行，等待授权窗口）
 
 ## M1 Orinfer host core
 
