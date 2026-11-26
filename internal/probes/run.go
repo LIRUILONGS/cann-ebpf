@@ -29,6 +29,18 @@ func Run(opts Options) (result *Result, retErr error) {
 		return nil, err
 	}
 	result = &Result{Started: time.Now()}
+	runStart := time.Now()
+	var captureStart, captureStop time.Time
+	defer func() {
+		if result == nil || captureStart.IsZero() {
+			return
+		}
+		result.SetupDuration = captureStart.Sub(runStart)
+		if !captureStop.IsZero() {
+			result.CaptureDuration = captureStop.Sub(captureStart)
+			result.TeardownDuration = time.Since(captureStop)
+		}
+	}()
 	functions, warnings := requestedFunctions(opts.Profile)
 	result.Warnings = append(result.Warnings, warnings...)
 	if len(functions) == 0 {
@@ -101,11 +113,35 @@ func Run(opts Options) (result *Result, retErr error) {
 	var linkMu sync.Mutex
 	closeLinks := func() {
 		linkMu.Lock()
-		defer linkMu.Unlock()
-		for i := len(links) - 1; i >= 0; i-- {
-			_ = links[i].Close()
-		}
+		pending := links
 		links = nil
+		linkMu.Unlock()
+		// Uprobes are per-thread: with 10 targets × 37 functions × 2 probes the
+		// kernel serializes uretprobe teardown (~50 ms per link on the V4 host),
+		// so waiting for all links can take ~40 s. Closing is best-effort with a
+		// short bound; the remaining fds are released when the process exits and
+		// the post-run residual check verifies no cann_ uprobe is left behind.
+		const workers = 16
+		sem := make(chan struct{}, workers)
+		var wg sync.WaitGroup
+		for _, l := range pending {
+			wg.Add(1)
+			go func(l link.Link) {
+				defer wg.Done()
+				sem <- struct{}{}
+				defer func() { <-sem }()
+				_ = l.Close()
+			}(l)
+		}
+		done := make(chan struct{})
+		go func() {
+			wg.Wait()
+			close(done)
+		}()
+		select {
+		case <-done:
+		case <-time.After(1 * time.Second):
+		}
 	}
 	defer closeLinks()
 
@@ -119,6 +155,13 @@ func Run(opts Options) (result *Result, retErr error) {
 			result.Warnings = append(result.Warnings, "hardware sampling skipped: no output directory")
 		} else {
 			interval := time.Duration(hardwareIntervalSeconds(opts.Profile)) * time.Second
+			if opts.HardwareInterval > 0 {
+				interval = opts.HardwareInterval
+			}
+			if interval < 2*time.Second {
+				result.Warnings = append(result.Warnings,
+					fmt.Sprintf("hardware interval %s is shorter than one npu-smi call (~1.1s); sampling may overlap", interval))
+			}
 			collector, hwWarnings := hardware.Start(opts.Context, filepath.Join(opts.OutputDir, "hardware.jsonl"), interval)
 			hardwareCollector = collector
 			result.Warnings = append(result.Warnings, hwWarnings...)
@@ -197,6 +240,10 @@ func Run(opts Options) (result *Result, retErr error) {
 
 	runCtx, cancel := context.WithCancel(opts.Context)
 	defer cancel()
+	captureStart = time.Now()
+	if opts.OnCaptureStart != nil {
+		opts.OnCaptureStart()
+	}
 	timer := time.NewTimer(opts.Duration)
 	defer timer.Stop()
 	var runErr error
@@ -207,11 +254,12 @@ func Run(opts Options) (result *Result, retErr error) {
 			runErr = runCtx.Err()
 		}
 	}
-
-	closeLinks()
-	if blockingCollection != nil {
-		blockingCollection.Close()
-		blockingCollection = nil
+	// The capture window ends here; teardown (closing hundreds of uprobe links,
+	// batch collection, summary) can take much longer and must not be counted
+	// as capture time or as hardware samples.
+	captureStop = time.Now()
+	if opts.OnCaptureStop != nil {
+		opts.OnCaptureStop()
 	}
 	if hardwareCollector != nil {
 		result.Hardware = hardwareCollector.Stop()
@@ -223,8 +271,18 @@ func Run(opts Options) (result *Result, retErr error) {
 			}
 		}
 	}
+
+	closeLinksStart := time.Now()
+	closeLinks()
+	result.CloseLinksDuration = time.Since(closeLinksStart)
+	if blockingCollection != nil {
+		blockingCollection.Close()
+		blockingCollection = nil
+	}
 	_ = reader.Flush()
+	batchStart := time.Now()
 	batchCaptures, batchWarnings := batchLayer.Collect(10 * time.Second)
+	result.BatchCollectDuration = time.Since(batchStart)
 	result.Warnings = append(result.Warnings, batchWarnings...)
 	for _, capture := range batchCaptures {
 		if opts.OutputDir != "" && len(capture.ReportJSON) > 0 {
@@ -251,12 +309,14 @@ func Run(opts Options) (result *Result, retErr error) {
 		}
 		result.PythonBatch = append(result.PythonBatch, capture)
 	}
+	consumeStart := time.Now()
 	select {
 	case <-consumeDone:
 	case <-time.After(3 * time.Second):
 		_ = reader.Close()
 		<-consumeDone
 	}
+	result.ConsumeWaitDuration = time.Since(consumeStart)
 	spanMu.Lock()
 	result.Spans = append([]runlog.Span(nil), captured...)
 	limitReached := spanLimitReached
@@ -288,7 +348,9 @@ func Run(opts Options) (result *Result, retErr error) {
 		for _, warning := range result.Warnings {
 			_ = writer.AddWarning(warning)
 		}
+		writerStart := time.Now()
 		closeErr := writer.CloseWithError(runErr)
+		result.WriterCloseDuration = time.Since(writerStart)
 		result.EventCount = writer.SnapshotManifest().EventCount
 		writer = nil
 		if closeErr != nil {
@@ -296,6 +358,7 @@ func Run(opts Options) (result *Result, retErr error) {
 		}
 	}
 	if opts.OutputDir != "" {
+		summaryStart := time.Now()
 		if summary, summaryErr := runlog.BuildSummaryFromFile(result.JSONLPath); summaryErr == nil {
 			if summaryErr = summary.WriteJSON(filepath.Join(opts.OutputDir, "summary.json")); summaryErr == nil {
 				summaryErr = summary.WriteMarkdown(filepath.Join(opts.OutputDir, "summary.md"))
@@ -306,6 +369,7 @@ func Run(opts Options) (result *Result, retErr error) {
 		} else {
 			result.Warnings = append(result.Warnings, "build summary: "+summaryErr.Error())
 		}
+		result.SummaryDuration = time.Since(summaryStart)
 	}
 	return result, nil
 }

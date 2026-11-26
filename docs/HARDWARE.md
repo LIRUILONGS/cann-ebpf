@@ -43,7 +43,11 @@
 | `cmd/cann-ebpf/attach.go` | `--hardware` 参数与输出 |
 | `internal/diagnose` | 硬件汇总与 `hbm_pressure` 判定 |
 
-采样间隔取 `profile.hardware.interval_s`（默认 10 秒）。10 秒窗口通常得到 2 个采样点。
+采样间隔取 `profile.hardware.interval_s`（默认 10 秒），CLI `--hardware-interval` 可覆盖。
+单次 `npu-smi info` 在本机约 **1.14 秒**，`usages -i N`/`memory -i N` 单设备也要 0.5–0.65 秒，
+所以不建议低于 2 秒；低于 2 秒会写 warning。每次采样有 5 秒超时，避免 npu-smi 卡住采集协程。
+
+10 秒窗口通常得到 2 个采样点；硬件采样在 `capture_stop` 时停止，不会把清理阶段算进窗口。
 
 `--hardware`：
 

@@ -36,6 +36,7 @@ func cmdAttach(args []string) int {
 	pythonBatchRequireType := fs.String("python-batch-require-type", "SchedulerOutput", "required batch owner type substring")
 	blockingMode := fs.String("blocking", "auto", "host blocking probes: auto|on|off (sched_switch off-CPU and futex_wait)")
 	hardwareMode := fs.String("hardware", "auto", "coarse npu-smi hardware sampling: auto|on|off")
+	hardwareInterval := fs.Duration("hardware-interval", 0, "hardware sampling interval override (default: profile hardware.interval_s)")
 	jsonOut := fs.Bool("json", false, "json summary")
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -103,8 +104,15 @@ func cmdAttach(args []string) int {
 		Context: ctx, PIDs: pids, ProcRoot: *procRoot, Profile: profile.Doc,
 		ProfileName: profile.Name, Duration: *duration, OutputDir: *outputDir,
 		MinDuration: *minDuration, ContextSocket: contextSocketPath,
-		Blocking:     probes.BlockingMode(*blockingMode),
-		HardwareMode: *hardwareMode,
+		Blocking:         probes.BlockingMode(*blockingMode),
+		HardwareMode:     *hardwareMode,
+		HardwareInterval: *hardwareInterval,
+		OnCaptureStart: func() {
+			fmt.Fprintf(os.Stderr, "capture_start=%s\n", time.Now().UTC().Format(time.RFC3339Nano))
+		},
+		OnCaptureStop: func() {
+			fmt.Fprintf(os.Stderr, "capture_stop=%s\n", time.Now().UTC().Format(time.RFC3339Nano))
+		},
 		PythonBatch: probes.PythonBatchOptions{
 			Enabled:     *pythonBatch,
 			LibPath:     *pythonBatchLib,
@@ -117,6 +125,7 @@ func cmdAttach(args []string) int {
 		fmt.Fprintf(os.Stderr, "attach: %v\n", err)
 		return 5
 	}
+	fmt.Fprintf(os.Stderr, "capture_end=%s\n", time.Now().UTC().Format(time.RFC3339Nano))
 	if *jsonOut {
 		writeJSON(map[string]any{
 			"backend": "ebpf", "profile": profile.Name, "pids": pids,
@@ -131,6 +140,11 @@ func cmdAttach(args []string) int {
 			result.Blocking.Mode, result.Blocking.OffCPU, result.Blocking.Futex, result.Blocking.Attached, result.Blocking.Failed)
 		fmt.Printf("hardware source=%s available=%v samples=%d devices=%d output=%s\n",
 			result.Hardware.Source, result.Hardware.Available, result.Hardware.Samples, result.Hardware.Devices, result.Hardware.Path)
+		fmt.Printf("timings setup=%s capture=%s teardown=%s close_links=%s batch=%s consume=%s writer=%s summary=%s\n",
+			result.SetupDuration.Round(time.Millisecond), result.CaptureDuration.Round(time.Millisecond),
+			result.TeardownDuration.Round(time.Millisecond), result.CloseLinksDuration.Round(time.Millisecond),
+			result.BatchCollectDuration.Round(time.Millisecond), result.ConsumeWaitDuration.Round(time.Millisecond),
+			result.WriterCloseDuration.Round(time.Millisecond), result.SummaryDuration.Round(time.Millisecond))
 		for _, batch := range result.PythonBatch {
 			fmt.Printf("python_batch pid=%d status=%s batches=%d requests=%d lib=%s\n",
 				batch.PID, batch.Status, batch.Batches, batch.Requests, batch.Lib)

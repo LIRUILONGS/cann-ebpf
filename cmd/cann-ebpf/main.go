@@ -32,6 +32,8 @@ func run(args []string) int {
 		return cmdValidate(args[1:])
 	case "discover":
 		return cmdDiscover(args[1:])
+	case "preflight":
+		return cmdPreflight(args[1:])
 	case "attach":
 		return cmdAttach(args[1:])
 	case "attach-tracefs":
@@ -51,7 +53,7 @@ func run(args []string) int {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: cann-ebpf <validate|discover|attach|attach-tracefs|trace|diagnose|version> [flags]")
+	fmt.Fprintln(os.Stderr, "usage: cann-ebpf <validate|preflight|discover|attach|attach-tracefs|trace|diagnose|version> [flags]")
 }
 
 func cmdValidate(args []string) int {

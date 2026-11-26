@@ -88,11 +88,24 @@ M1 的 8 个核心函数和 2088 spans 是历史基线。当前 37 个 host 探�
 - [x] 合成 pthread mutex 竞争：off-CPU 99.7%、futex 99.9%，`host_lock_contention` 1.00
 - [x] V4 10 秒短窗口：7,561 spans、无效样本 0、health 200/200、service active/active、残留 0
 - [x] `--blocking off`：无 blocking 字段，服务状态不变
-- [ ] 10 秒窗口开销基线（sched_switch 为全系统 tracepoint）；长跑前仍未量化
-- [ ] 暂不实现 `pthread_mutex_lock` uprobe（由 futex 等待覆盖主要锁场景）
+- [x] agent 开销基线（60s×2+2）：CPU +0.28pp 单核、RSS +1.3MB、dropped 0
+- [ ] 固定负载吞吐门禁 ≤3%（生产流量不可控，需业务配合或维护窗口）
 
-完整证据见 `docs/M2-VALIDATION.md`。M2 数字来自 2026-11-26 的真实验证；嵌套 span 不采样，
-不能把缺 blocking 字段当成“没有阻塞”。
+完整证据见 `docs/M2-VALIDATION.md`、`docs/M2-OVERHEAD.md`。M2 数字来自 2026-11-26 的真实验证；
+嵌套 span 不采样，不能把缺 blocking 字段当成“没有阻塞”。
+
+## preflight 环境检查
+
+- [x] 只读检查 root/BTF/tracefs/uprobe_events/4 个 tracepoint/perf_paranoid/lockdown/memlock/nofile/npu-smi/cgroup
+- [x] JSON + human 输出、退出码 4
+- [x] V4 实测 pass=15 warn=0 fail=0
+- [ ] 把 preflight 接入 `attach` 启动前自动执行（当前需手动）
+
+## 采集时序与 detach
+
+- [x] 输出 `capture_start/capture_stop/capture_end` 与各阶段 timings
+- [x] closeLinks 有界等待 1 秒，剩余 fd 由进程退出清理（残留 0）
+- [ ] 降低 740 个 uprobe 的退出清理时间（减少目标或改系统级 attach + BPF PID 过滤）
 
 ## 纯 eBPF vLLM batch 标准采集
 

@@ -14,8 +14,8 @@
 | 最新提交 | 见 `git log -1`（`diagnose`、M2 off-CPU/futex 及上机验证记录） |
 | Git remote | 未配置；交接前建议先配置内部 Git 远程并推送 |
 | Linux/arm64 二进制（M2/M3-dev） | `dist/cann-ebpf-linux-arm64-m2` |
-| 二进制大小 | `9,722,312` bytes |
-| 二进制 SHA-256 | `B4991B716B5F552F538CE92968D26B72B15C4EAED27ABB0F977BA2E6E059D094` |
+| 二进制大小 | `9,724,244` bytes |
+| 二进制 SHA-256 | `D4B1268F8C28DAD6B10130A1EFD5E36C7FCA4C0C15BD4223F31CE2CAD1A0C1E3` |
 | 历史已验证二进制 | `dist/cann-ebpf-linux-arm64-batch`（`0.5.0-m5`，上表 SHA 已替换为 M2 构建，旧包仍保留在 dist/） |
 | 服务器验证副本（历史） | `/root/cann-ebpf`，V4 服务器 `bms-84865758` |
 | 服务器 profiles | `/root/cann-ebpf/profiles` |
@@ -52,6 +52,8 @@
 | P0 `diagnose` 命令 | 完成 | 只读读取已有证据，JSON/Markdown，单测覆盖；不需要 NPU |
 | M2 off-CPU/futex 归因 | 完成并上机验证 | sched_switch + syscalls futex tracepoint、`offcpu_ns`/`futex_ns`；V4 10 秒与合成锁竞争均通过 |
 | E 层 npu-smi 硬件指标 | 完成并上机验证 | `hardware.jsonl`、manifest artifact、`hbm_pressure`；8 设备/HBM/AICore/功耗/温度 |
+| `preflight` 环境检查 | 完成并上机验证 | 15 项检查；V4 pass=15 warn=0 fail=0 |
+| M2 开销基线 | 部分完成 | agent +0.28pp 单核 CPU、+1.3MB RSS、0 丢；业务吞吐因生产负载不可控未下 ≤3% 结论 |
 | M3 device join 管线 | 代码完成，生产端未接通 | `cann.device.v1` schema、join、device verdict、diagnose 集成；真实设备数据需维护窗口 |
 | M3.0 msprof 动态 attach | 已验证不可用 | `msprof --pid` 三变体段错误；改为容器内 in-process collector |
 | vLLM general plugin | 代码和单测完成，未激活 | 未安装到运行中的 V4，也未重启验证；本阶段不做 |
@@ -179,6 +181,17 @@ span_id, seq
 - M3.0 `msprof --pid` 动态 attach 三变体均段错误，判定不可用；生产端改为容器内 in-process
   collector，需维护窗口。详见 `docs/M3-DEVICE-JOIN.md`、`docs/M3-FEASIBILITY.md`。
 
+### 3.11 `preflight` 与采集时序
+
+- `cann-ebpf preflight [--json]`：只读检查 root、BTF、tracefs、uprobe_events、四个 tracepoint、
+  perf_event_paranoid、lockdown、memlock、nofile、npu-smi、cgroup；有 fail 退出码 4。
+  V4 实测 15 pass / 0 warn / 0 fail。详见 `docs/PREFLIGHT.md`。
+- attach 现在输出 `capture_start` / `capture_stop` / `capture_end` 时间戳，以及
+  `timings setup/capture/teardown/close_links/batch/consume/writer/summary`，便于区分采集窗口和清理。
+- V4 上 740 个 uprobe 的内核串行 detach 约 40 秒；现在 `closeLinks` 有界等待 1 秒，
+  剩余 fd 由进程退出清理（残留最终为 0），`capture_stop` 之后不再计入采集窗口。
+- 硬件采样在 `capture_stop` 时停止，避免把清理阶段算进硬件窗口。
+
 ## 4. 当前能回答和不能回答的问题
 
 ### 能回答
@@ -209,6 +222,7 @@ span_id, seq
 | `cmd/cann-ebpf/attach.go` | eBPF attach 参数、自动发现、输出、`--blocking` |
 | `cmd/cann-ebpf/trace.go` | `trace` 报告和链路树 |
 | `cmd/cann-ebpf/diagnose.go` | `diagnose` 只读定位报告 CLI |
+| `cmd/cann-ebpf/preflight.go` | `preflight` 环境检查 CLI |
 | `internal/probes/functions.go` | 37 个 CANN/ACL/HCCL 函数声明 |
 | `internal/probes/bpf/cann.bpf.c` | BPF C 源码（37 组 uprobe + sched_switch/futex kprobe） |
 | `internal/probes/bpf/cann.bpf.o` | 已编译并嵌入的 BPF 对象，目标机不需要现编 |
@@ -218,6 +232,7 @@ span_id, seq
 | `internal/diagnose/` | 已读证据的过滤、聚合、判定、JSON/Markdown |
 | `internal/hardware/` | E 层 npu-smi 采样、解析、JSONL |
 | `internal/device/` | `cann.device.v1` schema 与 host/device join |
+| `internal/preflight/` | 环境预检的纯判定表与 Linux 采集 |
 | `internal/probes/pythonbatch_linux_arm64.go` | 纯 eBPF CPython/vLLM batch 采集 |
 | `internal/runlog/` | JSONL、manifest、summary、span 读取 |
 | `profiles/vllm-ascend.yaml` | V4/vLLM-Ascend profile |
@@ -233,6 +248,8 @@ span_id, seq
 | `docs/HARDWARE.md` | E 层 npu-smi 采样、schema、验证与边界 |
 | `docs/M3-DEVICE-JOIN.md` | device 时间线 schema、join 算法、诊断接线与合成验证 |
 | `docs/M3-FEASIBILITY.md` | msprof/msPTI 动态采集可行性结论 |
+| `docs/PREFLIGHT.md` | preflight 检查项、退出码与 V4 结果 |
+| `docs/M2-OVERHEAD.md` | M2 agent 开销基线与吞吐不可测说明 |
 | `docs/M4-VALIDATION.md` | V4 实测记录 |
 | `docs/VLLM-BATCH-POC.md` | 纯 eBPF batch POC 记录 |
 
@@ -262,6 +279,9 @@ span_id, seq
 | E 层硬件验证 | 10 秒 7,794 spans + 2 采样×8 设备；HBM free 6.3%、AICore 峰值 46%；manifest artifact 4202 bytes |
 | M3 join 验证（合成时间线） | 真实 7,794 host spans + 合成 device.jsonl：100% 匹配、reason 全 `ok`、`device_bound` 5,721 条 |
 | M3.0 msprof 动态 attach | 三变体均 exit 139（Segmentation fault），V4 health/service/worker 全程正常 |
+| preflight | V4 pass=15 warn=0 fail=0；tracepoint id、lockdown、memlock、npu-smi 均正常 |
+| M2 开销（60s×2+2） | agent CPU off 1.365% → on 1.64%（+0.28pp 单核），RSS +1.3MB，dropped 0 |
+| 采集时序 | setup ~1.2s，capture 60s，teardown ~1.5s；进程退出关闭剩余 perf fd 约 40s |
 
 ## 7. 下一步工作方向
 
@@ -389,6 +409,9 @@ clang --target=bpfel -mcpu=v1 -O2 -g -c internal/probes/bpf/cann.bpf.c -o intern
 服务器只读发现：
 
 ```bash
+./cann-ebpf-linux-arm64-m2 preflight
+./cann-ebpf-linux-arm64-m2 preflight --json
+
 ./cann-ebpf-linux-arm64 discover \
   --profile vllm-ascend \
   --profiles-dir profiles \
@@ -462,6 +485,7 @@ OUT="runs/ebpf-m2-$(date -u +%Y%m%dT%H%M%SZ)"
 - [ ] 确认 `profiles/vllm-ascend.yaml` 的目标发现规则仍匹配当前容器。
 - [ ] 确认 `runs/` 和旧证据目录不被覆盖。
 - [ ] 先跑 `go test ./...` 和 `go vet ./...`。
+- [x] 先跑 `preflight`，确认 tracefs/uprobe/tracepoint/lockdown/npu-smi 全 pass。
 - [x] 用已有 `runs/` 跑一次 `diagnose`，确认只读、JSON/Markdown 都能出。
 - [x] 上机验证 M2：`--blocking on` 的 10 秒窗口，确认 `offcpu=true futex=true failed=0`、无残留、
       `/health` 和服务状态不变，并用合成锁竞争对照一次（见 `docs/M2-VALIDATION.md`）。

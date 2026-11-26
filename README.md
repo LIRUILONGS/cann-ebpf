@@ -36,6 +36,8 @@
 | `diagnose` 只读定位命令 | 完成；JSON `cann.diagnose.report.v1` + Markdown，单测覆盖全部过滤与判定分支，并已在 V4 真实 evidence 上只读运行 |
 | M2 host off-CPU/futex | 完成并上机验证；V4 10 秒 `attached=4 failed=0`，合成锁竞争 `host_lock_contention` 1.00 |
 | E 层 npu-smi 硬件指标 | 完成并上机验证；8 设备 HBM/AICore/功耗/温度，`hbm_pressure` |
+| `preflight` 环境检查 | 完成并上机验证；V4 pass=15 warn=0 fail=0 |
+| M2 开销 | agent +0.28pp 单核 CPU、+1.3MB RSS、0 丢事件；固定负载吞吐门禁未做 |
 | M3 device 时间线 join | join/schema/diagnose 完成；真实 V4 span + 合成时间线 100% 匹配；`msprof --pid` 段错误，生产端待维护窗口 |
 | Orinfer profile | 配置校验通过；服务未运行，尚无运行窗口验证 |
 | msPTI / 设备 kernel 时间线 | 未实现，属于 M3 |
@@ -62,13 +64,13 @@ Remove-Item Env:GOOS, Env:GOARCH, Env:CGO_ENABLED
 当前 Linux/arm64 二进制 SHA-256 以交付包 `SHA256SUMS` 为准，构建后不得手工修改：
 
 ```text
-cann-ebpf-linux-arm64-m2  b4991b716b5f552f538ce92968d26b72b15c4eaed27abb0f977ba2e6e059d094
+cann-ebpf-linux-arm64-m2  d4b1268f8c28dad6b10130a1efd5e36c7fca4c0c15bd4223f31ce2cad1a0c1e3
 cpy-poc-linux-arm64       08a5f05f92c15dd2d4b6475805ebbb3bfc3188b024c900745cb604a30826be53
 cpy-batch-poc-linux-arm64 见 batch POC 交付目录 SHA256SUMS
 ```
 
-`cann-ebpf-linux-arm64-m2` 已在 `bms-84865758` 上完成 V4、合成锁竞争和硬件层验证，二进制大小
-`9,722,312` bytes；M3 生产端未接通（`msprof --pid` 段错误），详见 `docs/M3-FEASIBILITY.md`。
+`cann-ebpf-linux-arm64-m2` 已在 `bms-84865758` 上完成 V4、合成锁竞争、硬件层和 preflight 验证，
+二进制大小 `9,724,244` bytes；M3 生产端未接通（`msprof --pid` 段错误），详见 `docs/M3-FEASIBILITY.md`。
 
 仓库已包含 `internal/probes/bpf/cann.bpf.o`。修改 `cann.bpf.c` 后必须用 clang BPF
 target 重新生成对象；不要依赖目标机现编，也不要修改目标进程或 CANN 库。
@@ -77,6 +79,7 @@ target 重新生成对象；不要依赖目标机现编，也不要修改目标�
 
 ```text
 cann-ebpf validate        校验配置或 profile
+cann-ebpf preflight       只读环境检查（根/追踪点/权限/npu-smi）
 cann-ebpf discover        只读发现进程、库、符号和 offset
 cann-ebpf attach          eBPF uprobe 采集
 cann-ebpf attach-tracefs  tracefs 后备采集
@@ -298,6 +301,8 @@ Span 新增字段：
 - 硬件层是周期性 wall-clock 快照，AICore/HBM 是整卡值，不能归因到单个 Worker 或单次调用。
 - M3 join 的 100% 匹配是用**合成** `device.jsonl` 验证的代码路径，不是真实设备时间；
   `msprof --pid` 动态采集段错误，真实设备数据需要维护窗口的 in-process collector。
+- V4 上 740 个 uprobe 的进程退出清理约 40 秒（内核串行 detach，残留最终为 0），
+  这是命令返回时间，不是采集窗口、也不影响业务；`capture_stop` 之后的清理不计入窗口。
 - `diagnose` 只读已有证据；没有 off-CPU 采样时只输出 `blocking_unknown`，没有 msPTI 时永远不输出
   `device_bound` / `launch_starvation`。
 - Orinfer 当前未运行；profile 只能声明配置校验通过，不能写成真实采集验证。
@@ -342,6 +347,8 @@ unicode dict，单次最多 64 个 key；batch span 写入标准 `spans.jsonl`�
 - `docs/DIAGNOSE.md`：`diagnose` 用法、时间窗语义、判定规则和边界。
 - `docs/M2-OFFCPU.md`：M2 设计、判定口径和边界。
 - `docs/M2-VALIDATION.md`：M2 上机验证数据、修复记录和证据位置。
+- `docs/M2-OVERHEAD.md`：M2 agent 开销基线与吞吐不可测说明。
+- `docs/PREFLIGHT.md`：preflight 检查项、退出码与 V4 结果。
 - `docs/HARDWARE.md`：E 层 npu-smi 采样、schema、验证与边界。
 - `docs/M3-DEVICE-JOIN.md`：device 时间线 schema、join 算法与合成验证。
 - `docs/M3-FEASIBILITY.md`：msprof/msPTI 动态采集可行性结论。

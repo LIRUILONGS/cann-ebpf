@@ -110,7 +110,9 @@ func (c *Collector) loop(ctx context.Context) {
 }
 
 func (c *Collector) sampleOnce(ctx context.Context) {
-	raw, err := c.opts.runner(ctx, "npu-smi", "info")
+	sampleCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	raw, err := c.opts.runner(sampleCtx, "npu-smi", "info")
 	if err != nil {
 		c.mu.Lock()
 		if c.lastErr != err.Error() {

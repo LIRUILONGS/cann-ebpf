@@ -14,20 +14,23 @@ import (
 const DefaultToolVersion = "0.6.0-m2"
 
 type Options struct {
-	Context       context.Context
-	PIDs          []int
-	ProcRoot      string
-	Profile       *config.Document
-	ProfileName   string
-	Duration      time.Duration
-	OutputDir     string
-	ToolVersion   string
-	MaxSpans      int
-	MinDuration   time.Duration
-	ContextSocket string
-	PythonBatch   PythonBatchOptions
-	Blocking      BlockingMode
-	HardwareMode  string
+	Context          context.Context
+	PIDs             []int
+	ProcRoot         string
+	Profile          *config.Document
+	ProfileName      string
+	Duration         time.Duration
+	OutputDir        string
+	ToolVersion      string
+	MaxSpans         int
+	MinDuration      time.Duration
+	ContextSocket    string
+	PythonBatch      PythonBatchOptions
+	Blocking         BlockingMode
+	HardwareMode     string
+	HardwareInterval time.Duration
+	OnCaptureStart   func()
+	OnCaptureStop    func()
 }
 
 // PythonBatchOptions enables the read-only CPython/vLLM SchedulerOutput
@@ -52,20 +55,28 @@ type Attachment struct {
 }
 
 type Result struct {
-	Started      time.Time
-	Ended        time.Time
-	EventCount   uint64
-	Spans        []runlog.Span
-	JSONLPath    string
-	ManifestPath string
-	SummaryPath  string
-	Attachments  []Attachment
-	Warnings     []string
-	Stats        probeStats
-	Context      contextfeed.Snapshot
-	PythonBatch  []PythonBatchCapture
-	Blocking     BlockingResult
-	Hardware     hardware.Result
+	Started              time.Time
+	Ended                time.Time
+	EventCount           uint64
+	Spans                []runlog.Span
+	JSONLPath            string
+	ManifestPath         string
+	SummaryPath          string
+	Attachments          []Attachment
+	Warnings             []string
+	Stats                probeStats
+	Context              contextfeed.Snapshot
+	PythonBatch          []PythonBatchCapture
+	Blocking             BlockingResult
+	Hardware             hardware.Result
+	SetupDuration        time.Duration
+	CaptureDuration      time.Duration
+	TeardownDuration     time.Duration
+	CloseLinksDuration   time.Duration
+	BatchCollectDuration time.Duration
+	ConsumeWaitDuration  time.Duration
+	WriterCloseDuration  time.Duration
+	SummaryDuration      time.Duration
 }
 
 type PythonBatchCapture struct {
