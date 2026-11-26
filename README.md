@@ -1,6 +1,6 @@
 # cann-ebpf
 
-昇腾 CANN 主机侧低开销观测工具。当前交付版本为 **`0.4.0-m4`**：
+昇腾 CANN 主机侧低开销观测工具。当前交付版本为 **`0.5.0-m5`**：
 
 - 37 个 CANN/ACL/HCCL host uprobe 程序，entry/return 配对；
 - vLLM-Ascend 自动发现、8 个 `VLLM::Worker_TP` 并行 attach、frontend/EngineCore 覆盖；
@@ -23,6 +23,8 @@
 | batch 上下文协议 | 完成；非 root UID 982 客户端 smoke 通过 |
 | vLLM general plugin | 代码和单测完成；**未装入/重启正在运行的 V4** |
 | JSONL / manifest / summary | 完成；manifest 与 JSONL 的 count、bytes、SHA-256 一致 |
+| 链路追踪 | 完成；batch trace 传播、summary trace 覆盖、trace 链路树 |
+| 纯 eBPF CPython POC | 完成；合成 Python 3.12 和真实 V4 Worker 1452 均验证通过 |
 | Orinfer profile | 配置校验通过；服务未运行，尚无运行窗口验证 |
 | msPTI / 设备 kernel 时间线 | 未实现，属于 M3 |
 | 逐 request 执行时长 | 未实现；当前只做 batch 窗口归因 |
@@ -38,14 +40,16 @@ go vet ./...
 
 $env:GOOS = "linux"
 $env:GOARCH = "arm64"
-go build -buildvcs=false -trimpath -o dist/cann-ebpf-linux-arm64-m4 ./cmd/cann-ebpf
+go build -buildvcs=false -trimpath -o dist/cann-ebpf-linux-arm64-m5 ./cmd/cann-ebpf
+go build -buildvcs=false -trimpath -o dist/cpy-poc-linux-arm64 ./cmd/cpy-poc
 Remove-Item Env:GOOS, Env:GOARCH, Env:CGO_ENABLED
 ```
 
-当前 Linux/arm64 二进制 SHA-256：
+当前 Linux/arm64 二进制 SHA-256 以交付包 `SHA256SUMS` 为准，构建后不得手工修改：
 
 ```text
-cf441013b88e3545b986eea16fa615be4fd0ca3cb8f4f694577b832812095f03
+cann-ebpf-linux-arm64-m5  55b40f18f321496171c9b790433e3ca80a654e3f246aa75b1acef29490d06182
+cpy-poc-linux-arm64       08a5f05f92c15dd2d4b6475805ebbb3bfc3188b024c900745cb604a30826be53
 ```
 
 仓库已包含 `internal/probes/bpf/cann.bpf.o`。修改 `cann.bpf.c` 后必须用 clang BPF
@@ -58,6 +62,7 @@ cann-ebpf validate        校验配置或 profile
 cann-ebpf discover        只读发现进程、库、符号和 offset
 cann-ebpf attach          eBPF uprobe 采集
 cann-ebpf attach-tracefs  tracefs 后备采集
+cann-ebpf trace           按 trace_id/parent 聚合 spans.jsonl
 cann-ebpf version         版本和平台
 ```
 
@@ -200,10 +205,33 @@ Span 新增字段：
 - 插件字段采用白名单解码，未知字段直接拒绝。
 - 失败时保留真实错误、warnings、dropped events 和 `status=error`，不伪造成功。
 
+## M5 链路追踪与纯 eBPF POC
+
+本轮新增 W3C 形状的 batch/CANN 链路追踪：
+
+- batch span 是父节点，命中的 CANN span 派生 child `span_id`，写入 `trace` 对象；
+- `summary.json` 增加 `trace_coverage`、`trace_sources` 和 `top_slow_traces`；
+- `cann-ebpf trace` 可直接输出 trace 到 batch 再到 CANN span 的链路树；
+- 旧插件没有 trace 字段时，collector 生成 `collector_local_batch` 本地 trace；
+- 插件支持 `CANN_EBPF_TRACEPARENT` 做进程级上游继承；逐 HTTP request 传播尚未实现；
+- 子 span 的 `batch_parent_span_id` 保留 batch 的上游父 span，batch span 本身仍不写入 JSONL。
+
+`poc/cpython` 是隔离的纯 eBPF CPython 3.12 POC：只挂 `PyObject_GetAttr`
+entry/return，过滤 `num_scheduled_tokens`，读取返回 dict 的 request ID 键，不读
+value、prompt、响应或 tensor。合成 Python 3.12 和真实 V4 Worker `1452` 都已验证；
+6 秒窗口读到 8 个真实 `chatcmpl-*` request ID，`read_errors=0`、`ringbuf_lost=0`。
+POC 硬编码 CPython 3.12.13 布局，只支持 combined unicode dict，不是生产稳定接口，
+也不能推导逐 request 时长。
+
+详细 schema、证据和边界见 `docs/M5-TRACE-AND-CPY-POC.md` 与
+`poc/cpython/README.md`。
+
 ## 文档
 
 - `docs/M4-VALIDATION.md`：当前交付的实测数据、复现命令、证据和边界。
 - `docs/M4-CONTEXT-PROTOCOL.md`：batch 协议、权限模型、插件安装与激活步骤。
+- `docs/M5-TRACE-AND-CPY-POC.md`：链路追踪 schema、POC 设计、真实 V4 证据和边界。
+- `poc/cpython/README.md`：纯 eBPF CPython POC 的构建、运行和限制。
 - `docs/M1-VALIDATION.md`：历史 M1 8 探针基线和 tracefs 记录。
 - `docs/M1-OUTPUT.md`：JSONL / manifest / summary 证据层契约。
 - `docs/M1-PROFILES.md`：profile 匹配和只读 smoke 说明。

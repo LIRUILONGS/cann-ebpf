@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"cann-ebpf/internal/runlog"
+	"cann-ebpf/internal/tracectx"
 )
 
 const (
@@ -35,15 +36,20 @@ const (
 // vLLM plugin. Payloads contain identifiers only; prompt and response text are
 // explicitly outside this contract.
 type Event struct {
-	V          int      `json:"v"`
-	Type       string   `json:"type"`
-	TsNS       int64    `json:"ts_ns"`
-	PID        int      `json:"pid"`
-	BatchID    string   `json:"batch_id,omitempty"`
-	Phase      string   `json:"phase,omitempty"`
-	RequestIDs []string `json:"request_ids,omitempty"`
-	Model      string   `json:"model,omitempty"`
-	Source     string   `json:"source,omitempty"`
+	V            int      `json:"v"`
+	Type         string   `json:"type"`
+	TsNS         int64    `json:"ts_ns"`
+	PID          int      `json:"pid"`
+	BatchID      string   `json:"batch_id,omitempty"`
+	TraceID      string   `json:"trace_id,omitempty"`
+	SpanID       string   `json:"span_id,omitempty"`
+	ParentSpanID string   `json:"parent_span_id,omitempty"`
+	TraceState   string   `json:"trace_state,omitempty"`
+	TraceSource  string   `json:"trace_source,omitempty"`
+	Phase        string   `json:"phase,omitempty"`
+	RequestIDs   []string `json:"request_ids,omitempty"`
+	Model        string   `json:"model,omitempty"`
+	Source       string   `json:"source,omitempty"`
 }
 
 type batchWindow struct {
@@ -53,6 +59,7 @@ type batchWindow struct {
 	phase      string
 	requestIDs []string
 	source     string
+	trace      tracectx.Context
 	receivedAt time.Time
 }
 
@@ -252,6 +259,17 @@ func (f *Feed) Apply(event Event) error {
 	if source == "" {
 		source = DefaultSource
 	}
+	trace := tracectx.Context{
+		TraceID: event.TraceID, SpanID: event.SpanID,
+		ParentSpanID: event.ParentSpanID, TraceState: event.TraceState,
+		Source: event.TraceSource,
+	}.Normalize()
+	if trace.Source == "" && trace.TraceID != "" {
+		trace.Source = source
+	}
+	if err := trace.ValidateBatch(); err != nil {
+		return fmt.Errorf("trace context: %w", err)
+	}
 	now := f.now()
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -261,9 +279,13 @@ func (f *Feed) Apply(event Event) error {
 	f.pruneLocked(now)
 	switch event.Type {
 	case EventTypeBatchBegin:
+		if trace.TraceID == "" {
+			trace = tracectx.NewContext("collector_local_batch")
+		}
 		window := &batchWindow{
 			id: event.BatchID, startNS: event.TsNS, phase: event.Phase,
-			requestIDs: uniqueIDs(event.RequestIDs), source: source, receivedAt: now,
+			requestIDs: uniqueIDs(event.RequestIDs), source: source,
+			trace: trace, receivedAt: now,
 		}
 		windows := f.byPID[event.PID]
 		windows = append(windows, window)
@@ -281,6 +303,30 @@ func (f *Feed) Apply(event Event) error {
 			found = true
 			if windows[i].endNS == 0 || event.TsNS > windows[i].endNS {
 				windows[i].endNS = event.TsNS
+			}
+			if trace.TraceID != "" {
+				if windows[i].trace.TraceID != "" &&
+					(windows[i].trace.TraceID != trace.TraceID || windows[i].trace.SpanID != trace.SpanID) {
+					return fmt.Errorf("batch_end trace does not match batch_begin: %s", event.BatchID)
+				}
+				if windows[i].trace.ParentSpanID != "" && trace.ParentSpanID != "" &&
+					windows[i].trace.ParentSpanID != trace.ParentSpanID {
+					return fmt.Errorf("batch_end parent_span_id does not match batch_begin: %s", event.BatchID)
+				}
+				// batch_end normally carries only trace_id/span_id. Merge
+				// instead of replacing, otherwise the begin-side upstream
+				// parent and trace_state would be silently lost.
+				windows[i].trace.TraceID = trace.TraceID
+				windows[i].trace.SpanID = trace.SpanID
+				if trace.ParentSpanID != "" {
+					windows[i].trace.ParentSpanID = trace.ParentSpanID
+				}
+				if trace.TraceState != "" {
+					windows[i].trace.TraceState = trace.TraceState
+				}
+				if windows[i].trace.Source == "" {
+					windows[i].trace.Source = trace.Source
+				}
 			}
 			break
 		}
@@ -352,6 +398,13 @@ func (f *Feed) Enrich(span runlog.Span) runlog.Span {
 		span.Attribution = &runlog.Attribution{
 			Level: "batch", Source: window.source, Confidence: 1.0,
 			Verdict: "batch_window",
+		}
+		if window.trace.TraceID != "" {
+			seed := fmt.Sprintf("%s|%s|%d|%d|%s|%d|%d",
+				window.trace.TraceID, window.id, span.PID, span.TID,
+				span.Function, span.StartNS, span.EndNS)
+			child := window.trace.Child(seed)
+			span.Trace = &child
 		}
 		return span
 	}

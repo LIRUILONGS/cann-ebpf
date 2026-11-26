@@ -42,15 +42,25 @@ vLLM 的 batch，本版本增加一个可选、只传标识符的 Unix socket �
 | `request_ids` | 否 | request 标识符数组，最多 4096 个 |
 | `model` | 否 | 模型标识，不包含提示词或输出 |
 | `source` | 否 | 来源；缺省 `vllm_general_plugin` |
+| `trace_id` | 否 | 32 位小写 hex；与 `span_id` 成对出现 |
+| `span_id` | 否 | 16 位小写 hex；本 batch span ID |
+| `parent_span_id` | 否 | 16 位小写 hex；batch 的上游父 span，可选 |
+| `trace_state` | 否 | trace state 字符串，原样传递 |
+| `trace_source` | 否 | 如 `vllm_general_plugin`、`protocol_smoke`；缺省取 `source` |
 
 未知字段被 `DisallowUnknownFields` 拒绝。未知事件类型、空 `batch_id`、空 request ID、
 非正时间戳、超过上限的 request 数组都会被拒绝并计数。
 
+`trace_id`、`span_id` 和 `parent_span_id` 使用与 W3C Trace Context 相同的字符长度和
+校验规则，但当前协议不是完整的 W3C HTTP header 传播实现。缺少 trace 字段时，
+`batch_begin` 会由 collector 生成 `collector_local_batch` 本地 trace；如果只提供
+`trace_id` 而不提供 `span_id`，则拒绝该事件，不能用无父节点的 trace 伪造 batch。
+
 ### 3.2 示例
 
 ```json
-{"v":1,"type":"batch_begin","ts_ns":10161864490000000,"pid":1452,"batch_id":"b-1","phase":"decode","request_ids":["req-1","req-2"],"source":"vllm_general_plugin"}
-{"v":1,"type":"batch_end","ts_ns":10161864520000000,"pid":1452,"batch_id":"b-1","source":"vllm_general_plugin"}
+{"v":1,"type":"batch_begin","ts_ns":10161864490000000,"pid":1452,"batch_id":"b-1","phase":"decode","request_ids":["req-1","req-2"],"source":"vllm_general_plugin","trace_id":"55555555555555555555555555555555","span_id":"6666666666666666","parent_span_id":"7777777777777777","trace_state":"vendor=value","trace_source":"vllm_general_plugin"}
+{"v":1,"type":"batch_end","ts_ns":10161864520000000,"pid":1452,"batch_id":"b-1","source":"vllm_general_plugin","trace_id":"55555555555555555555555555555555","span_id":"6666666666666666"}
 ```
 
 ### 3.3 匹配规则
@@ -60,8 +70,12 @@ vLLM 的 batch，本版本增加一个可选、只传标识符的 Unix socket �
 - `batch_end` 必须能找到对应 `batch_begin`；
 - span `[start_ns,end_ns]` 与 batch `[begin,end]` 有交叠即匹配；
 - 多个窗口重叠时选开始时间更晚、接收时间更新的窗口；
+- `batch_end` 携带 trace 时必须与 `batch_begin` 的 `trace_id` 和 `span_id` 一致；
+  不携带 trace 时沿用 `batch_begin` 的值，不会用结束事件覆盖成另一条 trace；
 - 未关闭的窗口以 span 结束时间为临时上界，不制造结束时间；
 - request ID 只复制到 span，不改变每 request 的时长；
+- 命中的 CANN span 会派生 child `span_id`，`parent_span_id` 指向 batch span；
+  batch 的上游父 span 保存在 `batch_parent_span_id`，batch span 本身不写入 JSONL；
 - `request_begin/request_end` 目前保留为协议证据，不生成 request span。
 
 ## 4. 权限模型
@@ -114,6 +128,13 @@ cann_ebpf = "cann_ebpf_vllm.plugin:register"
 | `CANN_EBPF_VLLM_SOCKET` | `/run/cann-ebpf/vllm-ascend.sock` | socket 路径 |
 | `CANN_EBPF_VLLM_SOURCE` | `vllm_general_plugin` | span 中的 source |
 | `CANN_EBPF_VLLM_DISABLE` | 空 | `1/true/yes/on` 时禁用 |
+| `CANN_EBPF_TRACEPARENT` | 空 | 可选 W3C 形状 `00-<32hex>-<16hex>-01`，作为 batch 上游父 span |
+| `CANN_EBPF_TRACESTATE` | 空 | 可选 trace state，随 batch 原样传递 |
+
+`CANN_EBPF_TRACEPARENT` 是进程级配置：同一个 vLLM Worker 启动后，所有 batch 共享
+该上游 `trace_id`，每个 batch span 仍由插件生成新的 `span_id`。它不是逐 HTTP request
+注入；要打通 `HTTP -> vLLM -> CANN`，还需要在 vLLM HTTP 层或反向代理中提取请求头，
+并把请求级 trace 上下文传给 Worker。当前文档不把进程级配置写成完整的分布式链路。
 
 ## 6. 激活条件与步骤
 
@@ -134,8 +155,9 @@ cann_ebpf = "cann_ebpf_vllm.plugin:register"
 5. 确认目标 UID 对 socket 目录可 traverse、对 socket 可读写；
 6. 重启 vLLM 或启动新实例；
 7. 启动 collector，观察 `context socket owner` warning 和 `context batches > 0`；
-8. 运行真实请求，验证 span 出现 `attribution.level=batch`，并保留 JSONL/manifest；
-9. 失败时回滚：移除插件安装、恢复启动配置，collector 仍可退化为 thread。
+8. 运行真实请求，验证 span 出现 `attribution.level=batch` 和 `trace`，并保留 JSONL/manifest；
+9. 用 `cann-ebpf trace --input <spans.jsonl>` 验证 trace 到 batch 的链路树；
+10. 失败时回滚：移除插件安装、恢复启动配置，collector 仍可退化为 thread。
 
 在不重启的目标上，可以做的替代验证是 `context-smoke.sh`：它使用同一协议、同一 UID
 和同一 socket 权限，但 source 为 `protocol_smoke`，不能冒充真实插件流量。

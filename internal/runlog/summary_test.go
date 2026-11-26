@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"cann-ebpf/internal/tracectx"
 )
 
 func TestPercentileNearestRank(t *testing.T) {
@@ -193,4 +195,67 @@ func TestBuildSummaryContextCoverageAndBatches(t *testing.T) {
 
 func summarySpan(function, category string, duration int64) Span {
 	return Span{Function: function, Category: category, DurationNS: duration}
+}
+
+func TestBuildSummaryTraceCoverageAndTopTraces(t *testing.T) {
+	traceA := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	traceB := "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	spans := []Span{
+		{
+			Function: "A", Category: "sync", DurationNS: 10, PID: 1, SpanID: "s-1",
+			RequestIDs: []string{"r-1"},
+			Trace:      &tracectx.Context{TraceID: traceA, SpanID: "1111111111111111", ParentSpanID: "aaaaaaaaaaaaaaaa", Source: "vllm_general_plugin"},
+		},
+		{
+			Function: "B", Category: "submit", DurationNS: 30, PID: 1, SpanID: "s-2",
+			RequestIDs: []string{"r-2"},
+			Trace:      &tracectx.Context{TraceID: traceA, SpanID: "2222222222222222", ParentSpanID: "aaaaaaaaaaaaaaaa", Source: "vllm_general_plugin"},
+		},
+		{
+			Function: "C", Category: "sync", DurationNS: 100, PID: 2, SpanID: "s-3",
+			Trace: &tracectx.Context{TraceID: traceB, SpanID: "3333333333333333", ParentSpanID: "bbbbbbbbbbbbbbbb", Source: "collector_local_batch"},
+		},
+	}
+	summary, err := BuildSummary(spans)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if summary.Trace.TracedSpans != 3 || summary.Trace.TracedSpanPct != 100 {
+		t.Fatalf("trace coverage = %+v", summary.Trace)
+	}
+	if summary.Trace.UniqueTraces != 2 || summary.Trace.UniqueBatchSpans != 2 || summary.Trace.MissingParentSpans != 0 {
+		t.Fatalf("trace uniqueness = %+v", summary.Trace)
+	}
+	if len(summary.TraceSources) != 2 || summary.TraceSources[0].Source != "vllm_general_plugin" || summary.TraceSources[0].Count != 2 {
+		t.Fatalf("trace sources = %+v", summary.TraceSources)
+	}
+	if len(summary.TopSlowTraces) != 2 || summary.TopSlowTraces[0].TraceID != traceB {
+		t.Fatalf("top traces = %+v", summary.TopSlowTraces)
+	}
+	top := summary.TopSlowTraces[1]
+	if top.TraceID != traceA || top.Count != 2 || top.TotalNS != 40 || len(top.RequestIDs) != 2 || len(top.BatchSpanIDs) != 1 {
+		t.Fatalf("trace A stats = %+v", top)
+	}
+	markdown := summary.Markdown()
+	for _, wanted := range []string{"链路追踪", traceA, "vllm_general_plugin"} {
+		if !strings.Contains(markdown, wanted) {
+			t.Fatalf("markdown missing %q:\n%s", wanted, markdown)
+		}
+	}
+}
+
+func TestBuildSummaryTraceMissingParent(t *testing.T) {
+	summary, err := BuildSummary([]Span{{
+		Function: "A", Category: "sync", DurationNS: 1, PID: 1, SpanID: "s-1",
+		Trace: &tracectx.Context{
+			TraceID: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", SpanID: "bbbbbbbbbbbbbbbb",
+			Source: "collector_local_batch",
+		},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if summary.Trace.MissingParentSpans != 1 || summary.Trace.UniqueBatchSpans != 0 {
+		t.Fatalf("missing parent coverage = %+v", summary.Trace)
+	}
 }

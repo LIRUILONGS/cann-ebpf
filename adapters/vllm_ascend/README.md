@@ -37,6 +37,26 @@ shared path) before activation.
 If the plugin is absent, or a request has no schedulable request ID, the
 collector writes `attribution.level=thread` and does not invent a batch.
 
+## Trace context
+
+Each batch gets a local `trace_id` and batch `span_id`. A host CANN span that
+overlaps the batch window receives a child `trace.span_id`, with
+`trace.parent_span_id` set to the batch span and
+`trace.batch_parent_span_id` preserving the batch's upstream parent when one is
+supplied.
+
+Set `CANN_EBPF_TRACEPARENT` to inherit a process-level upstream trace:
+
+```text
+CANN_EBPF_TRACEPARENT=00-<32hex trace_id>-<16hex parent_span_id>-01
+CANN_EBPF_TRACESTATE=vendor=value
+```
+
+This is not per-request HTTP propagation. A complete `HTTP -> vLLM -> CANN`
+trace still requires extracting `traceparent` at the HTTP boundary and passing
+request-scoped context into the Worker. The general plugin is not activated in
+the running V4 service.
+
 ## Activation status
 
 This plugin is **not installed or activated in the running V4 service**. vLLM

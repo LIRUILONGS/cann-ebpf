@@ -166,3 +166,116 @@ func TestFeedCloseTerminatesActiveConnection(t *testing.T) {
 		t.Fatal("Feed.Close blocked on an active plugin connection")
 	}
 }
+
+func TestFeedPropagatesTraceContext(t *testing.T) {
+	feed := New()
+	defer feed.Close()
+	traceID := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	batchSpanID := "bbbbbbbbbbbbbbbb"
+	begin := Event{
+		V: 1, Type: EventTypeBatchBegin, TsNS: 1000, PID: 42, BatchID: "b-trace",
+		RequestIDs: []string{"r-1"}, TraceID: traceID, SpanID: batchSpanID,
+		ParentSpanID: "cccccccccccccccc", TraceState: "vendor=value", TraceSource: "vllm_general_plugin",
+	}
+	if err := feed.Apply(begin); err != nil {
+		t.Fatal(err)
+	}
+	span := feed.Enrich(runlog.Span{
+		TsNS: 1500, StartNS: 1500, EndNS: 1700, DurationNS: 200,
+		PID: 42, TID: 43, Function: "aclrtSynchronizeStream",
+	})
+	if span.Trace == nil {
+		t.Fatal("batch span did not receive trace context")
+	}
+	if span.Trace.TraceID != traceID || span.Trace.ParentSpanID != batchSpanID {
+		t.Fatalf("trace parentage = %+v", span.Trace)
+	}
+	if span.Trace.BatchParentSpanID != "cccccccccccccccc" {
+		t.Fatalf("batch upstream parent = %+v", span.Trace)
+	}
+	if span.Trace.SpanID == "" || span.Trace.SpanID == batchSpanID {
+		t.Fatalf("invalid child span id = %+v", span.Trace)
+	}
+	if span.Trace.TraceState != "vendor=value" || span.Trace.Source != "vllm_general_plugin" {
+		t.Fatalf("trace metadata = %+v", span.Trace)
+	}
+	again := feed.Enrich(runlog.Span{
+		TsNS: 1500, StartNS: 1500, EndNS: 1700, DurationNS: 200,
+		PID: 42, TID: 43, Function: "aclrtSynchronizeStream",
+	})
+	if again.Trace == nil || again.Trace.SpanID != span.Trace.SpanID {
+		t.Fatalf("trace span id is not deterministic: %+v vs %+v", span.Trace, again.Trace)
+	}
+	if err := feed.Apply(Event{
+		V: 1, Type: EventTypeBatchEnd, TsNS: 2000, PID: 42, BatchID: "b-trace",
+		TraceID: traceID, SpanID: batchSpanID,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	ended := feed.Enrich(runlog.Span{
+		TsNS: 1600, StartNS: 1600, EndNS: 1700, DurationNS: 100,
+		PID: 42, TID: 43, Function: "aclrtSynchronizeStream",
+	})
+	if ended.Trace == nil || ended.Trace.BatchParentSpanID != "cccccccccccccccc" || ended.Trace.TraceState != "vendor=value" {
+		t.Fatalf("batch_end erased begin trace metadata: %+v", ended.Trace)
+	}
+}
+
+func TestFeedGeneratesLocalBatchTraceWhenPluginOmitsIt(t *testing.T) {
+	feed := New()
+	defer feed.Close()
+	if err := feed.Apply(Event{V: 1, Type: EventTypeBatchBegin, TsNS: 100, PID: 7, BatchID: "b-local"}); err != nil {
+		t.Fatal(err)
+	}
+	span := feed.Enrich(runlog.Span{TsNS: 120, StartNS: 120, EndNS: 130, DurationNS: 10, PID: 7, TID: 8, Function: "f"})
+	if span.Trace == nil {
+		t.Fatal("local batch trace was not generated")
+	}
+	if span.Trace.Source != "collector_local_batch" {
+		t.Fatalf("trace source = %q", span.Trace.Source)
+	}
+	if err := span.Trace.Validate(); err != nil {
+		t.Fatalf("generated trace is invalid: %v", err)
+	}
+}
+
+func TestFeedRejectsInvalidOrMismatchedTrace(t *testing.T) {
+	feed := New()
+	defer feed.Close()
+	bad := Event{
+		V: 1, Type: EventTypeBatchBegin, TsNS: 100, PID: 9, BatchID: "b",
+		TraceID: "not-hex", SpanID: "bbbbbbbbbbbbbbbb",
+	}
+	if err := feed.Apply(bad); err == nil {
+		t.Fatal("invalid trace_id must be rejected")
+	}
+	begin := Event{
+		V: 1, Type: EventTypeBatchBegin, TsNS: 100, PID: 9, BatchID: "b",
+		TraceID: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", SpanID: "bbbbbbbbbbbbbbbb",
+	}
+	if err := feed.Apply(begin); err != nil {
+		t.Fatal(err)
+	}
+	end := Event{
+		V: 1, Type: EventTypeBatchEnd, TsNS: 200, PID: 9, BatchID: "b",
+		TraceID: "cccccccccccccccccccccccccccccccc", SpanID: "dddddddddddddddd",
+	}
+	if err := feed.Apply(end); err == nil {
+		t.Fatal("mismatched batch_end trace must be rejected")
+	}
+}
+
+func TestFeedApplyJSONAcceptsTraceFields(t *testing.T) {
+	feed := New()
+	defer feed.Close()
+	line := []byte("{\"v\":1,\"type\":\"batch_begin\",\"ts_ns\":100,\"pid\":9,\"batch_id\":\"b\"," +
+		"\"trace_id\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"span_id\":\"bbbbbbbbbbbbbbbb\"," +
+		"\"trace_source\":\"vllm_general_plugin\",\"request_ids\":[\"r\"]}")
+	if err := feed.ApplyJSON(line); err != nil {
+		t.Fatal(err)
+	}
+	span := feed.Enrich(runlog.Span{TsNS: 110, StartNS: 110, EndNS: 120, DurationNS: 10, PID: 9, TID: 10, Function: "f"})
+	if span.Trace == nil || span.Trace.TraceID != "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" {
+		t.Fatalf("trace = %+v", span.Trace)
+	}
+}

@@ -35,6 +35,7 @@
 | `batch_id` | string | 否 | 上下文协议匹配到的 batch 标识；没有匹配时省略 |
 | `request_ids` | array | 否 | 与 batch 关联的 request 标识数组；只是关联键，不是业务内容 |
 | `attribution` | object | 否 | 派生归因：`level`、`source`、`confidence`、`verdict`；不修改原始观测值 |
+| `trace` | object | 否 | 可选的链路追踪上下文；包含 `trace_id`、`span_id`、`parent_span_id`、`batch_parent_span_id`、`trace_state`、`source` |
 | `span_id` | string | 是 | 稳定派生 ID；为空时 writer 用身份字段和 `seq` 生成 SHA-256 |
 | `seq` | uint64 | 是 | 运行内严格递增；0 由 writer 按接收顺序分配 |
 | `unknown_fields` | array | 否 | 显式保留的前向兼容字段 |
@@ -74,6 +75,14 @@
     "confidence": 1,
     "verdict": "batch_window"
   },
+  "trace": {
+    "trace_id": "55555555555555555555555555555555",
+    "span_id": "181b2c38dadc2258",
+    "parent_span_id": "6666666666666666",
+    "batch_parent_span_id": "7777777777777777",
+    "trace_state": "vendor=value",
+    "source": "vllm_general_plugin"
+  },
   "span_id": "f03f...",
   "seq": 1
 }
@@ -100,7 +109,7 @@ writer, err := runlog.NewWriter(runlog.WriterOptions{
     Dir:         "/var/lib/cann-ebpf/runs/20261126-vllm-01",
     RunID:       "20261126-vllm-01",
     Profile:     "vllm-ascend",
-    ToolVersion: "cann-ebpf/0.4.0-m4",
+    ToolVersion: "cann-ebpf/0.5.0-m5",
     TargetPIDs:  []int{4321, 4322},
     Libraries: []runlog.LibraryRef{{
         Path:   "/usr/local/Ascend/cann-9.2.0/aarch64-linux/lib64/libascendcl.so",
@@ -187,6 +196,9 @@ err = summary.WriteMarkdown("/path/summary.md")
 - 按 `pid` 聚合：`count`、`batch_spans`、`thread_spans`、`total_ns`；用于确认多 Worker 覆盖。
 - 按 `attribution.level` 聚合：`count`、`span_pct`；`batch` / `thread` / `unattributed` 分别计数。
 - `context_coverage`：batch/thread/unattributed span 数、`batch_span_pct`、唯一 batch 和 request ID 数。
+- `trace_coverage`：带 trace 的 span 数、占比、唯一 trace、唯一 batch span 和缺失 parent 的 span 数。
+- `trace_sources`：按 `trace.source` 聚合的 span 数和占比。
+- `top_slow_traces`：按 trace 的 `total_ns` 降序，最多 10 条；附带 batch span IDs、request IDs、PIDs、sources 和示例 span IDs。`total_ns` 是已观测 host span 耗时之和，不是端到端 trace 延迟。
 - `top_slow_batches`：按 batch 的 `total_ns` 降序，最多 10 条；附带 request IDs、PIDs、run IDs 和示例 span IDs。没有 `batch_id` 时明确为空，不伪造排名。
 - 分位数使用 nearest-rank：升序排序后 `rank = ceil(p * n)`，取 `values[rank-1]`。
 - 空 `function`、空 `category`、负 `duration_ns` 返回错误，不做静默修正。
@@ -220,8 +232,21 @@ Summary JSON schema：
     "unique_batches": 1,
     "unique_request_ids": 2
   },
+  "trace_coverage": {
+    "traced_spans": 2,
+    "traced_span_pct": 100,
+    "unique_traces": 1,
+    "unique_batch_spans": 1,
+    "missing_parent_spans": 0
+  },
+  "trace_sources": [
+    {"source": "vllm_general_plugin", "count": 2, "span_pct": 100}
+  ],
   "top_slow_batches": [
     {"batch_id": "b-1", "count": 2, "total_ns": 30, "p50_ns": 10, "p95_ns": 20, "p99_ns": 20, "max_ns": 20, "request_ids": ["req-1", "req-2"], "pids": [4321], "run_ids": ["20261126-vllm-01"], "example_span_ids": ["f03f..."]}
+  ],
+  "top_slow_traces": [
+    {"trace_id": "55555555555555555555555555555555", "batch_span_ids": ["6666666666666666"], "count": 2, "total_ns": 30, "p50_ns": 10, "p95_ns": 20, "p99_ns": 20, "max_ns": 20, "request_ids": ["req-1", "req-2"], "pids": [4321], "sources": ["vllm_general_plugin"], "example_span_ids": ["f03f..."]}
   ]
 }
 ```
@@ -269,6 +294,7 @@ ok  cann-ebpf/internal/runlog
 - manifest 启动即写、状态迁移、空数组、禁止覆盖、原子更新、库 inode。
 - flush 后可见、最终关闭计算字节数和 SHA-256、丢事件与 warnings。
 - nearest-rank 分位数、function/category 聚合、空数据不伪造统计、JSON/Markdown 双格式输出。
+- trace 字段 round-trip、trace 覆盖率、trace source 聚合、top trace 排序和缺失 parent 计数。
 
 ## 7. M1 边界
 
@@ -282,5 +308,7 @@ API，不改变上述字段语义。
   V4 10 秒实测 6,991 spans。两者不能混写成一个探针集合。
 - `batch_id` / `request_ids` / `attribution` 是上下文协议的派生字段；没有插件或 smoke 时省略或标
   `thread`，不能补造。
+- `trace` 是由上下文协议或 collector 本地 batch 派生的关联信息；`trace.span_id` 不是 JSONL 内部
+  `span_id`，`batch_parent_span_id` 只在插件提供了上游 parent 时存在，不能补造完整 HTTP 链路。
 - 当前没有 msPTI 设备侧字段，也没有逐 request 的 `duration_ns` 拆分。summary 的 batch 聚合是
   “时间窗内 host span 的合计”，不是设备 kernel 时长。

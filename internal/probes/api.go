@@ -10,7 +10,7 @@ import (
 	"cann-ebpf/internal/runlog"
 )
 
-const DefaultToolVersion = "0.4.0-m4"
+const DefaultToolVersion = "0.5.0-m5"
 
 type Options struct {
 	Context       context.Context

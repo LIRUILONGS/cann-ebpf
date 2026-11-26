@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"cann-ebpf/internal/tracectx"
 )
 
 func TestSpanUnknownFieldsRoundTrip(t *testing.T) {
@@ -151,5 +153,46 @@ bad-json
 `))
 	if err == nil || !strings.Contains(err.Error(), "line 2") {
 		t.Fatalf("expected line 2 error, got %v", err)
+	}
+}
+
+func TestSpanTraceRoundTripAndValidation(t *testing.T) {
+	span := Span{
+		Schema: SpanSchemaV1, RunID: "run-1", Profile: "vllm-ascend",
+		TsNS: 100, StartNS: 100, EndNS: 200, PID: 100, TID: 101, TGID: 100,
+		Function: "aclrtSynchronizeStream", APIName: "aclrtSynchronizeStream",
+		Library: "/usr/local/Ascend/lib64/libascendcl.so", Category: "sync",
+		DurationNS: 100, SpanID: "event-1", Seq: 1,
+		Trace: &tracectx.Context{
+			TraceID: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", SpanID: "bbbbbbbbbbbbbbbb",
+			ParentSpanID: "cccccccccccccccc", Source: "vllm_general_plugin",
+		},
+	}
+	if err := span.Validate(); err != nil {
+		t.Fatalf("valid trace span: %v", err)
+	}
+	data, err := json.Marshal(span)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "\"trace\"") {
+		t.Fatalf("trace missing from JSON: %s", data)
+	}
+	var decoded Span
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded.Trace == nil || decoded.Trace.TraceID != span.Trace.TraceID {
+		t.Fatalf("trace round trip = %+v", decoded.Trace)
+	}
+	invalid := span
+	invalid.Trace = &tracectx.Context{TraceID: span.Trace.TraceID}
+	if err := invalid.Validate(); err == nil {
+		t.Fatal("trace without span_id must fail")
+	}
+	invalid = span
+	invalid.Trace = &tracectx.Context{TraceID: "not-hex", SpanID: span.Trace.SpanID}
+	if err := invalid.Validate(); err == nil {
+		t.Fatal("invalid trace_id must fail")
 	}
 }

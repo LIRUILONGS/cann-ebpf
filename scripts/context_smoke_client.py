@@ -18,6 +18,8 @@ def main():
     parser.add_argument("--socket", required=True)
     parser.add_argument("--pid", required=True, type=int)
     parser.add_argument("--batch-id", default="ctx-smoke-1")
+    parser.add_argument("--trace-id", default="5" * 32)
+    parser.add_argument("--span-id", default="6" * 16)
     parser.add_argument("--hold-seconds", default=1.2, type=float)
     parser.add_argument("--uid", type=int)
     parser.add_argument("--gid", type=int)
@@ -50,6 +52,9 @@ def main():
         "phase": "decode",
         "request_ids": ["req-smoke-1", "req-smoke-2"],
         "source": "protocol_smoke",
+        "trace_id": args.trace_id,
+        "span_id": args.span_id,
+        "trace_source": "protocol_smoke",
     }
     send(sock, begin)
     time.sleep(args.hold_seconds)
@@ -60,6 +65,9 @@ def main():
         "pid": args.pid,
         "batch_id": args.batch_id,
         "source": "protocol_smoke",
+        "trace_id": args.trace_id,
+        "span_id": args.span_id,
+        "trace_source": "protocol_smoke",
     }
     send(sock, end)
     time.sleep(0.2)

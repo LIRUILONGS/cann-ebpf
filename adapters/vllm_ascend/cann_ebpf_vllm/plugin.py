@@ -29,6 +29,8 @@ DEFAULT_SOURCE = "vllm_general_plugin"
 QUEUE_SIZE = 2048
 RECONNECT_SECONDS = 0.5
 MAX_REQUEST_IDS = 4096
+TRACE_ID_HEX = 32
+SPAN_ID_HEX = 16
 
 _state_lock = threading.Lock()
 _registered = False
@@ -196,6 +198,45 @@ class _Sender:
         return self._send_errors
 
 
+def _parse_traceparent(value: str) -> tuple[str, str, str] | None:
+    """Parse a W3C traceparent header without accepting malformed IDs."""
+    parts = value.strip().split("-")
+    if len(parts) != 4:
+        return None
+    version, trace_id, parent_id, flags = parts
+    if len(version) != 2 or version == "ff":
+        return None
+    if len(trace_id) != TRACE_ID_HEX or len(parent_id) != SPAN_ID_HEX:
+        return None
+    if trace_id == "0" * TRACE_ID_HEX or parent_id == "0" * SPAN_ID_HEX:
+        return None
+    if len(flags) != 2:
+        return None
+    if any(ch not in "0123456789abcdef" for ch in trace_id + parent_id + flags):
+        return None
+    return trace_id, parent_id, flags
+
+
+def _trace_context() -> dict[str, str]:
+    """Return a local batch trace, optionally rooted in CANN_EBPF_TRACEPARENT."""
+    trace_id = uuid.uuid4().hex
+    parent_span_id = ""
+    trace_source = DEFAULT_SOURCE
+    trace_state = os.environ.get("CANN_EBPF_TRACESTATE", "").strip()
+    traceparent = os.environ.get("CANN_EBPF_TRACEPARENT", "").strip()
+    parsed = _parse_traceparent(traceparent) if traceparent else None
+    if parsed is not None:
+        trace_id, parent_span_id, _flags = parsed
+        trace_source = DEFAULT_SOURCE + "+traceparent"
+    return {
+        "trace_id": trace_id,
+        "span_id": uuid.uuid4().hex[:SPAN_ID_HEX],
+        "parent_span_id": parent_span_id,
+        "trace_state": trace_state,
+        "trace_source": trace_source,
+    }
+
+
 def _new_batch_id(pid: int) -> str:
     return f"{pid}-{time.monotonic_ns()}-{uuid.uuid4().hex[:12]}"
 
@@ -204,7 +245,10 @@ def _event(kind: str, ts_ns: int, pid: int, batch_id: str, **extra: Any) -> dict
     # Keep the protocol deliberately closed. In particular, do not forward
     # arbitrary keyword arguments: a caller must not be able to turn this into
     # a prompt or output exfiltration path.
-    allowed = {"phase", "request_ids", "model", "source"}
+    allowed = {
+        "phase", "request_ids", "model", "source",
+        "trace_id", "span_id", "parent_span_id", "trace_state", "trace_source",
+    }
     event: dict[str, Any] = {
         "v": 1,
         "type": kind,
@@ -237,12 +281,14 @@ def _wrap_execute_model(original: Any) -> Any:
         pid = os.getpid()
         batch_id = _new_batch_id(pid)
         started = time.monotonic_ns()
+        trace = _trace_context()
         begin = _event(
             "batch_begin", started, pid, batch_id,
             phase=_phase_from_scheduler_output(scheduler_output),
             request_ids=request_ids,
             model=_model_name(self),
             source=sender.source,
+            **trace,
         )
         try:
             sender.emit(begin)
@@ -252,7 +298,13 @@ def _wrap_execute_model(original: Any) -> Any:
             return original(self, *args, **kwargs)
         finally:
             try:
-                sender.emit(_event("batch_end", time.monotonic_ns(), pid, batch_id, source=sender.source))
+                sender.emit(_event(
+                    "batch_end", time.monotonic_ns(), pid, batch_id,
+                    source=sender.source,
+                    trace_id=trace["trace_id"],
+                    span_id=trace["span_id"],
+                    trace_source=trace["trace_source"],
+                ))
             except Exception:
                 LOG.exception("cann-ebpf context end failed")
 

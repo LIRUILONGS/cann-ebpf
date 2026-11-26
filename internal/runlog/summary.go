@@ -64,6 +64,35 @@ type ContextCoverage struct {
 	UniqueRequests int     `json:"unique_request_ids"`
 }
 
+type TraceCoverage struct {
+	TracedSpans        int64   `json:"traced_spans"`
+	TracedSpanPct      float64 `json:"traced_span_pct"`
+	UniqueTraces       int     `json:"unique_traces"`
+	UniqueBatchSpans   int     `json:"unique_batch_spans"`
+	MissingParentSpans int64   `json:"missing_parent_spans"`
+}
+
+type TraceSourceStats struct {
+	Source  string  `json:"source"`
+	Count   int64   `json:"count"`
+	SpanPct float64 `json:"span_pct"`
+}
+
+type TraceStats struct {
+	TraceID        string   `json:"trace_id"`
+	BatchSpanIDs   []string `json:"batch_span_ids,omitempty"`
+	Count          int64    `json:"count"`
+	TotalNS        int64    `json:"total_ns"`
+	P50NS          int64    `json:"p50_ns"`
+	P95NS          int64    `json:"p95_ns"`
+	P99NS          int64    `json:"p99_ns"`
+	MaxNS          int64    `json:"max_ns"`
+	RequestIDs     []string `json:"request_ids,omitempty"`
+	PIDs           []int    `json:"pids,omitempty"`
+	Sources        []string `json:"sources,omitempty"`
+	ExampleSpanIDs []string `json:"example_span_ids,omitempty"`
+}
+
 type BatchStats struct {
 	BatchID        string   `json:"batch_id"`
 	Count          int64    `json:"count"`
@@ -81,15 +110,27 @@ type BatchStats struct {
 // Summary is derived output. It never changes or replaces spans.jsonl; raw
 // nanosecond values remain authoritative in the JSONL and manifest.
 type Summary struct {
-	Schema         string          `json:"schema"`
-	Status         string          `json:"status"`
-	SpanCount      int64           `json:"span_count"`
-	Functions      []FunctionStats `json:"functions"`
-	Categories     []CategoryStats `json:"categories"`
-	PIDs           []PIDStats      `json:"pids"`
-	Attribution    []LevelStats    `json:"attribution_levels"`
-	Coverage       ContextCoverage `json:"context_coverage"`
-	TopSlowBatches []BatchStats    `json:"top_slow_batches"`
+	Schema         string             `json:"schema"`
+	Status         string             `json:"status"`
+	SpanCount      int64              `json:"span_count"`
+	Functions      []FunctionStats    `json:"functions"`
+	Categories     []CategoryStats    `json:"categories"`
+	PIDs           []PIDStats         `json:"pids"`
+	Attribution    []LevelStats       `json:"attribution_levels"`
+	Coverage       ContextCoverage    `json:"context_coverage"`
+	Trace          TraceCoverage      `json:"trace_coverage"`
+	TraceSources   []TraceSourceStats `json:"trace_sources"`
+	TopSlowBatches []BatchStats       `json:"top_slow_batches"`
+	TopSlowTraces  []TraceStats       `json:"top_slow_traces"`
+}
+
+type traceAggregate struct {
+	durations  durationAggregate
+	requestIDs map[string]struct{}
+	pids       map[int]struct{}
+	sources    map[string]struct{}
+	batchSpans map[string]struct{}
+	spanIDs    []string
 }
 
 type batchAggregate struct {
@@ -134,7 +175,9 @@ func BuildSummary(spans []Span) (Summary, error) {
 		Categories:     []CategoryStats{},
 		PIDs:           []PIDStats{},
 		Attribution:    []LevelStats{},
+		TraceSources:   []TraceSourceStats{},
 		TopSlowBatches: []BatchStats{},
+		TopSlowTraces:  []TraceStats{},
 	}
 	if len(spans) == 0 {
 		return summary, nil
@@ -145,6 +188,9 @@ func BuildSummary(spans []Span) (Summary, error) {
 	pidGroups := make(map[int]*PIDStats)
 	levelCounts := make(map[string]int64)
 	batchGroups := make(map[string]*batchAggregate)
+	traceGroups := make(map[string]*traceAggregate)
+	traceSourceCounts := make(map[string]int64)
+	batchSpanSet := make(map[string]struct{})
 	requestSet := make(map[string]struct{})
 	for i, span := range spans {
 		if span.Function == "" {
@@ -194,6 +240,43 @@ func BuildSummary(spans []Span) (Summary, error) {
 		for _, requestID := range span.RequestIDs {
 			if requestID != "" {
 				requestSet[requestID] = struct{}{}
+			}
+		}
+		if span.Trace != nil && span.Trace.TraceID != "" {
+			summary.Trace.TracedSpans++
+			if span.Trace.ParentSpanID != "" {
+				batchSpanSet[span.Trace.ParentSpanID] = struct{}{}
+			} else {
+				summary.Trace.MissingParentSpans++
+			}
+			if span.Trace.Source != "" {
+				traceSourceCounts[span.Trace.Source]++
+			}
+			trace := traceGroups[span.Trace.TraceID]
+			if trace == nil {
+				trace = &traceAggregate{
+					requestIDs: map[string]struct{}{},
+					pids:       map[int]struct{}{},
+					sources:    map[string]struct{}{},
+					batchSpans: map[string]struct{}{},
+				}
+				traceGroups[span.Trace.TraceID] = trace
+			}
+			trace.durations.add(span.DurationNS)
+			for _, requestID := range span.RequestIDs {
+				if requestID != "" {
+					trace.requestIDs[requestID] = struct{}{}
+				}
+			}
+			trace.pids[span.PID] = struct{}{}
+			if span.Trace.Source != "" {
+				trace.sources[span.Trace.Source] = struct{}{}
+			}
+			if span.Trace.ParentSpanID != "" {
+				trace.batchSpans[span.Trace.ParentSpanID] = struct{}{}
+			}
+			if span.SpanID != "" && len(trace.spanIDs) < 5 {
+				trace.spanIDs = append(trace.spanIDs, span.SpanID)
 			}
 		}
 		if span.BatchID != "" {
@@ -275,6 +358,26 @@ func BuildSummary(spans []Span) (Summary, error) {
 	if summary.SpanCount > 0 {
 		summary.Coverage.BatchPct = float64(summary.Coverage.BatchSpans) * 100 / float64(summary.SpanCount)
 	}
+	summary.Trace.UniqueTraces = len(traceGroups)
+	summary.Trace.UniqueBatchSpans = len(batchSpanSet)
+	if summary.SpanCount > 0 {
+		summary.Trace.TracedSpanPct = float64(summary.Trace.TracedSpans) * 100 / float64(summary.SpanCount)
+	}
+	for source, count := range traceSourceCounts {
+		pct := 0.0
+		if summary.Trace.TracedSpans > 0 {
+			pct = float64(count) * 100 / float64(summary.Trace.TracedSpans)
+		}
+		summary.TraceSources = append(summary.TraceSources, TraceSourceStats{
+			Source: source, Count: count, SpanPct: pct,
+		})
+	}
+	sort.Slice(summary.TraceSources, func(i, j int) bool {
+		if summary.TraceSources[i].Count == summary.TraceSources[j].Count {
+			return summary.TraceSources[i].Source < summary.TraceSources[j].Source
+		}
+		return summary.TraceSources[i].Count > summary.TraceSources[j].Count
+	})
 
 	for batchID, aggregate := range batchGroups {
 		count, totalNS, p50NS, p95NS, p99NS, maxNS, err := aggregate.durations.finish()
@@ -291,6 +394,31 @@ func BuildSummary(spans []Span) (Summary, error) {
 		}
 		summary.TopSlowBatches = append(summary.TopSlowBatches, stat)
 	}
+	for traceID, aggregate := range traceGroups {
+		count, totalNS, p50NS, p95NS, p99NS, maxNS, err := aggregate.durations.finish()
+		if err != nil {
+			return Summary{}, err
+		}
+		summary.TopSlowTraces = append(summary.TopSlowTraces, TraceStats{
+			TraceID: traceID, Count: count, TotalNS: totalNS, P50NS: p50NS,
+			P95NS: p95NS, P99NS: p99NS, MaxNS: maxNS,
+			BatchSpanIDs:   sortedStrings(aggregate.batchSpans),
+			RequestIDs:     sortedStrings(aggregate.requestIDs),
+			PIDs:           sortedInts(aggregate.pids),
+			Sources:        sortedStrings(aggregate.sources),
+			ExampleSpanIDs: append([]string(nil), aggregate.spanIDs...),
+		})
+	}
+	sort.Slice(summary.TopSlowTraces, func(i, j int) bool {
+		if summary.TopSlowTraces[i].TotalNS == summary.TopSlowTraces[j].TotalNS {
+			return summary.TopSlowTraces[i].TraceID < summary.TopSlowTraces[j].TraceID
+		}
+		return summary.TopSlowTraces[i].TotalNS > summary.TopSlowTraces[j].TotalNS
+	})
+	if len(summary.TopSlowTraces) > 10 {
+		summary.TopSlowTraces = summary.TopSlowTraces[:10]
+	}
+
 	sort.Slice(summary.TopSlowBatches, func(i, j int) bool {
 		if summary.TopSlowBatches[i].TotalNS == summary.TopSlowBatches[j].TotalNS {
 			return summary.TopSlowBatches[i].BatchID < summary.TopSlowBatches[j].BatchID
@@ -416,6 +544,29 @@ func (s Summary) Markdown() string {
 		fmt.Fprintf(&output, "| %d | %d | %d | %d | %d |\n", stat.PID, stat.Count, stat.BatchSpans, stat.ThreadSpans, stat.TotalNS)
 	}
 
+	output.WriteString("\n## 链路追踪\n\n")
+	fmt.Fprintf(&output, "- 带 trace 的 span：`%d`（%.2f%%）\n", s.Trace.TracedSpans, s.Trace.TracedSpanPct)
+	fmt.Fprintf(&output, "- 唯一 trace：`%d`，唯一 batch span：`%d`\n", s.Trace.UniqueTraces, s.Trace.UniqueBatchSpans)
+	fmt.Fprintf(&output, "- 有 trace 但缺 parent_span_id 的 span：`%d`\n", s.Trace.MissingParentSpans)
+	if len(s.TraceSources) > 0 {
+		output.WriteString("\n| trace source | count | traced span % |\n|---|---:|---:|\n")
+		for _, stat := range s.TraceSources {
+			fmt.Fprintf(&output, "| `%s` | %d | %.2f%% |\n", escapeMarkdownCell(stat.Source), stat.Count, stat.SpanPct)
+		}
+	}
+	if len(s.TopSlowTraces) == 0 {
+		output.WriteString("\n未发现带 trace 的 span；未生成 trace 排名。\n")
+	} else {
+		output.WriteString("\n| trace_id | batch spans | count | p50 ns | p95 ns | p99 ns | max ns | total ns | requests | pids |\n")
+		output.WriteString("|---|---|---:|---:|---:|---:|---:|---:|---:|---|\n")
+		for _, stat := range s.TopSlowTraces {
+			fmt.Fprintf(&output, "| `%s` | %s | %d | %d | %d | %d | %d | %d | %d | %s |\n",
+				escapeMarkdownCell(stat.TraceID), joinStringsLimited(stat.BatchSpanIDs, 2), stat.Count,
+				stat.P50NS, stat.P95NS, stat.P99NS, stat.MaxNS, stat.TotalNS,
+				len(stat.RequestIDs), joinInts(stat.PIDs))
+		}
+	}
+
 	if len(s.TopSlowBatches) == 0 {
 		output.WriteString("\n## Top slow batch\n\n未发现带 batch_id 的 span；未生成 batch 排名。\n")
 	} else {
@@ -471,6 +622,12 @@ func normalizeSummary(summary Summary) Summary {
 	if summary.TopSlowBatches == nil {
 		summary.TopSlowBatches = []BatchStats{}
 	}
+	if summary.TraceSources == nil {
+		summary.TraceSources = []TraceSourceStats{}
+	}
+	if summary.TopSlowTraces == nil {
+		summary.TopSlowTraces = []TraceStats{}
+	}
 	if summary.Status == "" {
 		if summary.SpanCount == 0 {
 			summary.Status = SummaryStatusEmpty
@@ -479,6 +636,16 @@ func normalizeSummary(summary Summary) Summary {
 		}
 	}
 	return summary
+}
+
+func joinStringsLimited(values []string, limit int) string {
+	if len(values) == 0 {
+		return ""
+	}
+	if limit > 0 && len(values) > limit {
+		values = values[:limit]
+	}
+	return strings.Join(values, ",")
 }
 
 func joinInts(values []int) string {

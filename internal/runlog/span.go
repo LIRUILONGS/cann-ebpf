@@ -8,6 +8,8 @@ import (
 	"io"
 	"sort"
 	"strings"
+
+	"cann-ebpf/internal/tracectx"
 )
 
 const SpanSchemaV1 = "cann.span.v1"
@@ -35,6 +37,7 @@ var spanKnownFields = map[string]struct{}{
 	"batch_id":       {},
 	"request_ids":    {},
 	"attribution":    {},
+	"trace":          {},
 	"span_id":        {},
 	"seq":            {},
 	"unknown_fields": {},
@@ -63,31 +66,32 @@ type Attribution struct {
 // TGID repeats the process ID explicitly so consumers do not have to guess
 // the Linux naming convention. TsNS is the event/start timestamp.
 type Span struct {
-	Schema        string         `json:"schema"`
-	RunID         string         `json:"run_id"`
-	Profile       string         `json:"profile"`
-	TsNS          int64          `json:"ts_ns"`
-	StartNS       int64          `json:"start_ns,omitempty"`
-	EndNS         int64          `json:"end_ns,omitempty"`
-	PID           int            `json:"pid"`
-	TID           int            `json:"tid"`
-	TGID          int            `json:"tgid"`
-	Comm          string         `json:"comm,omitempty"`
-	ThreadName    string         `json:"thread_name,omitempty"`
-	Function      string         `json:"function"`
-	APIName       string         `json:"api,omitempty"`
-	Library       string         `json:"library"`
-	Category      string         `json:"category"`
-	DurationNS    int64          `json:"duration_ns"`
-	Ret           *int64         `json:"ret,omitempty"`
-	Phase         string         `json:"phase,omitempty"`
-	DevID         int            `json:"dev_id,omitempty"`
-	BatchID       string         `json:"batch_id,omitempty"`
-	RequestIDs    []string       `json:"request_ids,omitempty"`
-	Attribution   *Attribution   `json:"attribution,omitempty"`
-	SpanID        string         `json:"span_id"`
-	Seq           uint64         `json:"seq"`
-	UnknownFields []UnknownField `json:"unknown_fields,omitempty"`
+	Schema        string            `json:"schema"`
+	RunID         string            `json:"run_id"`
+	Profile       string            `json:"profile"`
+	TsNS          int64             `json:"ts_ns"`
+	StartNS       int64             `json:"start_ns,omitempty"`
+	EndNS         int64             `json:"end_ns,omitempty"`
+	PID           int               `json:"pid"`
+	TID           int               `json:"tid"`
+	TGID          int               `json:"tgid"`
+	Comm          string            `json:"comm,omitempty"`
+	ThreadName    string            `json:"thread_name,omitempty"`
+	Function      string            `json:"function"`
+	APIName       string            `json:"api,omitempty"`
+	Library       string            `json:"library"`
+	Category      string            `json:"category"`
+	DurationNS    int64             `json:"duration_ns"`
+	Ret           *int64            `json:"ret,omitempty"`
+	Phase         string            `json:"phase,omitempty"`
+	DevID         int               `json:"dev_id,omitempty"`
+	BatchID       string            `json:"batch_id,omitempty"`
+	RequestIDs    []string          `json:"request_ids,omitempty"`
+	Attribution   *Attribution      `json:"attribution,omitempty"`
+	Trace         *tracectx.Context `json:"trace,omitempty"`
+	SpanID        string            `json:"span_id"`
+	Seq           uint64            `json:"seq"`
+	UnknownFields []UnknownField    `json:"unknown_fields,omitempty"`
 }
 
 // Normalize fills writer-owned defaults without changing observed values.
@@ -152,6 +156,14 @@ func (s Span) Validate() error {
 		}
 		if s.Attribution.Confidence < 0 || s.Attribution.Confidence > 1 {
 			return fmt.Errorf("attribution.confidence must be in [0,1]")
+		}
+	}
+	if s.Trace != nil {
+		if err := s.Trace.Validate(); err != nil {
+			return fmt.Errorf("trace: %w", err)
+		}
+		if s.Trace.TraceID != "" && s.Trace.SpanID == "" {
+			return fmt.Errorf("trace.span_id is required when trace.trace_id is set")
 		}
 	}
 	for i, requestID := range s.RequestIDs {
