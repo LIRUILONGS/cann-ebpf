@@ -1,5 +1,7 @@
 # cann-ebpf
 
+> 交接文档：`docs/HANDOFF.md`（项目地址、已完成内容、下一步工作方向、硬约束）。
+
 昇腾 CANN 主机侧低开销观测工具。当前交付版本为 **`0.5.0-m5`**：
 
 - 37 个 CANN/ACL/HCCL host uprobe 程序，entry/return 配对；

@@ -1,0 +1,363 @@
+# cann-ebpf 项目交接文档
+
+文档日期：2026-11-26  
+适用版本：`0.5.0-m5`（含纯 eBPF batch warning 修复）  
+代码状态：`main` @ `b4c7b87512f4ace24ff299f60d7964c1f773d03e`  
+文档性质：工程交接。本文只写已验证事实；代码完成但未上机验证的内容会单独标注。
+
+## 1. 项目地址
+
+| 项 | 地址/值 |
+|---|---|
+| 本地工作区 | `C:\Users\liruilong\pentagi\cann-ebpf` |
+| Git 分支 | `main` |
+| 最新提交 | `b4c7b87512f4ace24ff299f60d7964c1f773d03e` (`fix: surface batch probe data-loss warnings`) |
+| Git remote | 未配置；交接前建议先配置内部 Git 远程并推送 |
+| Linux/arm64 二进制 | `dist/cann-ebpf-linux-arm64-batch` |
+| 二进制大小 | `9,232,219` bytes |
+| 二进制 SHA-256 | `AE9F527AA8B0113F9166D9B2B0F2378E129CC26C04550F54F9CF37B9640F0E51` |
+| 服务器验证副本（历史） | `/root/cann-ebpf`，V4 服务器 `bms-84865758` |
+| 服务器 profiles | `/root/cann-ebpf/profiles` |
+
+说明：服务器上的 `/root/cann-ebpf` 是历史验证副本，不一定是最终源码仓库；以本地 Git 仓库和对应提交为准。
+
+## 2. 项目定位
+
+`cann-ebpf` 是昇腾 CANN 主机侧低开销观测工具，定位是：
+
+> 网关负责发现异常和给出线索；本工具负责低层定位。
+
+它不重复实现网关已经有的 HTTP 延迟、TTFT、QPS、请求统计等功能，而是回答：
+
+- 哪个进程、哪个线程、哪个 CANN/ACL/HCCL 调用；
+- 调用等了多久、返回值是什么、命中哪个库和函数；
+- 属于哪个 vLLM batch、batch 里有哪些 request ID；
+- 后续需要回答 host 阻塞、off-CPU、锁竞争、设备执行时间时，证据在哪里。
+
+当前阶段已经做到“host 侧调用链 + batch/request 关联 + 原始证据链”；还不能完整回答“为什么卡住”和“设备侧到底执行了多久”，这两项属于下一步的 M2/M3。
+
+## 3. 已经完成的内容
+
+### 3.1 总览
+
+| 模块 | 状态 | 说明 |
+|---|---|---|
+| M0 配置、发现、profile 匹配、ELF 符号解析 | 完成 | 已在 V4 服务器只读验证 |
+| M1 host core | 完成 | ringbuf、entry/exit 配对、JSONL/manifest/summary |
+| M4 vLLM-Ascend host profile | 完成 | 37 个函数、74 个 entry/exit 程序、10 个目标自动发现、10 秒实采 |
+| M5 trace context + CPython POC | 完成 | trace 链路树、纯 eBPF CPython batch POC |
+| 纯 eBPF vLLM batch 标准采集 | 完成 | 已并入 `spans.jsonl`/summary，真实 V4 验证通过 |
+| vLLM general plugin | 代码和单测完成，未激活 | 未安装到运行中的 V4，也未重启验证 |
+| Orinfer | 仅 profile validate | 服务未运行，没有真实采集窗口 |
+| M2 off-CPU/futex 归因 | 未实现 | 下一阶段重点 |
+| M3 msPTI 设备时间线 | 未实现 | 下一阶段重点 |
+| M6 生产化 | 未实现 | Prometheus/OTLP、Grafana、systemd 等未做 |
+
+注意：版本号 `0.5.0-m5` 不代表 M5 全部完成。M5 的 V4/Orinfer A/B 对比还没有做；当前 M5 交付的是 trace context 和 CPython POC。
+
+### 3.2 M0：发现与符号解析
+
+- 支持 YAML profile 加载、`extends` 合并和 JSON Schema 校验。
+- 只读扫描 `/proc`：cmdline、maps、cgroup、容器 root、namespace、监听端口。
+- 支持 `any/all/exclude` 匹配、优先级、`first_match/all_matching`。
+- 解析 ELF dynsym，完成 vaddr 到 file offset 转换；缺符号时 fail-soft，不创建假 attach。
+- `discover --dry-run` 支持 JSON/human 输出，可用于交接前检查目标环境。
+
+### 3.3 M1/M4：host 侧采集
+
+- 37 个 CANN/ACL/HCCL 函数，共 74 个 entry/exit uprobe 程序。
+- 覆盖类别：
+  - `sync`：`aclrtSynchronizeStream`、`aclrtSynchronizeStreamWithTimeout`、`aclrtSynchronizeEvent`
+  - `event`：`aclrtRecordEvent`、`aclrtStreamWaitEvent`、`aclrtQueryEventStatus`、`aclrtQueryEventWaitStatus`、`aclrtQueryEvent`
+  - `handle`：设备、context、stream、event 的创建/销毁/查询
+  - `memory`：`aclrtMalloc/Free`、`MallocHost/FreeHost`、`HostRegister/Unregister`、`GetMemInfo`、`rtMemGetInfoEx`
+  - `submit`：`aclrtMemcpyAsync`、`aclrtLaunchKernel`、`rtKernelLaunch*`、`rtMemcpyAsync`
+  - `hccl`：AllReduce、AlltoAll、AllGather、ReduceScatter、Broadcast、Send/Recv
+- `vllm-ascend` profile 自动发现 8 个 `VLLM::Worker_TP` + frontend + `VLLM::EngineCor`，共 10 个目标。
+- 真实 V4 10 秒采集：6,991 条 span，8 个 Worker 均有数据，dropped 0，`/health` 前后均为 200，服务前后均为 `active`，uprobe 残留 0。
+- 注意：37 个函数“已 attach”不等于同一窗口内全部触发；该 10 秒窗口实际只观测到 6 类函数调用。
+
+### 3.4 纯 eBPF vLLM batch 采集
+
+- 不安装 Python 包、不注入目标进程、不重启 V4、不修改目标内存。
+- 通过 uprobe/uretprobe `PyObject_GetAttr`，只识别属性 `num_scheduled_tokens`，以返回 dict 指针作为 batch 身份，读取 dict key 作为 request ID。
+- 固定运行时：CPython 3.12.13 + vLLM 0.23.0 + vLLM-Ascend 0.23.0rc1；不是通用 Python/vLLM 支持。
+- 标准输出增加 `category=batch` span，`attribution.source=ebpf_scheduler_output_dict`。
+- 每个 Worker 生成 `python-batch-<pid>.json`，包含统计、类型确认和 warning。
+- 单 Worker 1452 实测：10 个 batch、6 个真实 `chatcmpl-*` request ID、`read_errors=0`、`ringbuf_lost=0`。
+- 双 Worker 1452/3962 实测：每个 Worker 4 个 batch，共 8 条 batch span。
+- `--no-context` 2 秒实测：4 个 batch、4 个 request ID、4 条 batch span，manifest artifact 哈希校验通过，采集后 `PyObject_GetAttr` uprobe 残留为 0。
+
+边界：batch 身份是 `SchedulerOutput.num_scheduled_tokens` 的观测窗口，不是 `execute_model` 函数级入口/返回；`duration_ns` 不能当成 request 延迟或 NPU 执行时间。
+
+### 3.5 证据链与输出
+
+| 输出 | 内容 |
+|---|---|
+| `spans.jsonl` | 原始 host span，一行一个对象 |
+| `manifest.json` | 运行环境、目标 PID、库 inode/size/mtime、统计、warnings、SHA-256 |
+| `summary.json` | 派生 function/category/PID/context/batch 汇总 |
+| `summary.md` | 人类可读摘要 |
+| `python-batch-<pid>.json` | 纯 eBPF batch 逐 Worker 统计、类型确认和 warnings |
+
+Span 关键字段：
+
+```text
+schema, run_id, profile, ts_ns, start_ns, end_ns,
+pid, tid, tgid, comm, thread_name,
+function, api, library, category, duration_ns, ret, phase,
+dev_id, batch_id, request_ids,
+attribution{level, source, confidence, verdict},
+trace{trace_id, span_id, parent_span_id, batch_parent_span_id, trace_state, source},
+span_id, seq
+```
+
+证据原则：
+
+- 原始值以 `spans.jsonl` / `manifest.json` 为准，不修改、不补造。
+- `summary` 是派生数据，不覆盖原始事件。
+- manifest 记录 segments 的 bytes 和 SHA-256；warnings 保留 ringbuf 丢失、读取错误等数据损失。
+- 不覆盖已有证据目录。
+
+### 3.6 链路追踪
+
+- 支持 `trace_id`、`span_id`、`parent_span_id`、`batch_parent_span_id`。
+- `cann-ebpf trace --input <spans.jsonl>` 按 trace_id 聚合，输出链路树。
+- batch span 可以作为 host span 的父节点/关联节点，按 batch 查看请求与调用链。
+
+## 4. 当前能回答和不能回答的问题
+
+### 能回答
+
+- 哪个 PID/TID 调用了哪个 CANN/ACL/HCCL 函数。
+- 调用从进入到返回持续了多久、返回值是什么、命中哪个库。
+- 某次采集窗口内有哪些 batch、每个 batch 有哪些 request ID（限固定运行时和纯 eBPF 路径）。
+- 哪些 span 属于同一个 `trace_id`，链路上下游是什么。
+- 按函数、类别、PID、batch 的分布统计，以及原始证据的哈希和完整性。
+
+### 不能回答
+
+- 不能回答“为什么卡住”：缺少 `sched_switch`、`futex`、off-CPU 归因。
+- 不能可靠区分 `host_lock_contention`、`device_bound`、`launch_starvation`。
+- 不能回答 NPU kernel / memcpy / HCCL 的设备执行时间：msPTI 未接入。
+- 不能回答单 request 延迟；batch 窗口不能拆成逐 request 时长。
+- 不能回答 `execute_model` 的 Python 函数级耗时；插件未激活，纯 eBPF 的 `PyObject_GetAttr` 不是函数边界。
+- 没有 DCMI/npu-exporter 硬件层，不能直接给出 NPU 利用率、HBM 余量、温度、功耗。
+
+## 5. 代码地图
+
+| 路径 | 作用 |
+|---|---|
+| `cmd/cann-ebpf/main.go` | CLI 入口、`validate/discover/attach/attach-tracefs/trace/version` |
+| `cmd/cann-ebpf/attach.go` | eBPF attach 参数、自动发现、输出 |
+| `cmd/cann-ebpf/trace.go` | `trace` 报告和链路树 |
+| `internal/probes/functions.go` | 37 个 CANN/ACL/HCCL 函数声明 |
+| `internal/probes/bpf/cann.bpf.c` | BPF C 源码 |
+| `internal/probes/bpf/cann.bpf.o` | 已编译并嵌入的 BPF 对象，目标机不需要现编 |
+| `internal/probes/pythonbatch_linux_arm64.go` | 纯 eBPF CPython/vLLM batch 采集 |
+| `internal/runlog/` | JSONL、manifest、summary、span 读取 |
+| `profiles/vllm-ascend.yaml` | V4/vLLM-Ascend profile |
+| `profiles/orinfer.yaml` | Orinfer profile（仅配置校验通过） |
+| `poc/cpython/` | CPython offset、batch span、POC 程序 |
+| `adapters/vllm_ascend/` | vLLM general plugin 适配器（未激活） |
+| `docs/PLAN.md` | 总体方案和判定规则 |
+| `docs/TASKS.md` | 任务清单和未完成项 |
+| `docs/M4-VALIDATION.md` | V4 实测记录 |
+| `docs/VLLM-BATCH-POC.md` | 纯 eBPF batch POC 记录 |
+
+## 6. 已实测环境与结果
+
+| 项 | 值 |
+|---|---|
+| 主机 | `bms-84865758` |
+| 架构 | `aarch64` |
+| 内核 | `5.10.0-136.108.0.188.31.oe2203sp1.bclinux.aarch64` |
+| 目标服务 | `vllm-ds4-8905.service` |
+| 容器镜像 | `ds4/vllm-ascend:v0.23.0rc1-nonroot` |
+| 目标进程内 CANN | `cann-9.0.1` |
+| Python | `3.12.13` |
+| vLLM | `0.23.0+empty` |
+| vLLM-Ascend | `0.23.0rc1` |
+| 目标 UID/GID | `982:979` |
+| discovery | 10 个目标，每目标 37/148 符号、4 个库 |
+| 10 秒 host 采集 | 6,991 spans，dropped 0，8 Worker 均有 span |
+| 采集影响 | `/health` 200/200，service active/active，uprobe 残留 0 |
+| 纯 eBPF batch | 10 个 batch、6 个 request ID（单 Worker）；双 Worker 各 4 个 batch |
+| 构建验证 | `go test ./...`、`go vet ./...`、Linux/arm64 交叉编译通过 |
+
+## 7. 下一步工作方向
+
+建议按以下顺序推进，先让现有数据可用，再补低层归因，最后做设备侧和生产化。
+
+### P0：实现 `diagnose` 命令
+
+目标：不新增采集，先读取已有 `spans.jsonl`，把网关告警转成低层定位报告。
+
+输入：
+
+- `spans.jsonl` / `manifest.json`
+- 时间窗、PID/TID、batch_id、request_id、trace_id（至少支持时间窗和 PID）
+
+输出：
+
+- 命中的 Worker、PID、TID
+- 命中的 batch 和 request_ids
+- top slow function/category
+- sync/event/submit/memory/HCCL 分布
+- 是否存在 host 阻塞迹象
+- 证据 span_id、start_ns/end_ns
+- 当前无法判定的原因（例如缺少 off-CPU 或 msPTI）
+
+验收：
+
+- 只读，不 attach，不修改原始 evidence；
+- JSON 和 Markdown 两种输出；
+- 结果可复现，空数据/缺字段明确报 unknown，不补造；
+- 有单元测试覆盖时间窗、PID、batch_id、request_id 过滤。
+
+### P1：M2 off-CPU 与锁归因
+
+目标：回答“host 是不是被卡住了，卡在锁、调度还是驱动等待”。
+
+实现：
+
+- `sched_switch`：统计线程 off-CPU 时间；
+- `futex`：统计 futex 等待；
+- 可选 `pthread_mutex_lock`：补充用户态锁竞争；
+- 输出 `offcpu_ns`、`futex_ns`，增加 `host_lock_contention` 判定。
+
+验收：
+
+- 合成锁竞争目标可稳定复现；
+- V4 短窗口采集不改变服务状态；
+- 给出 host wall time、off-CPU 占比、futex 占比和证据 span；
+- 与设备时间线结合前，不轻易下 `device_bound` 结论。
+
+### P1：M3 msPTI / CANN profiler join
+
+目标：把 host span 关联到 device kernel / memcpy / HCCL 时间线。
+
+实现：
+
+- 接入 msPTI API / KERNEL / MEMCPY / HCCL record；
+- 校准 host 与容器/设备时钟；
+- 按 `(device_id, correlationId)` join；
+- 生成 join report：对齐率、未匹配数量、未匹配原因。
+
+验收：
+
+- 在一个已知 kernel 上验证 correlationId 真能关联；
+- `device_bound`、`launch_starvation`、`copy_bound`、`communication_bound` 只有在有设备侧证据时才输出；
+- join 失败时明确降级为时间窗，不伪造精确关联。
+
+### P2：`execute_model` 边界（可选）
+
+纯 eBPF 无法直接挂 Python 方法。若要精确拿到 `execute_model` 的 Python 入口/返回：
+
+- 使用仓库中的 vLLM general plugin 包装 `NPUModelRunner.execute_model`；
+- 需要安装 Python 包并重启 V4，必须走维护窗口；
+- 默认不启用，仍然以纯 eBPF 为主；
+- 插件也只能解决 Python batch 边界，不能解决单 request 和设备时间。
+
+### P2：生产化
+
+- Prometheus/OTLP exporter、Grafana dashboard；
+- systemd 单元、安装/升级/回滚脚本；
+- preflight 检查、权限收敛、资源 watchdog、自动 detach；
+- 固定负载生成器和开销基线，验证吞吐下降 ≤ 3%、ringbuf 丢事件 < 0.1%。
+
+### 等待窗口
+
+- Orinfer 运行后进行真实 discovery/attach 验证；
+- V4/Orinfer 同 workload、同并发、同时长 A/B 对比；
+- 插件真实请求路径验证和容器/宿主 monotonic clock 校准。
+
+## 8. 交接硬约束
+
+以下约束来自项目要求，接手时不要突破：
+
+- 没有明确说明，永远不要脱敏；证据必须是实际原始数据，不能修改、补造、替换。
+- 不读取 prompt、响应、token tensor 或业务文本；request ID 只是关联键。
+- 不重启 V4/Orinfer、不停止服务、不修改目标进程内存；纯 eBPF POC 只允许短时只读 attach。
+- 不覆盖旧证据目录；采集前后必须检查 health、service 状态和 uprobe 残留。
+- 不把 batch 窗口说成 `execute_model` 函数级耗时，不把 `duration_ns` 说成 request 延迟或 NPU 执行时间。
+- 不把 37 个已 attach 函数说成同一窗口全部触发；必须区分“可解析/可 attach”和“实际观测到”。
+- 插件默认不启用；插件路径和纯 eBPF 路径必须分开描述。
+- `dist/`、`runs/`、`__pycache__` 不提交；代码修改需要 Git 提交。
+
+## 9. 快速验证命令
+
+Windows 本机构建：
+
+```powershell
+$env:CGO_ENABLED = "0"
+go test ./...
+go vet ./...
+$env:GOOS = "linux"
+$env:GOARCH = "arm64"
+go build -buildvcs=false -trimpath -o dist/cann-ebpf-linux-arm64-batch ./cmd/cann-ebpf
+Remove-Item Env:GOOS, Env:GOARCH, Env:CGO_ENABLED
+```
+
+服务器只读发现：
+
+```bash
+./cann-ebpf-linux-arm64 discover \
+  --profile vllm-ascend \
+  --profiles-dir profiles \
+  --dry-run --json > runs/discover.json
+```
+
+标准 host 采集：
+
+```bash
+OUT="runs/ebpf-$(date -u +%Y%m%dT%H%M%SZ)"
+./cann-ebpf-linux-arm64 attach \
+  --pid auto \
+  --profile vllm-ascend \
+  --profiles-dir profiles \
+  --duration 10s \
+  --output "$OUT"
+```
+
+纯 eBPF batch 采集（不装插件）：
+
+```bash
+OUT="runs/ebpf-batch-$(date -u +%Y%m%dT%H%M%SZ)"
+./cann-ebpf-linux-arm64 attach \
+  --pid auto \
+  --profile vllm-ascend \
+  --profiles-dir profiles \
+  --duration 10s \
+  --python-batch \
+  --no-context \
+  --output "$OUT"
+```
+
+查看链路：
+
+```bash
+./cann-ebpf-linux-arm64 trace --input "$OUT/spans.jsonl" --limit 20
+```
+
+## 10. 交接检查清单
+
+- [ ] 确认本地 Git 仓库提交和 `dist/cann-ebpf-linux-arm64-batch` SHA-256。
+- [ ] 确认服务器 SSH/密钥可用；最近一次曾出现 `Permission denied (publickey,password)`，不要假设一定可连。
+- [ ] 确认 V4 服务当前状态和 `/health`，不要在未授权窗口 attach 或重启。
+- [ ] 确认 `profiles/vllm-ascend.yaml` 的目标发现规则仍匹配当前容器。
+- [ ] 确认 `runs/` 和旧证据目录不被覆盖。
+- [ ] 先跑 `go test ./...` 和 `go vet ./...`。
+- [ ] 按 P0 → M2 → M3 的顺序推进，不要先做网关指标重复功能。
+
+---
+
+维护说明：本文与 `docs/TASKS.md`、`docs/PLAN.md`、`docs/M4-VALIDATION.md` 有交叉引用；如果实现状态变化，先更新本文件的“已完成/未完成”和“下一步”，再同步 TASKS。
+
+- Orinfer 运行后进行真实 discovery/attach 验证；
+- V4/Orinfer 同 workload、同并发、同时长 A/B 对比；
+- 插件真实请求路径验证和容器/宿主 monotonic clock 校准。
+
+
+
+
