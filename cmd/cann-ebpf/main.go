@@ -42,6 +42,8 @@ func run(args []string) int {
 		return cmdTrace(args[1:])
 	case "diagnose":
 		return cmdDiagnose(args[1:])
+	case "metrics":
+		return cmdMetrics(args[1:])
 	case "version":
 		fmt.Printf("cann-ebpf %s %s/%s\n", toolVersion, runtime.GOOS, runtime.GOARCH)
 		return 0
@@ -53,7 +55,7 @@ func run(args []string) int {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: cann-ebpf <validate|preflight|discover|attach|attach-tracefs|trace|diagnose|version> [flags]")
+	fmt.Fprintln(os.Stderr, "usage: cann-ebpf <validate|preflight|discover|attach|attach-tracefs|trace|diagnose|metrics|version> [flags]")
 }
 
 func cmdValidate(args []string) int {

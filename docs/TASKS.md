@@ -162,9 +162,9 @@ M1 的 8 个核心函数和 2088 spans 是历史基线。当前 37 个 host 探�
 - [x] A3 uprobe detach 与规模优化（系统级 attach + BPF PID 过滤）：V4 退出 ~4.5s、残留 0、覆盖不变
 - [x] A4 `scripts/overhead_fixed_load.py` 固定负载开销（dry-run；真实门禁待窗口）
 - [x] A5 systemd/安装/回滚/release + SHA256SUMS（脚本 + dry-run）
-- [ ] A6 Prometheus exporter（我）
-- [ ] A7 DCMI/短间隔硬件（我）
-- [ ] A8 M5 采集/对比脚本（我）
+- [x] A6 Prometheus exporter：`cann-ebpf metrics` text/serve，V4 69 个指标
+- [x] A7 DCMI/短间隔硬件评估：2s→5 采样×8 设备，health 正常；DCMI API 未接入
+- [x] A8 M5 采集/对比脚本：`scripts/m5_capture.sh`、`scripts/m5_compare.py`（smoke 通过）
 
 维护窗口：
 

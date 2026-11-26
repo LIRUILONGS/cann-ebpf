@@ -37,7 +37,11 @@
 | M2 host off-CPU/futex | 完成并上机验证；V4 10 秒 `attached=4 failed=0`，合成锁竞争 `host_lock_contention` 1.00 |
 | E 层 npu-smi 硬件指标 | 完成并上机验证；8 设备 HBM/AICore/功耗/温度，`hbm_pressure` |
 | `preflight` 环境检查 | 完成并上机验证；V4 pass=15 warn=0 fail=0 |
-| M2 开销 | agent +0.28pp 单核 CPU、+1.3MB RSS、0 丢事件；固定负载吞吐门禁未做 |
+| A3/A4/A5 | attach 系统级化（V4 墙钟 ~110s→~18s）、固定负载脚本、systemd/安装/升级/release 骨架 |
+| A6 Prometheus exporter | 完成；`cann-ebpf metrics`，V4 证据 69 个 `cann_ebpf_*` 指标 |
+| A7 硬件短间隔 | 2s 间隔 5 采样×8 设备，health 正常；建议 ≥5s；DCMI API 未接入 |
+| A8 M5 采集/对比 | `m5_capture.sh`/`m5_compare.py`，双 V4 run smoke 通过 |
+| M2 开销 | agent +0.28pp 单核 CPU、+1.3MB RSS、0 丢事件；固定负载门禁用 A4 脚本 |
 | M3 device 时间线 join | join/schema/diagnose 完成；真实 V4 span + 合成时间线 100% 匹配；`msprof --pid` 段错误，生产端待维护窗口 |
 | M3 msPTI collector | 完成并在合成 ACL 验证；final7 慢 Sync 305/305（100%）；真实 V4/Orinfer 注入待维护窗口 |
 | Orinfer profile | 配置校验通过；服务未运行，尚无运行窗口验证 |
@@ -86,6 +90,7 @@ cann-ebpf attach          eBPF uprobe 采集
 cann-ebpf attach-tracefs  tracefs 后备采集
 cann-ebpf trace           按 trace_id/parent 聚合 spans.jsonl
 cann-ebpf diagnose        只读定位报告（JSON/Markdown）
+cann-ebpf metrics         Prometheus 指标（text 或 /metrics）
 cann-ebpf version         版本和平台
 ```
 
@@ -372,6 +377,9 @@ unicode dict，单次最多 64 个 key；batch span 写入标准 `spans.jsonl`�
 - `docs/NEXT-WORK.md`：M3 合成验证之后的下一阶段工作与分工。
 - `docs/A3-ATTACH-SCALING.md`：系统级 uprobe + BPF PID 过滤的规模/退出优化。
 - `docs/OPERATIONS.md`：安装/卸载/升级/systemd/固定负载/发布包运维说明。
+- `docs/A6-METRICS.md`：Prometheus exporter 指标与用法。
+- `docs/A7-HARDWARE-INTERVAL.md`：硬件短间隔开销与 DCMI 评估。
+- `docs/A8-M5.md`：M5 采集/对比脚本与边界。
 - `docs/M4-VALIDATION.md`：当前交付的实测数据、复现命令、证据和边界。
 - `docs/M4-CONTEXT-PROTOCOL.md`：batch 协议、权限模型、插件安装与激活步骤。
 - `docs/M5-TRACE-AND-CPY-POC.md`：链路追踪 schema、POC 设计、真实 V4 证据和边界。

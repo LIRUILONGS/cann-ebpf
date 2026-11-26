@@ -56,6 +56,9 @@
 | A3 uprobe attach 规模优化 | 完成并上机验证 | 系统级 attach + BPF `target_pids` 过滤；37 函数/74 links；V4 墙钟 ~110s→~18s，退出 ~4.5s，残留 0 |
 | A4 固定负载开销脚本 | 脚本 + dry-run 完成 | `scripts/overhead_fixed_load.py`；真实负载门禁待维护窗口 |
 | A5 M6 交付骨架 | 脚本 + dry-run 完成 | systemd timer、install/uninstall/upgrade、make-release；均支持 dry-run |
+| A6 Prometheus exporter | 完成并上机验证 | `cann-ebpf metrics` text/serve；V4 证据 69 个指标，标签基数受控 |
+| A7 硬件短间隔/DCMI | 评估完成 | 2s 间隔 5 采样×8 设备、health 正常；npu-smi 单次 ~1.14s，建议 ≥5s；DCMI API 未接入 |
+| A8 M5 采集/对比脚本 | 完成（smoke） | `m5_capture.sh` + `m5_compare.py`；真实 A/B 待 Orinfer 窗口 |
 | M2 开销基线 | 部分完成 | agent +0.28pp 单核 CPU、+1.3MB RSS、0 丢；业务吞吐因生产负载不可控未下 ≤3% 结论 |
 | M3 device join 管线 | 完成 | `cann.device.v1` schema、join、device verdict、diagnose 集成；`attach` 生成 `pidmap.json` |
 | M3.0 msprof 动态 attach | 已验证不可用 | `msprof --pid` 三变体段错误；改为容器内 in-process collector |
@@ -216,6 +219,15 @@ span_id, seq
 - **A5 交付骨架**：`deploy/` systemd service/timer、capture-once、install/uninstall/upgrade；
   `scripts/make-release.sh` 生成发布包与 SHA256SUMS；全部默认 dry-run，已在服务器验证计划输出。
   用法见 `docs/OPERATIONS.md`。
+- **A6 Prometheus exporter**：`cann-ebpf metrics --input <run|runs> [--listen addr]`，输出
+  `cann_ebpf_*`（run/spans/function/category/blocking/hardware/device/verdict）；V4 证据 69 个指标，
+  HTTP /metrics 200。详见 `docs/A6-METRICS.md`。
+- **A7 短间隔/DCMI**：`--hardware-interval 2s` 10 秒得到 5 采样×8 设备，health 正常；
+  npu-smi 单次 ~1.14s，建议 ≥5s；DCMI API 未接入（npu-smi 走 DCMI 驱动）。
+  详见 `docs/A7-HARDWARE-INTERVAL.md`。
+- **A8 M5 脚本**：`scripts/m5_capture.sh`（带 health/service 检查、拒绝覆盖）与
+  `scripts/m5_compare.py`（两边 diagnose 后生成 compare.md）；V4 双 run smoke 通过。
+  详见 `docs/A8-M5.md`。
 
 ## 4. 当前能回答和不能回答的问题
 
@@ -250,6 +262,8 @@ span_id, seq
 | `cmd/cann-ebpf/trace.go` | `trace` 报告和链路树 |
 | `cmd/cann-ebpf/diagnose.go` | `diagnose` 只读定位报告 CLI |
 | `cmd/cann-ebpf/preflight.go` | `preflight` 环境检查 CLI |
+| `cmd/cann-ebpf/metrics.go` | `metrics` Prometheus 导出 CLI |
+| `internal/export/` | 诊断报告到 `cann_ebpf_*` 指标的渲染 |
 | `internal/probes/functions.go` | 37 个 CANN/ACL/HCCL 函数声明 |
 | `internal/probes/bpf/cann.bpf.c` | BPF C 源码（37 组 uprobe + sched_switch/futex kprobe） |
 | `internal/probes/bpf/cann.bpf.o` | 已编译并嵌入的 BPF 对象，目标机不需要现编 |
@@ -263,6 +277,7 @@ span_id, seq
 | `internal/preflight/` | 环境预检的纯判定表与 Linux 采集 |
 | `deploy/` | systemd service/timer、capture-once、install/uninstall/upgrade |
 | `scripts/overhead_fixed_load.py` | 固定负载开销门禁脚本（A4） |
+| `scripts/m5_capture.sh` / `m5_compare.py` | M5 采集与 A/B 对比（A8） |
 | `scripts/make-release.sh` | 发布包与 SHA256SUMS（A5） |
 | `internal/probes/pythonbatch_linux_arm64.go` | 纯 eBPF CPython/vLLM batch 采集 |
 | `internal/runlog/` | JSONL、manifest、summary、span 读取 |
@@ -285,6 +300,9 @@ span_id, seq
 | `docs/NEXT-WORK.md` | M3 合成验证之后的下一阶段工作与分工 |
 | `docs/A3-ATTACH-SCALING.md` | 系统级 uprobe + BPF PID 过滤的规模/退出优化 |
 | `docs/OPERATIONS.md` | 安装/卸载/升级/systemd/固定负载/发布包运维说明 |
+| `docs/A6-METRICS.md` | Prometheus exporter 指标、用法与验证 |
+| `docs/A7-HARDWARE-INTERVAL.md` | 硬件短间隔开销与 DCMI 评估 |
+| `docs/A8-M5.md` | M5 采集/对比脚本与边界 |
 | `docs/M4-VALIDATION.md` | V4 实测记录 |
 | `docs/VLLM-BATCH-POC.md` | 纯 eBPF batch POC 记录 |
 
