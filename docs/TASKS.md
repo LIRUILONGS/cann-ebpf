@@ -153,6 +153,26 @@ M1 的 8 个核心函数和 2088 spans 是历史基线。当前 37 个 host 探�
 - [ ] DCMI 后端（当前只有 npu-smi）
 - [ ] 短间隔（1–2s）开销评估
 
+## 下一阶段（详见 `docs/NEXT-WORK.md`）
+
+无窗口：
+
+- [ ] A1 M3 join 质量：api_name_mismatch、可匹配分母、reason 明细（另一任务）
+- [ ] A2 collector 加固：buffer 生命周期/stop 幂等/时钟重估/tid 刷新/转义（另一任务）
+- [ ] A3 uprobe detach 与规模优化（系统级 attach + BPF PID 过滤）（我）
+- [ ] A4 `scripts/overhead_fixed_load.py` 固定负载开销（我）
+- [ ] A5 systemd/安装/回滚/release + SHA256SUMS（我）
+- [ ] A6 Prometheus exporter（我）
+- [ ] A7 DCMI/短间隔硬件（我）
+- [ ] A8 M5 采集/对比脚本（我）
+
+维护窗口：
+
+- [ ] B1 V4 真实设备时间线注入（另一任务主导，我负责 host 采集/校验）
+- [ ] B2 M5 V4/Orinfer A/B（我主导）
+- [ ] B3 固定负载吞吐门禁 ≤3%（我）
+- [ ] B4 真实 HCCL correlation（另一任务）
+
 ## M5 V4/Orinfer A/B（需要人工窗口）
 
 状态：等待 Orinfer 运行窗口；当前只有 V4 基线。

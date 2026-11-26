@@ -69,25 +69,33 @@ pidmap.json                 容器 local→host pid/tid 快照，schema cann.pid
 - `cann.device.v1` 字段只增不改；删除/改语义必须升 v2。
 - `manifest.artifacts.kind` 约定：`device_jsonl`、`device_meta`、`pidmap`、`hardware_samples`。
 
-## 3. 当前任务分配（下一步）
+## 3. 当前任务分配（2026-11-26 更新）
 
-### 另一个任务（M3 生产端）
+已完成：
+- 另一个任务：M3 collector/合成验证（`5e2fc93`）、pidmap、join 增强、diagnose meta/pidmap；
+- 我：`attach --device-jsonl` + pidmap 自动抓取/artifact、preflight 门禁（`08b327c`）。
 
-1. 在 CANN 9.0.1 容器内 `cmake/make` collector 与 `synthetic_acl`，先跑合成验证（不碰 V4）；
-2. 输出真实 `device.jsonl` + meta，确认 API/KERNEL/MEMCPY/HCCL 的 correlationId；
-3. 校对 msPTI 时间戳：`CLOCK_REALTIME` → monotonic 的偏移是否稳定（保留 raw 值）；
-4. 覆盖 `msptiActivityHccl` 无 correlationId 的时间窗回退标注；
-5. 提交 `m3/**`、`internal/device/**`、`internal/diagnose/**`、`cmd/diagnose.go`、`.gitignore`；
-6. 把 `.tmp-mspti-inspect/` 删除或加入忽略（不要提交容器头文件副本）。
+下一阶段分工详见 `docs/NEXT-WORK.md`：
 
-### 我（host 接线与验收）
+| 范围 | 另一个任务 | 我 |
+|---|---|---|
+| 无窗口 | A1 M3 join 质量（api_name_mismatch/可匹配率）、A2 collector 加固 | A3 teardown/规模优化、A4 固定负载脚本、A5 M6 交付骨架、A6 exporter、A7 DCMI、A8 M5 脚本 |
+| 维护窗口 | B1 V4 真实设备时间线（主导）、B4 真实 HCCL | B1 host 采集/health/残留/导入、B3 开销门禁、B2 M5 A/B |
+| 不做 | 插件/`execute_model`、逐 request 延迟 | — |
 
-1. `attach --device-jsonl` 导入 device/meta 并封存 artifact；自动抓 `pidmap.json`；（本提交实现）
-2. `preflight` 接入 attach 启动前（`--preflight enforce|warn|off`，默认 enforce）；（本提交实现）
-3. 固定负载开销脚本（`scripts/overhead_fixed_load.py`）与维护窗口执行清单；
-4. 等 M3 collector 产出后，用真实 device.jsonl 跑 `diagnose`，写 `docs/M3-VALIDATION.md`；
-5. 更新 HANDOFF/TASKS/README 的 M3 状态与二进制 SHA；
-6. 继续推进 teardown 时间优化（740 uprobe → 系统级 attach + BPF PID 过滤，另立任务）。
+### 3.1 我的具体下一步
+
+1. A3：把 740 个 per-pid uprobe 改为系统级 attach + BPF `target_pids` 过滤（或只挂 Worker），目标退出清理 <10s、残留 0；
+2. A4：`scripts/overhead_fixed_load.py`（固定 prompt/并发/max_tokens，on/off 多轮，读 `/metrics`+agent CPU/RSS）；
+3. A5：systemd/install/uninstall/upgrade、release tar + `SHA256SUMS`、runbook；
+4. A6/A7/A8：exporter 设计、DCMI/短间隔评估、M5 采集对比脚本；
+5. 等 B1 后更新 `M3-VALIDATION` 与二进制 SHA。
+
+### 3.2 另一个任务的具体下一步
+
+1. A1：修复 `api_name_mismatch`（final7 5,320 条），把全量分母改为“可匹配设备调用”分母，并在 diagnose/report 展示 reason 明细；
+2. A2：collector buffer 生命周期、stop 幂等/死锁、时钟偏移重估、线程 tid 映射刷新、JSON 转义；
+3. 准备 B1 注入脚本与回滚；B4 真实 HCCL correlation。
 
 ## 4. 对 M3 collector 的评审备注（不改对方文件）
 

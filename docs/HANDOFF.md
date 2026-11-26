@@ -265,6 +265,7 @@ span_id, seq
 | `docs/PREFLIGHT.md` | preflight 检查项、退出码与 V4 结果 |
 | `docs/M2-OVERHEAD.md` | M2 agent 开销基线与吞吐不可测说明 |
 | `docs/WORK-SPLIT.md` | 两个并行任务的文件所有权、接口约定与评审备注 |
+| `docs/NEXT-WORK.md` | M3 合成验证之后的下一阶段工作与分工 |
 | `docs/M4-VALIDATION.md` | V4 实测记录 |
 | `docs/VLLM-BATCH-POC.md` | 纯 eBPF batch POC 记录 |
 
@@ -300,9 +301,10 @@ span_id, seq
 
 ## 7. 下一步工作方向
 
-详细的分阶段方案、依赖、验收和命令见 `docs/NEXT-PLAN.md`。结论：先用 1 天做 msPTI 动态 attach
-可行性（容器内 `msprof --pid`）+ E 层 npu-smi 指标 + M2 开销基线，再决定 M3 走动态解析还是
-容器内 in-process collector。插件/`execute_model` 函数级耗时本轮明确不做，见 P2 说明。
+详细的分阶段方案、文件所有权与下一阶段分工见 `docs/NEXT-WORK.md` 和 `docs/WORK-SPLIT.md`。
+当前结论：M3 collector 合成验证已完成；无窗口阶段先做 join 质量、collector 加固、teardown/规模优化、
+固定负载脚本和 M6 交付骨架；真实 V4/Orinfer 设备时间线与 M5 A/B 需要维护窗口。
+插件/`execute_model` 函数级耗时不做，见 P2 说明。
 
 ### P0：`diagnose` 命令（已完成）
 

@@ -365,6 +365,7 @@ unicode dict，单次最多 64 个 key；batch span 写入标准 `spans.jsonl`�
 - `docs/M3-FEASIBILITY.md`：msprof/msPTI 动态采集可行性结论。
 - `docs/NEXT-PLAN.md`：M2 之后的分阶段方案（M3 可行性、E 层指标、开销基线、生产化）。
 - `docs/WORK-SPLIT.md`：两个并行任务的文件所有权、接口约定与评审备注。
+- `docs/NEXT-WORK.md`：M3 合成验证之后的下一阶段工作与分工。
 - `docs/M4-VALIDATION.md`：当前交付的实测数据、复现命令、证据和边界。
 - `docs/M4-CONTEXT-PROTOCOL.md`：batch 协议、权限模型、插件安装与激活步骤。
 - `docs/M5-TRACE-AND-CPY-POC.md`：链路追踪 schema、POC 设计、真实 V4 证据和边界。
