@@ -351,6 +351,7 @@ unicode dict，单次最多 64 个 key；batch span 写入标准 `spans.jsonl`�
 
 ## 文档
 
+- `docs/PRODUCT.md`：成品说明（能力矩阵、证据文件、已验证/未验证边界）。
 - `docs/HANDOFF.md`：交接总览、已完成/未完成、下一步与硬约束。
 - `docs/DIAGNOSE.md`：`diagnose` 用法、时间窗语义、判定规则和边界。
 - `docs/M2-OFFCPU.md`：M2 设计、判定口径和边界。
