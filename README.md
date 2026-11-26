@@ -74,7 +74,7 @@ cpy-poc-linux-arm64       08a5f05f92c15dd2d4b6475805ebbb3bfc3188b024c900745cb604
 cpy-batch-poc-linux-arm64 见 batch POC 交付目录 SHA256SUMS
 ```
 
-`cann-ebpf-linux-arm64-m3` 已在 `bms-84865758` 上完成 V4、合成锁竞争、硬件层、preflight 和
+`cann-ebpf-linux-arm64-m3` 已在 `目标 V4 环境（主机名省略）` 上完成 V4、合成锁竞争、硬件层、preflight 和
 M3 合成 ACL 验证；M3 生产注入仍待维护窗口，详见 `docs/M3-FEASIBILITY.md`、`docs/M3-VALIDATION.md`。
 
 仓库已包含 `internal/probes/bpf/cann.bpf.o`。修改 `cann.bpf.c` 后必须用 clang BPF
@@ -166,7 +166,7 @@ sh deploy/upgrade.sh --apply   --binary bin/cann-ebpf
 # 采集 + health/service 检查 + 不覆盖证据目录
 PROFILE=vllm-ascend LABEL=v4 DURATION=10s BINARY=./cann-ebpf sh scripts/m5_capture.sh
 # 或服务器自动采集（带 uprobe 残留检查）
-OUT="/root/cann-ebpf/runs/ebpf-auto-$(date -u +%Y%m%dT%H%M%SZ)" \
+OUT="runs/ebpf-auto-$(date -u +%Y%m%dT%H%M%SZ)" \
 DURATION=10s sh scripts/server_auto_capture.sh
 ```
 
@@ -295,7 +295,7 @@ OUT="runs/ebpf-m2-$(date -u +%Y%m%dT%H%M%SZ)"
 嵌套 span 不采样，避免父子重复累计。blocking 程序单独加载，attach 失败只产生 warning，
 不影响 host span 采集。
 
-已在 `bms-84865758` 验证：V4 10 秒 `attached=4 failed=0`、7,561 spans、无效样本 0；
+已在 `目标 V4 环境（主机名省略）` 验证：V4 10 秒 `attached=4 failed=0`、7,561 spans、无效样本 0；
 合成 pthread mutex 竞争 off-CPU 99.7%、futex 99.9%、`host_lock_contention` 1.00。
 数据与边界见 `docs/M2-VALIDATION.md` 与 `docs/M2-OFFCPU.md`。
 
@@ -367,22 +367,105 @@ Span 新增字段：
 事件；内存 span 缓冲达到上限时，summary 从完整 JSONL 重新生成，并在 warnings
 中显式记录。
 
-## 最终 V4 实测
+## 实测数据 Demo
 
-环境：`bms-84865758`，openEuler aarch64，内核 `5.10.0-136...`，CANN 9.0.1，
-`vllm-ds4-8905.service`，镜像 `ds4/vllm-ascend:v0.23.0rc1-nonroot`。
+> 下列数据来自真实 V4 生产服务的短窗口采集、合成锁竞争目标和合成 ACL 工作负载；
+> 主机名、路径和访问地址已省略。合成数据用于验证代码路径，不是生产性能结论。
+
+### 1. V4 host 采集（10 秒）
+
+环境：openEuler aarch64，内核 5.10，CANN 9.0.1，vLLM-Ascend 0.23.0rc1。
 
 | 项目 | 结果 |
 |---|---|
 | discovery | 10 targets；8 Worker_TP + frontend + EngineCore；每个 37/148 symbols |
 | eBPF 10 秒 | 6,991 spans；dropped 0；8 个 Worker 均有 span |
-| 观测函数 | `SynchronizeStream`、`SynchronizeStreamWithTimeout`、`SynchronizeEvent`、`DestroyEvent`、`RecordEvent`、`QueryEventStatus`；另一次运行观测到 1 条 `HcclReduceScatter` |
+| 函数分布（另一次 10 秒窗口，7,794 spans） | `aclrtSynchronizeEvent` 5,559；`aclrtDestroyEvent` 2,073（1/128 采样）；`aclrtSynchronizeStreamWithTimeout` 159；`aclrtRecordEvent` 1；`aclrtQueryEventStatus` 2 |
 | 服务影响 | 采集前后 `/health` 均为 200；service 前后均为 `active` |
 | uprobe 清理 | `cann_` 残留计数为 0 |
 | 上下文 smoke | 164 spans；21 条 batch span；1 个 batch；2 个 request ID；验证失败项 0 |
 | JSONL 完整性 | eBPF 6,991 行，SHA-256 `fb2625ba842c27c2480aa1750035acc6f61769849d31c23af462cd34fdd1c312` |
 
-详细记录见 `docs/M4-VALIDATION.md`，协议见 `docs/M4-CONTEXT-PROTOCOL.md`。
+真实 span 行（字段节选，来自一次 blocking=on 的 V4 采集）：
+
+```json
+{
+  "schema": "cann.span.v1",
+  "pid": 1452,
+  "tid": 1452,
+  "function": "aclrtSynchronizeStreamWithTimeout",
+  "category": "sync",
+  "duration_ns": 15638197,
+  "offcpu_ns": 14251417,
+  "futex_ns": 0
+}
+```
+
+这条 span 持续 15.64ms，其中 14.25ms 是 host 线程 off-CPU 等待；它说明“host 在等”，
+不等于设备执行了 14.25ms。
+
+### 2. M2 host 阻塞（V4 + 合成锁竞争）
+
+| 场景 | spans | off-CPU 占比 | futex 占比 | 判定 |
+|---|---:|---:|---:|---|
+| V4 10 秒，blocking=on | 7,561 | 1.1% | 0.0% | `host_cpu_running` |
+| 合成 pthread mutex 竞争 | 791 | 99.7% | 99.9% | `host_lock_contention`（置信度 1.00） |
+
+两次采集均 `attached=4 failed=0`、无效样本 0。
+
+### 3. E 层硬件（V4 运行时快照）
+
+8 张卡全部可读；同一时刻 device 0 的原始行：
+
+```json
+{"schema":"cann.hardware.v1","device_id":0,"name":"910B2","aicore_pct":42,"hbm_used_mb":61404,"hbm_total_mb":65536,"power_w":216,"temp_c":43}
+```
+
+该窗口全卡最低 HBM 余量 6.3%，AICore 峰值 46%。硬件是整卡 wall-clock 快照，不能归因到单 Worker/单 request。
+
+### 4. M3 设备时间线 join（合成 ACL final7）
+
+| 指标 | 值 |
+|---|---|
+| host spans | 11,859 |
+| device spans | 148,466（API 127,862 / KERNEL 4,112 / MEMCPY 16,492） |
+| 可匹配设备调用 | 305 / 305（**100%**） |
+| 慢 Sync 匹配 | 305 / 305（**100%**） |
+| not_applicable | 11,554（`aclrtGetDevice` 11,536、`aclrtMalloc` 18） |
+| 时钟偏移 | -18,359 ns |
+| pidmap | 27 条容器 local → host pid/tid |
+| 设备判定 | `device_bound` 286、`launch_starvation` 18 |
+
+注意：这是合成 ACL 的 join 验证，不是 V4 真实设备性能结论。
+
+### 5. Prometheus 指标输出（final7 证据）
+
+```text
+cann_ebpf_spans_total{run_id="cann-generic-20261126T111917.065391760Z"} 11859
+cann_ebpf_device_match_rate 1
+cann_ebpf_device_slow_sync_match_rate 1
+cann_ebpf_blocking_measured 0
+cann_ebpf_verdict{verdict="device_bound"} 1
+cann_ebpf_verdict{verdict="launch_starvation"} 1
+```
+
+`blocking_measured=0` 是因为该 run 没开阻塞探针，不是 off-CPU 为 0；未知项会显式保留。
+
+### 6. A3 attach 规模优化的真实效果（10 秒采集）
+
+| 实现 | spans | 整次墙钟 | 采集后退出 |
+|---|---:|---:|---:|
+| per-pid uprobe（740 links） | 1,470 | 63.3s | ~50s |
+| system-wide + BPF 过滤（74 links） | 1,618 | 16.7s | ~4.5s |
+
+两次窗口业务流量不同，span 数有差异；8 个 Worker 均有数据，uprobe 残留 0。
+
+### 7. 数据边界
+
+- V4 host span 是真实调用；M2 合成锁竞争、M3 合成 ACL 是代码路径验证，不能当生产性能结论。
+- 没有单 request 延迟，也没有 `execute_model` 函数级耗时。
+- 设备结论只在存在真实 `device.jsonl` 且 join 匹配时成立。
+- 主机名、服务器路径和访问地址均已省略。
 
 ## 已知边界
 
