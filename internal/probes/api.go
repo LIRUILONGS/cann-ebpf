@@ -29,6 +29,7 @@ type Options struct {
 	Blocking         BlockingMode
 	HardwareMode     string
 	HardwareInterval time.Duration
+	HardwareBackend  string
 	OnCaptureStart   func()
 	OnCaptureStop    func()
 	DeviceJSONL      string

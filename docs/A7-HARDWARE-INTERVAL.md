@@ -39,7 +39,37 @@ health 200→200
   不在本阶段实现，避免引入 CGO 交叉编译复杂度。
 - 文档明确：A7 的验证对象是 **npu-smi 后端**，不是 DCMI API 直连。
 
-## 5. 边界
+## 6. DCMI 直连实现（2026-11-26）
+
+已提供只读 helper `m3/dcmi_probe/dcmi_probe.c`，并接入 `attach --hardware-backend dcmi`：
+
+```bash
+gcc -O2 -o dcmi_probe m3/dcmi_probe/dcmi_probe.c \
+  -I/usr/local/Ascend/driver/include \
+  -L/usr/local/Ascend/driver/lib64/driver -ldcmi \
+  -Wl,-rpath,/usr/local/Ascend/driver/lib64/driver
+
+CANN_DCMI_PROBE=/path/dcmi_probe ./cann-ebpf attach ... \
+  --hardware on --hardware-backend dcmi --hardware-interval 5s
+```
+
+helper 输出与 npu-smi 后端相同的 `cann.hardware.v1` JSONL：
+
+```json
+{"schema":"cann.hardware.v1","ts_ns":...,"device_id":0,"name":"910B2","health":"OK","aicore_pct":22,"hbm_used_mb":61408,"hbm_total_mb":65536,"power_w":133.9,"temp_c":43,"source":"dcmi"}
+```
+
+V4 实测（服务不停）：
+
+- 8 个 device 全部可读，`source=dcmi`，`samples=1`，采集墙钟 12.7s，`/health` 200→200；
+- HBM `61408/65536 MB` 与 npu-smi 同值；AICore/温度随采样时刻波动；
+- DCMI `dcmi_get_device_power_info` 在本驱动返回 0.1W 单位，helper 归一为 W（约 130–250W），
+  与 npu-smi 板级功耗可能不同（芯片 vs 板卡测量点），已在文档标注；
+- 仍不提供 kernel/memcpy/HCCL 执行时间，设备结论仍需 msPTI 时间线。
+
+默认后端仍是 `npu-smi`；DCMI 需要 helper，找不到时只告警禁用硬件层，不影响 host span。
+
+## 7. 边界
 
 - 硬件采样是 wall-clock 快照，不能和 monotonic host span 逐调用 join。
 - AICore/HBM 是整卡值，不能归因到单 Worker 或单 request。

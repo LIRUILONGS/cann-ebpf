@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
@@ -45,28 +46,64 @@ type Collector struct {
 type collectorOptions struct {
 	interval time.Duration
 	path     string
+	backend  string
+	probe    string
 	runner   CommandRunner
 	now      func() time.Time
 }
 
-// Start samples immediately and then on the configured interval. It returns a
-// collector even when npu-smi is unavailable; callers report Result.Available.
+// Start samples with the default npu-smi backend.
 func Start(ctx context.Context, outputPath string, interval time.Duration) (*Collector, []string) {
+	return StartWithBackend(ctx, outputPath, interval, "")
+}
+
+// StartWithBackend samples with the requested backend: "" or "npu-smi" runs
+// `npu-smi info`; "dcmi" runs the read-only dcmi_probe helper (CANN_DCMI_PROBE
+// or PATH). Both emit the same cann.hardware.v1 sample schema.
+func StartWithBackend(ctx context.Context, outputPath string, interval time.Duration, backend string) (*Collector, []string) {
 	if interval <= 0 {
 		interval = 10 * time.Second
+	}
+	backend = strings.ToLower(strings.TrimSpace(backend))
+	if backend == "" {
+		backend = "npu-smi"
 	}
 	runCtx, cancel := context.WithCancel(ctx)
 	c := &Collector{
 		opts: collectorOptions{
-			interval: interval, path: outputPath, runner: execRunner,
+			interval: interval, path: outputPath, backend: backend, runner: execRunner,
 			now: time.Now,
 		},
 		cancel: cancel,
 		done:   make(chan struct{}),
 	}
 	var warnings []string
-	if _, err := exec.LookPath("npu-smi"); err != nil {
-		warnings = append(warnings, "hardware disabled: npu-smi not found in PATH")
+	switch backend {
+	case "npu-smi":
+		if _, err := exec.LookPath("npu-smi"); err != nil {
+			warnings = append(warnings, "hardware disabled: npu-smi not found in PATH")
+			cancel()
+			close(c.done)
+			c.stopped = true
+			return c, warnings
+		}
+	case "dcmi":
+		probe := strings.TrimSpace(os.Getenv("CANN_DCMI_PROBE"))
+		if probe == "" {
+			if found, err := exec.LookPath("dcmi_probe"); err == nil {
+				probe = found
+			}
+		}
+		if probe == "" {
+			warnings = append(warnings, "hardware disabled: dcmi_probe not found (set CANN_DCMI_PROBE)")
+			cancel()
+			close(c.done)
+			c.stopped = true
+			return c, warnings
+		}
+		c.opts.probe = probe
+	default:
+		warnings = append(warnings, "hardware disabled: unsupported backend "+backend)
 		cancel()
 		close(c.done)
 		c.stopped = true
@@ -118,7 +155,22 @@ func (c *Collector) isStopping() bool {
 func (c *Collector) sampleOnce(ctx context.Context) {
 	sampleCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	raw, err := c.opts.runner(sampleCtx, "npu-smi", "info")
+	var (
+		raw     []byte
+		err     error
+		samples []Sample
+	)
+	if c.opts.backend == "dcmi" {
+		raw, err = c.opts.runner(sampleCtx, c.opts.probe)
+		if err == nil {
+			samples, err = ParseDCMIJSONL(raw)
+		}
+	} else {
+		raw, err = c.opts.runner(sampleCtx, "npu-smi", "info")
+		if err == nil {
+			samples, err = ParseNPUSmiInfo(raw)
+		}
+	}
 	if err != nil {
 		// Stop() cancels the context and kills the child; that is not a sampling
 		// failure and must not become a warning in the manifest.
@@ -129,13 +181,6 @@ func (c *Collector) sampleOnce(ctx context.Context) {
 		if c.lastErr != err.Error() {
 			c.lastErr = err.Error()
 		}
-		c.mu.Unlock()
-		return
-	}
-	samples, err := ParseNPUSmiInfo(raw)
-	if err != nil {
-		c.mu.Lock()
-		c.lastErr = err.Error()
 		c.mu.Unlock()
 		return
 	}
@@ -191,7 +236,10 @@ func (c *Collector) resultLocked() Result {
 	}
 	if c.samples > 0 {
 		result.Available = true
-		result.Source = "npu-smi"
+		result.Source = c.opts.backend
+		if result.Source == "" {
+			result.Source = "npu-smi"
+		}
 	}
 	if c.lastErr != "" {
 		result.Warnings = append(result.Warnings, "hardware sampling: "+c.lastErr)

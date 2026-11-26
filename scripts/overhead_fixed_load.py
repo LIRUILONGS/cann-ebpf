@@ -299,13 +299,13 @@ def main():
     base = [r for r in rows if r["mode"] == "off"]
     treat = [r for r in rows if r["mode"] == "on"]
     if base and treat:
-        base_rps = statistics.median(r["req_per_s"] for r in base)
-        treat_rps = statistics.median(r["req_per_s"] for r in treat)
+        base_rps = statistics.median(r["client_rps"] for r in base)
+        treat_rps = statistics.median(r["client_rps"] for r in treat)
         base_p95 = statistics.median(r["client_p95_s"] for r in base)
         treat_p95 = statistics.median(r["client_p95_s"] for r in treat)
         drop = (base_rps - treat_rps) / base_rps * 100 if base_rps else 0
         p95_reg = (treat_p95 - base_p95) / base_p95 * 100 if base_p95 else 0
-        print(f"median req/s off={base_rps} on={treat_rps} drop={drop:.2f}%")
+        print(f"median client req/s off={base_rps} on={treat_rps} drop={drop:.2f}% (gate uses client load)")
         print(f"median client p95 off={base_p95}s on={treat_p95}s regression={p95_reg:.2f}%")
         if args.enforce and (drop > args.max_throughput_drop_pct or p95_reg > args.max_p95_regression_pct):
             print("FAIL: overhead gate exceeded", file=sys.stderr)

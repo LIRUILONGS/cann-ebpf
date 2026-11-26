@@ -14,7 +14,7 @@
 | 源码 | `main` @ `5e2fc93`（in-process msPTI collector + host 接线） |
 | 版本号 | `0.6.0-m2` + M3（建议正式交付前改为 `0.7.0-m3`） |
 | Linux/arm64 二进制 | `dist/cann-ebpf-linux-arm64-m3` |
-| 大小 / SHA-256 | `13,402,332` bytes / `12fb457164710bc42a379a77ed04c7d9566a1c9c43d184f235ebd0ddf6160632` |
+| 大小 / SHA-256 | `13,407,163` bytes / `3fe700bb4d2345e7cee459c2c9449a1478e0b720da8db5ade29fc6f4569769c3` |
 | 构建/测试 | `go test ./...`、`go vet ./...`、Linux/arm64 交叉编译通过 |
 | 运行时依赖 | 仅目标机内核 + root/CAP；不需要 Python（纯 eBPF 路径） |
 

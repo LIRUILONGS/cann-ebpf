@@ -39,7 +39,7 @@
 | `preflight` 环境检查 | 完成并上机验证；V4 pass=15 warn=0 fail=0 |
 | A3/A4/A5 | attach 系统级化（V4 墙钟 ~110s→~18s）、固定负载脚本、systemd/安装/升级/release 骨架 |
 | A6 Prometheus exporter | 完成；`cann-ebpf metrics`，V4 证据 69 个 `cann_ebpf_*` 指标 |
-| A7 硬件短间隔 | 2s 间隔 5 采样×8 设备，health 正常；建议 ≥5s；DCMI API 未接入 |
+| A7 硬件短间隔/DCMI | 2s 间隔 5 采样×8 设备，health 正常；`--hardware-backend dcmi` 已实现并在 V4 验证 |
 | A8 M5 采集/对比 | `m5_capture.sh`/`m5_compare.py`，双 V4 run smoke 通过 |
 | M2 开销 | agent +0.28pp 单核 CPU、+1.3MB RSS、0 丢事件；固定负载门禁用 A4 脚本 |
 | M3 device 时间线 join | join/schema/diagnose 完成；真实 V4 span + 合成时间线 100% 匹配；`msprof --pid` 段错误，生产端待维护窗口 |
@@ -223,6 +223,17 @@ OUT="runs/ebpf-$(date -u +%Y%m%dT%H%M%SZ)"
 uprobe 现在按库去重后 system-wide attach，BPF `target_pids` 过滤目标进程；
 V4 上 37 个函数只需 74 个 perf event，采集 10 秒的总墙钟从 ~110s 降到 ~18s，
 退出清理 ~4.5s。详见 `docs/A3-ATTACH-SCALING.md`。
+
+硬件层默认走 `npu-smi`；也可用只读 DCMI helper：
+
+```bash
+gcc -O2 -o dcmi_probe m3/dcmi_probe/dcmi_probe.c \
+  -I/usr/local/Ascend/driver/include \
+  -L/usr/local/Ascend/driver/lib64/driver -ldcmi \
+  -Wl,-rpath,/usr/local/Ascend/driver/lib64/driver
+CANN_DCMI_PROBE=./dcmi_probe ./cann-ebpf-linux-arm64 attach ... \
+  --hardware on --hardware-backend dcmi
+```
 
 ### 上下文协议 smoke
 
@@ -547,6 +558,8 @@ unicode dict，单次最多 64 个 key；batch span 写入标准 `spans.jsonl`�
 - `docs/A6-METRICS.md`：Prometheus exporter 指标与用法。
 - `docs/A7-HARDWARE-INTERVAL.md`：硬件短间隔开销与 DCMI 评估。
 - `docs/A8-M5.md`：M5 采集/对比脚本与边界。
+- `docs/B3-ONLINE-OVERHEAD.md`：V4 在线固定负载 smoke 数据与门禁口径。
+- `docs/B-STATUS.md`：B1-B4 在“推理不停机”约束下的状态与阻塞原因。
 - `docs/M4-VALIDATION.md`：当前交付的实测数据、复现命令、证据和边界。
 - `docs/M4-CONTEXT-PROTOCOL.md`：batch 协议、权限模型、插件安装与激活步骤。
 - `docs/M5-TRACE-AND-CPY-POC.md`：链路追踪 schema、POC 设计、真实 V4 证据和边界。

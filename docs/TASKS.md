@@ -150,8 +150,8 @@ M1 的 8 个核心函数和 2088 spans 是历史基线。当前 37 个 host 探�
 - [x] `attach --hardware auto|on|off`；manifest artifact
 - [x] `diagnose` 硬件汇总与 `hbm_pressure`
 - [x] V4 10 秒验证：2 采样×8 设备、health/service 不变
-- [ ] DCMI 后端（当前只有 npu-smi）
-- [ ] 短间隔（1–2s）开销评估
+- [x] DCMI 后端：`m3/dcmi_probe` + `attach --hardware-backend dcmi`，V4 8 卡只读验证
+- [x] 短间隔（1–2s）开销评估：2s→5 采样×8 设备，health 正常；建议 ≥5s
 
 ## 下一阶段（详见 `docs/NEXT-WORK.md`）
 
@@ -163,15 +163,15 @@ M1 的 8 个核心函数和 2088 spans 是历史基线。当前 37 个 host 探�
 - [x] A4 `scripts/overhead_fixed_load.py` 固定负载开销（dry-run；真实门禁待窗口）
 - [x] A5 systemd/安装/回滚/release + SHA256SUMS（脚本 + dry-run）
 - [x] A6 Prometheus exporter：`cann-ebpf metrics` text/serve，V4 69 个指标
-- [x] A7 DCMI/短间隔硬件评估：2s→5 采样×8 设备，health 正常；DCMI API 未接入
+- [x] A7 DCMI/短间隔硬件评估：DCMI helper + `--hardware-backend dcmi` V4 验证；2s→5 采样×8 设备
 - [x] A8 M5 采集/对比脚本：`scripts/m5_capture.sh`、`scripts/m5_compare.py`（smoke 通过）
 
-维护窗口：
+维护窗口/受限项（V4 不停机）：
 
-- [ ] B1 V4 真实设备时间线注入（另一任务主导，我负责 host 采集/校验）
-- [ ] B2 M5 V4/Orinfer A/B（我主导）
-- [ ] B3 固定负载吞吐门禁 ≤3%（我）
-- [ ] B4 真实 HCCL correlation（另一任务）
+- [ ] B1 V4 真实设备时间线注入（需一次重启或备用节点；见 `docs/B-STATUS.md`）
+- [~] B2 M5 V4/Orinfer A/B：V4 基线已采 1,765 spans；Orinfer 未运行，真实 A/B 待环境
+- [~] B3 固定负载吞吐门禁：在线 smoke 通过（客户端 +6.7%、CPU +0.06pp、0 dropped）；正式 ≤3% 待隔离/低峰
+- [ ] B4 真实 HCCL correlation：需独占卡/备用节点；共享卡 HBM 余量仅 6.3%，未执行
 
 ## M5 V4/Orinfer A/B（需要人工窗口）
 

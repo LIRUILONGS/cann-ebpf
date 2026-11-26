@@ -178,7 +178,7 @@ func Run(opts Options) (result *Result, retErr error) {
 				result.Warnings = append(result.Warnings,
 					fmt.Sprintf("hardware interval %s is shorter than one npu-smi call (~1.1s); sampling may overlap", interval))
 			}
-			collector, hwWarnings := hardware.Start(opts.Context, filepath.Join(opts.OutputDir, "hardware.jsonl"), interval)
+			collector, hwWarnings := hardware.StartWithBackend(opts.Context, filepath.Join(opts.OutputDir, "hardware.jsonl"), interval, opts.HardwareBackend)
 			hardwareCollector = collector
 			result.Warnings = append(result.Warnings, hwWarnings...)
 			defer hardwareCollector.Stop()

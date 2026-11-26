@@ -14,8 +14,8 @@
 | 最新提交 | 见 `git log -1`（M3 A1/A2、diagnose/metrics、A3-A8 收尾） |
 | Git remote | 未配置；交接前建议先配置内部 Git 远程并推送 |
 | Linux/arm64 二进制（M3 + A1/A2） | `dist/cann-ebpf-linux-arm64-m3` |
-| 二进制大小 | `13,402,332` bytes |
-| 二进制 SHA-256 | `12fb457164710bc42a379a77ed04c7d9566a1c9c43d184f235ebd0ddf6160632` |
+| 二进制大小 | `13,407,163` bytes |
+| 二进制 SHA-256 | `3fe700bb4d2345e7cee459c2c9449a1478e0b720da8db5ade29fc6f4569769c3` |
 | collector A2 产物 | `dist/cann-mspti-a2-20261126/`（`libcannmspti.so`、`cann-mspti-selftest`、`synthetic_acl`、`SHA256SUMS.txt`） |
 | collector A2 服务器副本 | `/root/cann-ebpf/cann-mspti-a2-20261126/` |
 | 历史已验证二进制 | `dist/cann-ebpf-linux-arm64-batch`（`0.5.0-m5`，上表 SHA 已替换为 M2 构建，旧包仍保留在 dist/） |
@@ -59,7 +59,7 @@
 | A4 固定负载开销脚本 | 脚本 + dry-run 完成 | `scripts/overhead_fixed_load.py`；真实负载门禁待维护窗口 |
 | A5 M6 交付骨架 | 脚本 + dry-run 完成 | systemd timer、install/uninstall/upgrade、make-release；均支持 dry-run |
 | A6 Prometheus exporter | 完成并上机验证 | `cann-ebpf metrics` text/serve；V4 证据 69 个指标，标签基数受控 |
-| A7 硬件短间隔/DCMI | 评估完成 | 2s 间隔 5 采样×8 设备、health 正常；npu-smi 单次 ~1.14s，建议 ≥5s；DCMI API 未接入 |
+| A7 硬件短间隔/DCMI | 完成并上机验证 | 2s 间隔 5 采样×8 设备、health 正常；DCMI helper + `--hardware-backend dcmi` V4 验证通过 |
 | A8 M5 采集/对比脚本 | 完成（smoke） | `m5_capture.sh` + `m5_compare.py`；真实 A/B 待 Orinfer 窗口 |
 | M2 开销基线 | 部分完成 | agent +0.28pp 单核 CPU、+1.3MB RSS、0 丢；业务吞吐因生产负载不可控未下 ≤3% 结论 |
 | M3 device join 管线 | 完成 | `cann.device.v1` schema、join、device verdict、diagnose 集成；`attach` 生成 `pidmap.json` |
@@ -231,7 +231,7 @@ span_id, seq
   `cann_ebpf_*`（run/spans/function/category/blocking/hardware/device/verdict）；V4 证据 69 个指标，
   HTTP /metrics 200。详见 `docs/A6-METRICS.md`。
 - **A7 短间隔/DCMI**：`--hardware-interval 2s` 10 秒得到 5 采样×8 设备，health 正常；
-  npu-smi 单次 ~1.14s，建议 ≥5s；DCMI API 未接入（npu-smi 走 DCMI 驱动）。
+  DCMI 直连已实现：`m3/dcmi_probe` + `--hardware-backend dcmi`，V4 8 卡只读验证通过。
   详见 `docs/A7-HARDWARE-INTERVAL.md`。
 - **A8 M5 脚本**：`scripts/m5_capture.sh`（带 health/service 检查、拒绝覆盖）与
   `scripts/m5_compare.py`（两边 diagnose 后生成 compare.md）；V4 双 run smoke 通过。

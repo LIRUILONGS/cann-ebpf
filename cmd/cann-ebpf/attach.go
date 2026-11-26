@@ -35,8 +35,9 @@ func cmdAttach(args []string) int {
 	pythonBatchMaxEvents := fs.Int("python-batch-max-events", 20000, "maximum batch ring-buffer events retained per worker")
 	pythonBatchRequireType := fs.String("python-batch-require-type", "SchedulerOutput", "required batch owner type substring")
 	blockingMode := fs.String("blocking", "auto", "host blocking probes: auto|on|off (sched_switch off-CPU and futex_wait)")
-	hardwareMode := fs.String("hardware", "auto", "coarse npu-smi hardware sampling: auto|on|off")
+	hardwareMode := fs.String("hardware", "auto", "coarse hardware sampling: auto|on|off")
 	hardwareInterval := fs.Duration("hardware-interval", 0, "hardware sampling interval override (default: profile hardware.interval_s)")
+	hardwareBackend := fs.String("hardware-backend", "", "hardware backend: npu-smi (default) or dcmi (requires dcmi_probe)")
 	deviceJSONL := fs.String("device-jsonl", "", "external msPTI collector device.jsonl to import into the run directory")
 	preflightMode := fs.String("preflight", "enforce", "environment preflight before attach: enforce|warn|off")
 	jsonOut := fs.Bool("json", false, "json summary")
@@ -112,6 +113,7 @@ func cmdAttach(args []string) int {
 		Blocking:         probes.BlockingMode(*blockingMode),
 		HardwareMode:     *hardwareMode,
 		HardwareInterval: *hardwareInterval,
+		HardwareBackend:  *hardwareBackend,
 		DeviceJSONL:      *deviceJSONL,
 		OnCaptureStart: func() {
 			fmt.Fprintf(os.Stderr, "capture_start=%s\n", time.Now().UTC().Format(time.RFC3339Nano))
