@@ -1,8 +1,8 @@
 # cann-ebpf 项目交接文档
 
-文档日期：2026-11-26  
-适用版本：`0.6.0-m2`（`diagnose` 命令 + M2 host off-CPU/futex，均已上机验证）  
-代码状态：`main` @ 本次交接提交（`git log -1` 见提交号）  
+文档日期：2026-11-26
+适用版本：`0.6.0-m2` + M3（`diagnose`、M2 off-CPU/futex、in-process msPTI collector，均已上机验证）
+代码状态：`main` @ 本次交接提交（`git log -1` 见提交号）
 文档性质：工程交接。本文只写已验证事实；代码完成但未上机验证的内容会单独标注。
 
 ## 1. 项目地址
@@ -13,9 +13,9 @@
 | Git 分支 | `main` |
 | 最新提交 | 见 `git log -1`（`diagnose`、M2 off-CPU/futex 及上机验证记录） |
 | Git remote | 未配置；交接前建议先配置内部 Git 远程并推送 |
-| Linux/arm64 二进制（M2/M3-dev） | `dist/cann-ebpf-linux-arm64-m2` |
-| 二进制大小 | `9,724,244` bytes |
-| 二进制 SHA-256 | `D4B1268F8C28DAD6B10130A1EFD5E36C7FCA4C0C15BD4223F31CE2CAD1A0C1E3` |
+| Linux/arm64 二进制（M3） | `dist/cann-ebpf-linux-arm64-m3` |
+| 二进制大小 | 见 `SHA256SUMS.txt` 与本次提交说明 |
+| 二进制 SHA-256 | 见 `dist/SHA256SUMS.txt` |
 | 历史已验证二进制 | `dist/cann-ebpf-linux-arm64-batch`（`0.5.0-m5`，上表 SHA 已替换为 M2 构建，旧包仍保留在 dist/） |
 | 服务器验证副本（历史） | `/root/cann-ebpf`，V4 服务器 `bms-84865758` |
 | 服务器 profiles | `/root/cann-ebpf/profiles` |
@@ -35,8 +35,8 @@
 - 属于哪个 vLLM batch、batch 里有哪些 request ID；
 - 后续需要回答 host 阻塞、off-CPU、锁竞争、设备执行时间时，证据在哪里。
 
-当前阶段已经做到“host 侧调用链 + batch/request 关联 + 原始证据链 + host 阻塞归因”；还不能完整回答
-“设备侧到底执行了多久”，这项属于下一步的 M3。
+当前阶段已经做到“host 侧调用链 + batch/request 关联 + 原始证据链 + host 阻塞归因 + 合成 ACL 的设备时间线验证”；
+真实 V4/Orinfer 设备时间线需要维护窗口注入 in-process collector。
 
 ## 3. 已经完成的内容
 
@@ -54,17 +54,17 @@
 | E 层 npu-smi 硬件指标 | 完成并上机验证 | `hardware.jsonl`、manifest artifact、`hbm_pressure`；8 设备/HBM/AICore/功耗/温度 |
 | `preflight` 环境检查 | 完成并上机验证 | 15 项检查；V4 pass=15 warn=0 fail=0 |
 | M2 开销基线 | 部分完成 | agent +0.28pp 单核 CPU、+1.3MB RSS、0 丢；业务吞吐因生产负载不可控未下 ≤3% 结论 |
-| M3 device join 管线 | 代码完成，生产端未接通 | `cann.device.v1` schema、join、device verdict、diagnose 集成；真实设备数据需维护窗口 |
+| M3 device join 管线 | 完成 | `cann.device.v1` schema、join、device verdict、diagnose 集成；`attach` 生成 `pidmap.json` |
 | M3.0 msprof 动态 attach | 已验证不可用 | `msprof --pid` 三变体段错误；改为容器内 in-process collector |
 | vLLM general plugin | 代码和单测完成，未激活 | 未安装到运行中的 V4，也未重启验证；本阶段不做 |
 | Orinfer | 仅 profile validate | 服务未运行，没有真实采集窗口 |
-| M3 msPTI 设备时间线 | 未实现 | in-process collector 待维护窗口 |
+| M3 msPTI 设备时间线 | 代码 + 合成验证完成 | `m3/mspti_collector`；final7 慢 Sync 305/305（100%）；生产注入待维护窗口 |
 | M6 生产化 | 未实现 | Prometheus/OTLP、Grafana、systemd 等未做 |
 
-注意：版本号 `0.6.0-m2` 是功能基线；本次新增的 E 层硬件与 M3 device join 代码仍沿用该版本号，
-但 M3 生产端（in-process msPTI）未接通。M2 已在 V4 和合成锁竞争上验证（见 `docs/M2-VALIDATION.md`），
-硬件层见 `docs/HARDWARE.md`，join 管线见 `docs/M3-DEVICE-JOIN.md`。三者都不回答单 request 延迟；
-M5 的 V4/Orinfer A/B 对比也还没有做。
+注意：版本号 `0.6.0-m2` 是功能基线；M3 in-process collector 已在合成 ACL 上验证，但还没有注入
+运行中的 V4/Orinfer。M2 已在 V4 和合成锁竞争上验证（见 `docs/M2-VALIDATION.md`），硬件层见
+`docs/HARDWARE.md`，join 管线和 collector 见 `docs/M3-DEVICE-JOIN.md`、`docs/M3-COLLECTOR.md`、
+`docs/M3-VALIDATION.md`。它们都不回答单 request 延迟；M5 的 V4/Orinfer A/B 对比也还没有做。
 
 ### 3.2 M0：发现与符号解析
 
@@ -170,16 +170,17 @@ span_id, seq
   调用时给出 `hbm_pressure`；
 - 硬件是 wall-clock 采样，不能与 monotonic host span 逐调用 join。详见 `docs/HARDWARE.md`。
 
-### 3.10 M3 device 时间线 join（代码完成，生产端未接通）
+### 3.10 M3 device 时间线 join 与 in-process collector（代码 + 合成验证完成）
 
 - `internal/device` 定义 `cann.device.v1`（API/KERNEL/MEMCPY/HCCL）与 join：
   `(pid,tid,start±100µs)` 匹配 API record → `correlationId` → 设备区间；
 - 支持时钟偏移估计、reason 分类（ok/no_api_record/api_name_mismatch/duplicate/no_device_record/time_window）、
-  时间窗退化、每设备 busy 并集、四类 device verdict；
+  相邻区间容差（gap ≤100µs，字段 `gap_ns`/`adjacent`）、时间窗退化、每设备 busy 并集、四类 device verdict；
 - `diagnose` 自动读取 run 目录 `device.jsonl`，有设备证据才输出 `device_bound` 等结论；
-- 已用真实 V4 host span + 合成 device.jsonl 验证 7,794/7,794 匹配；合成数据只证明代码路径；
-- M3.0 `msprof --pid` 动态 attach 三变体均段错误，判定不可用；生产端改为容器内 in-process
-  collector，需维护窗口。详见 `docs/M3-DEVICE-JOIN.md`、`docs/M3-FEASIBILITY.md`。
+- final7 合成 ACL：11,859 host spans + 148,466 device spans，慢 Sync 305/305（100%），进程退出后仍可 join；
+- `m3/mspti_collector` 的 `libcannmspti.so` / `cann-mspti-collector` / `synthetic_acl` 已在容器内编译并验证；
+- M3.0 `msprof --pid` 动态 attach 三变体均段错误，判定不可用；生产端只能通过重启或容器入口 wrapper 注入。
+  详见 `docs/M3-DEVICE-JOIN.md`、`docs/M3-COLLECTOR.md`、`docs/M3-VALIDATION.md`、`docs/M3-FEASIBILITY.md`。
 
 ### 3.11 `preflight` 与采集时序
 
@@ -194,13 +195,13 @@ span_id, seq
   剩余 fd 由进程退出清理（残留最终为 0），`capture_stop` 之后不再计入采集窗口。
 - 硬件采样在 `capture_stop` 时停止，避免把清理阶段算进硬件窗口。
 
-### 3.12 M3 host 侧证据接入（本任务）
+### 3.12 M3 host 侧证据接入
 
 - `attach --device-jsonl <host-path>`：把容器内 msPTI collector 的 `device.jsonl` 与
   `device.jsonl.meta.json` 复制进 run 目录，并在目标存活时抓 `pidmap.json`；
 - 三个文件分别封存为 manifest artifact：`device_jsonl`、`device_meta`、`pidmap`；
 - 已存在同名文件不覆盖；源缺失只告警，不影响 host span；
-- `diagnose` 自动读取这三者做 join；生产端 collector 由并行任务负责（见 `docs/WORK-SPLIT.md`）。
+- `diagnose` 自动读取这三者做 join；`pidmap.json` 让目标进程退出后仍可复现 join。
 
 ## 4. 当前能回答和不能回答的问题
 
@@ -218,8 +219,10 @@ span_id, seq
 ### 不能回答
 
 - 不能回答“为什么卡住”的完整因果：M2 只覆盖 host 阻塞，设备侧仍缺。
-- 不能可靠区分 `device_bound`、`launch_starvation`、`copy_bound`、`communication_bound`。
-- 不能回答 NPU kernel / memcpy / HCCL 的设备执行时间：msPTI 未接入。
+- 有 `device.jsonl` + `pidmap.json` 且 join 成功的 run，可以给出设备 busy/kernel/memcpy 的观测值；
+  没有设备证据时不能输出这些结论，不能凭 host span 推断。
+- 真实 V4/Orinfer 尚无设备时间线：collector 未注入生产进程；合成 ACL 结果不能当生产性能。
+- 真实 HCCL 的 `Communication` correlationId 尚未验证；`msptiActivityHccl` 本身无 correlationId。
 - 不能回答单 request 延迟；batch 窗口不能拆成逐 request 时长。
 - 不能回答 `execute_model` 的 Python 函数级耗时；插件未激活，纯 eBPF 的 `PyObject_GetAttr` 不是函数边界。
 - 没有 DCMI/npu-exporter 硬件层，不能直接给出 NPU 利用率、HBM 余量、温度、功耗。
@@ -289,7 +292,7 @@ span_id, seq
 | M2 验证（合成） | 791 spans，off-CPU 99.7%、futex 99.9%，verdict `host_lock_contention`（confidence 1.00） |
 | `--blocking off` | 7,145 spans，无任何 offcpu/futex 字段，服务状态不变 |
 | E 层硬件验证 | 10 秒 7,794 spans + 2 采样×8 设备；HBM free 6.3%、AICore 峰值 46%；manifest artifact 4202 bytes |
-| M3 join 验证（合成时间线） | 真实 7,794 host spans + 合成 device.jsonl：100% 匹配、reason 全 `ok`、`device_bound` 5,721 条 |
+| M3 设备时间线验证（合成 ACL） | final7：11,859 host spans / 148,466 device spans，慢 Sync 305/305（100%），clock offset 761ns，pidmap 27 条 |
 | M3.0 msprof 动态 attach | 三变体均 exit 139（Segmentation fault），V4 health/service/worker 全程正常 |
 | preflight | V4 pass=15 warn=0 fail=0；tracepoint id、lockdown、memlock、npu-smi 均正常 |
 | M2 开销（60s×2+2） | agent CPU off 1.365% → on 1.64%（+0.28pp 单核），RSS +1.3MB，dropped 0 |
@@ -337,26 +340,26 @@ span_id, seq
 完整证据和修复记录见 `docs/M2-VALIDATION.md`。剩余限制：嵌套 span 不采样、没有生产流量下的
 真实锁竞争样本、长跑开销基线未做、仍不能下设备侧结论。
 
-### P1：M3 设备时间线与 join（部分完成）
+### P1：M3 设备时间线与 join（代码 + 合成验证完成，生产待窗口）
 
 已完成：
 
 - `internal/device`：`cann.device.v1` schema、API→correlationId→KERNEL/MEMCPY/HCCL join、
   时钟偏移、时间窗退化、reason 分类、四类 device verdict；
 - `diagnose` 自动读取 `device.jsonl`，有证据才输出设备结论；
-- 用真实 V4 host span（7,794 条）+ 合成 device.jsonl 验证 100% 匹配；
+- 合成 ACL 上验证：慢 Sync 305/305（100%）、API/KERNEL/MEMCPY correlationId、clock offset 761ns；
 - M3.0 可行性结论：`msprof --pid` 三变体段错误，动态 attach 路线不可用；
 - host 侧接入：`attach --device-jsonl` 导入 device/meta、抓 `pidmap.json` 并封存 artifact；
-- 并行任务负责容器内 in-process msPTI collector（`m3/mspti_collector`），所有权见
-  `docs/WORK-SPLIT.md`。
+- 容器内 in-process collector（`m3/mspti_collector`）已完成并验证。
 
 待做（需要维护窗口）：
 
-- collector 在 CANN 9.0.1 容器内构建并用 `synthetic_acl` 验证 API/KERNEL/MEMCPY/HCCL 与 correlationId；
-- 用已知 kernel 验证 correlationId 真能关联；95% 慢 Sync 匹配、偏差 <100µs；
-- 生产端接通后写 `docs/M3-VALIDATION.md`；join 失败时降级为时间窗，不伪造精确关联。
+- 把 collector 注入 V4 或 Orinfer，采集 10–30 秒真实设备时间线；
+- 用真实流量复核慢 Sync 匹配率 ≥95% 与设备 busy/kernel/memcpy；
+- 真实 HCCL 工作负载验证 `Communication` correlationId；
+- join 失败时降级为时间窗，不伪造精确关联。
 
-详见 `docs/M3-DEVICE-JOIN.md`、`docs/M3-FEASIBILITY.md`。
+详见 `docs/M3-DEVICE-JOIN.md`、`docs/M3-COLLECTOR.md`、`docs/M3-VALIDATION.md`、`docs/M3-FEASIBILITY.md`。
 
 ### P2：`execute_model` 边界（本轮明确不做）
 

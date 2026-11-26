@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"cann-ebpf/internal/contextfeed"
+	"cann-ebpf/internal/device"
 	"cann-ebpf/internal/discovery"
 	"cann-ebpf/internal/elfutil"
 	"cann-ebpf/internal/hardware"
@@ -107,6 +108,18 @@ func Run(opts Options) (result *Result, retErr error) {
 		}()
 		result.JSONLPath = writer.JSONLPath()
 		result.ManifestPath = filepath.Join(opts.OutputDir, "manifest.json")
+	}
+	if opts.OutputDir != "" {
+		pidMapPath := filepath.Join(opts.OutputDir, "pidmap.json")
+		if _, statErr := os.Stat(pidMapPath); os.IsNotExist(statErr) {
+			if artifact, mapErr := device.CapturePIDMaps(opts.PIDs); mapErr != nil {
+				result.Warnings = append(result.Warnings, "device pidmap: "+mapErr.Error())
+			} else if writeErr := device.WritePIDMap(pidMapPath, artifact); writeErr != nil {
+				result.Warnings = append(result.Warnings, "device pidmap write: "+writeErr.Error())
+			} else {
+				result.DeviceEvidence.PIDMapPath = pidMapPath
+			}
+		}
 	}
 
 	var links []link.Link
@@ -275,20 +288,26 @@ func Run(opts Options) (result *Result, retErr error) {
 	if opts.DeviceJSONL != "" {
 		result.DeviceEvidence = importDeviceEvidence(opts.OutputDir, opts.DeviceJSONL, opts.PIDs)
 		result.Warnings = append(result.Warnings, result.DeviceEvidence.Warnings...)
-		if writer != nil {
-			artifacts := []struct{ kind, path string }{
-				{"device_jsonl", result.DeviceEvidence.DevicePath},
-				{"device_meta", result.DeviceEvidence.MetaPath},
-				{"pidmap", result.DeviceEvidence.PIDMapPath},
+	}
+	if writer != nil {
+		artifacts := []struct{ kind, path string }{
+			{"device_jsonl", result.DeviceEvidence.DevicePath},
+			{"device_meta", result.DeviceEvidence.MetaPath},
+			{"pidmap", result.DeviceEvidence.PIDMapPath},
+		}
+		if artifacts[2].path == "" {
+			pidMapPath := filepath.Join(opts.OutputDir, "pidmap.json")
+			if _, err := os.Stat(pidMapPath); err == nil {
+				artifacts[2].path = pidMapPath
 			}
-			for _, artifact := range artifacts {
-				if artifact.path == "" {
-					continue
-				}
-				if err := writer.AddArtifact(artifact.path, artifact.kind); err != nil {
-					result.Warnings = append(result.Warnings,
-						fmt.Sprintf("seal %s %s: %v", artifact.kind, artifact.path, err))
-				}
+		}
+		for _, artifact := range artifacts {
+			if artifact.path == "" {
+				continue
+			}
+			if err := writer.AddArtifact(artifact.path, artifact.kind); err != nil {
+				result.Warnings = append(result.Warnings,
+					fmt.Sprintf("seal %s %s: %v", artifact.kind, artifact.path, err))
 			}
 		}
 	}

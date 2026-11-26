@@ -119,6 +119,16 @@ func (r Report) Markdown() string {
 		fmt.Fprintf(&b, "- host span：`%d`，device span：`%d`（%s）\n", dev.HostSpans, dev.DeviceSpans, dev.DeviceKinds)
 		fmt.Fprintf(&b, "- 匹配：`%d/%d`（%.1f%%），模式：%s，时钟偏移：`%d` ns\n",
 			dev.MatchedHostSpans, dev.HostSpans, dev.MatchRate*100, mode, dev.ClockOffsetNS)
+		if dev.SlowSyncSpans > 0 {
+			fmt.Fprintf(&b, "- 慢 Sync 匹配：`%d/%d`（%.1f%%）\n",
+				dev.MatchedSlowSync, dev.SlowSyncSpans, dev.SlowSyncMatchRate*100)
+		}
+		if dev.AdjacentMatches > 0 {
+			fmt.Fprintf(&b, "- 相邻区间容差匹配：`%d` 条（不贡献 busy 时间）\n", dev.AdjacentMatches)
+		}
+		if dev.PIDMapApplied {
+			fmt.Fprintf(&b, "- 容器 pid/tid 映射：已应用 `%d` 条\n", dev.PIDMapEntries)
+		}
 		if len(dev.Reasons) > 0 {
 			b.WriteString("\n| reason | count |\n|---|---:|\n")
 			for _, reason := range dev.Reasons {

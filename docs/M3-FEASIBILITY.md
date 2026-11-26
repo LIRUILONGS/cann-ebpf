@@ -3,7 +3,7 @@
 日期：2026-11-26
 主机：`bms-84865758`（容器 `deepseek-v4-flash-8905`，CANN 9.0.1）
 结论：**`msprof --pid` 动态 profiling 在本环境不可用（三种变体均段错误）**；V4 未受影响。
-M3 生产端改为容器内 in-process collector，需要维护窗口；在此之前只保留硬件层与 join 代码。
+M3 生产端已改为容器内 in-process collector，并已在合成 ACL 上验证；注入真实 V4/Orinfer 仍需维护窗口。
 
 ## 1. 环境事实
 
@@ -53,9 +53,9 @@ docker exec [-u root] deepseek-v4-flash-8905 sh -c '
 ## 4. 决策
 
 1. **路线 A（动态 attach）拒绝**：不工作，不再重试；不在生产容器反复尝试可能导致 core dump 的工具。
-2. **路线 B（in-process collector）进入准备阶段**：
-   - 在容器内用 `libmspti.so` 编译 collector（C 或 Python），输出 `cann.device.v1`；
-   - 通过 Unix socket 或 run 目录交给 host `diagnose`；
+2. **路线 B（in-process collector）已完成代码与合成验证**：
+   - `m3/mspti_collector` 已实现 `libcannmspti.so`、`cann-mspti-collector`、`synthetic_acl`；
+   - 输出 `cann.device.v1`，`attach` 生成 `pidmap.json`，host `diagnose` 直接读取；
    - 需要重启 V4 或入口 wrapper，必须走维护窗口；
    - 与 vLLM 插件分开开关、分开描述。
 3. **无窗口期间**：
@@ -65,12 +65,11 @@ docker exec [-u root] deepseek-v4-flash-8905 sh -c '
 
 ## 5. 下一步（维护窗口清单）
 
-1. 在测试容器（同镜像）编译 msPTI collector，先用合成 ACL 程序验证 API/KERNEL/MEMCPY/HCCL
-   记录和 correlationId 真能关联；
-2. 校准 host `bpf_ktime_get_ns` 与 msPTI 时间戳（按 device 记录偏移，目标 <100µs）；
-3. 在授权窗口重启 V4（或 wrapper 注入），采集 10–30 秒；
-4. 用 `diagnose` join：目标慢 Sync 匹配率 ≥95%，未匹配原因分类；
-5. 验收后更新 `docs/M3-VALIDATION.md`；
+1. [已完成] 在测试容器（同镜像）编译 msPTI collector，用合成 ACL 验证 API/KERNEL/MEMCPY 与 correlationId；
+2. [已完成] 校准 host `bpf_ktime_get_ns` 与 msPTI 时间戳（final7 `clock_offset_ns=761`，目标 <100µs）；
+3. [待授权] 在维护窗口重启 V4 或 Orinfer（或 wrapper 注入），采集 10–30 秒；
+4. [待授权] 用 `diagnose` join：目标慢 Sync 匹配率 ≥95%，未匹配原因分类；
+5. [已完成] 记录 `docs/M3-VALIDATION.md`；
 6. 失败则回滚到纯 host + 硬件层，不保留常驻 profiling。
 
 ## 6. 证据位置

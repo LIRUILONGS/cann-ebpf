@@ -2,7 +2,7 @@
 
 > 交接文档：`docs/HANDOFF.md`（项目地址、已完成内容、下一步工作方向、硬约束）。
 
-昇腾 CANN 主机侧低开销观测工具。当前交付版本为 **`0.6.0-m2`**：
+昇腾 CANN 主机侧低开销观测工具。当前交付版本为 **`0.6.0-m2`**，并已合入 M3 设备时间线采集器：
 
 - 37 个 CANN/ACL/HCCL host uprobe 程序，entry/return 配对；
 - vLLM-Ascend 自动发现、8 个 `VLLM::Worker_TP` 并行 attach、frontend/EngineCore 覆盖；
@@ -11,7 +11,7 @@
 - 只读 `diagnose` 定位命令（JSON/Markdown，不 attach）；
 - M2 host off-CPU/futex（`sched_switch` + futex syscall tracepoint，已在 V4 和合成锁竞争上验证）；
 - E 层 npu-smi 硬件采样（HBM/AICore/功耗/温度，已上机验证）；
-- M3 device 时间线 join 管线（schema + join + diagnose，生产端待维护窗口）；
+- M3 device 时间线 join 管线 + in-process msPTI collector（合成 ACL 已验证，生产注入待维护窗口）；
 - 采集前后健康检查、uprobe 残留检查和不覆盖旧证据的运行脚本。
 
 > 本版本的 `M4` 指 **vLLM-Ascend host profile + batch 上下文协议**。它仍然不是
@@ -39,8 +39,9 @@
 | `preflight` 环境检查 | 完成并上机验证；V4 pass=15 warn=0 fail=0 |
 | M2 开销 | agent +0.28pp 单核 CPU、+1.3MB RSS、0 丢事件；固定负载吞吐门禁未做 |
 | M3 device 时间线 join | join/schema/diagnose 完成；真实 V4 span + 合成时间线 100% 匹配；`msprof --pid` 段错误，生产端待维护窗口 |
+| M3 msPTI collector | 完成并在合成 ACL 验证；final7 慢 Sync 305/305（100%）；真实 V4/Orinfer 注入待维护窗口 |
 | Orinfer profile | 配置校验通过；服务未运行，尚无运行窗口验证 |
-| msPTI / 设备 kernel 时间线 | 未实现，属于 M3 |
+| msPTI / 设备 kernel 时间线 | 代码 + 合成验证完成；真实 V4/Orinfer 设备时间线待维护窗口 |
 | 逐 request 执行时长 | 未实现；当前只做 batch 窗口归因 |
 | `execute_model` 函数级耗时 | 未实现；本轮不激活插件 |
 
@@ -55,7 +56,7 @@ go vet ./...
 
 $env:GOOS = "linux"
 $env:GOARCH = "arm64"
-go build -buildvcs=false -trimpath -o dist/cann-ebpf-linux-arm64-m2 ./cmd/cann-ebpf
+go build -buildvcs=false -trimpath -o dist/cann-ebpf-linux-arm64-m3 ./cmd/cann-ebpf
 go build -buildvcs=false -trimpath -o dist/cpy-poc-linux-arm64 ./cmd/cpy-poc
 go build -buildvcs=false -trimpath -o dist/cpy-batch-poc-linux-arm64 ./cmd/cpy-batch-poc
 Remove-Item Env:GOOS, Env:GOARCH, Env:CGO_ENABLED
@@ -64,13 +65,13 @@ Remove-Item Env:GOOS, Env:GOARCH, Env:CGO_ENABLED
 当前 Linux/arm64 二进制 SHA-256 以交付包 `SHA256SUMS` 为准，构建后不得手工修改：
 
 ```text
-cann-ebpf-linux-arm64-m2  d4b1268f8c28dad6b10130a1efd5e36c7fca4c0c15bd4223f31ce2cad1a0c1e3
+cann-ebpf-linux-arm64-m3  见 dist/SHA256SUMS.txt（本次 M3 构建）
 cpy-poc-linux-arm64       08a5f05f92c15dd2d4b6475805ebbb3bfc3188b024c900745cb604a30826be53
 cpy-batch-poc-linux-arm64 见 batch POC 交付目录 SHA256SUMS
 ```
 
-`cann-ebpf-linux-arm64-m2` 已在 `bms-84865758` 上完成 V4、合成锁竞争、硬件层和 preflight 验证，
-二进制大小 `9,724,244` bytes；M3 生产端未接通（`msprof --pid` 段错误），详见 `docs/M3-FEASIBILITY.md`。
+`cann-ebpf-linux-arm64-m3` 已在 `bms-84865758` 上完成 V4、合成锁竞争、硬件层、preflight 和
+M3 合成 ACL 验证；M3 生产注入仍待维护窗口，详见 `docs/M3-FEASIBILITY.md`、`docs/M3-VALIDATION.md`。
 
 仓库已包含 `internal/probes/bpf/cann.bpf.o`。修改 `cann.bpf.c` 后必须用 clang BPF
 target 重新生成对象；不要依赖目标机现编，也不要修改目标进程或 CANN 库。
@@ -215,7 +216,7 @@ OUT="runs/ebpf-m2-$(date -u +%Y%m%dT%H%M%SZ)"
 外部 collector 产出 `device.jsonl` 后，用 attach 导入并抓 pidmap：
 
 ```bash
-./cann-ebpf-linux-arm64-m2 attach --pid auto --profile vllm-ascend --profiles-dir profiles \
+./cann-ebpf-linux-arm64-m3 attach --pid auto --profile vllm-ascend --profiles-dir profiles \
   --duration 30s --device-jsonl /host/path/device.jsonl --output runs/ebpf-m3
 ```
 
@@ -300,14 +301,14 @@ Span 新增字段：
   的执行时间拆分。request IDs 是关联键，不是业务内容。
 - 如果容器使用独立 time namespace，插件与 host eBPF 的单调时钟可能不一致；上线
   插件前必须做同一命名空间/跨命名空间时钟校准。
-- msPTI、kernel/memcpy/HCCL 设备执行时间、correlationId join 未实现。
+- msPTI kernel/memcpy/HCCL 的真实 V4/Orinfer 设备时间线尚未采集；collector 已在合成 ACL 上验证。
 - M2 已上机验证，但只覆盖最外层 CANN span 的 host 阻塞；嵌套 span 没有 blocking 字段是设计行为。
   本次 V4 窗口没有真实 futex 竞争（futex≈0），`host_lock_contention` 由合成锁竞争目标验证。
 - `offcpu_ns`/`futex_ns` 是 host 线程的等待时间，不是 request 延迟、不是 NPU 执行时间；
   没有 msPTI 时仍然不能下 `device_bound`/`launch_starvation`。
 - 硬件层是周期性 wall-clock 快照，AICore/HBM 是整卡值，不能归因到单个 Worker 或单次调用。
-- M3 join 的 100% 匹配是用**合成** `device.jsonl` 验证的代码路径，不是真实设备时间；
-  `msprof --pid` 动态采集段错误，真实设备数据需要维护窗口的 in-process collector。
+- M3 的 final7 结果来自**合成 ACL**，不是 V4 生产流量；`msprof --pid` 动态采集段错误，真实设备数据
+  需要维护窗口的 in-process collector。
 - V4 上 740 个 uprobe 的进程退出清理约 40 秒（内核串行 detach，残留最终为 0），
   这是命令返回时间，不是采集窗口、也不影响业务；`capture_stop` 之后的清理不计入窗口。
 - `diagnose` 只读已有证据；没有 off-CPU 采样时只输出 `blocking_unknown`，没有 msPTI 时永远不输出
@@ -358,6 +359,8 @@ unicode dict，单次最多 64 个 key；batch span 写入标准 `spans.jsonl`�
 - `docs/PREFLIGHT.md`：preflight 检查项、退出码与 V4 结果。
 - `docs/HARDWARE.md`：E 层 npu-smi 采样、schema、验证与边界。
 - `docs/M3-DEVICE-JOIN.md`：device 时间线 schema、join 算法与合成验证。
+- `docs/M3-COLLECTOR.md`：in-process msPTI collector、环境变量、pidmap 与生产启用方式。
+- `docs/M3-VALIDATION.md`：M3 上机验证数据、慢 Sync 修复前后对比和边界。
 - `docs/M3-FEASIBILITY.md`：msprof/msPTI 动态采集可行性结论。
 - `docs/NEXT-PLAN.md`：M2 之后的分阶段方案（M3 可行性、E 层指标、开销基线、生产化）。
 - `docs/WORK-SPLIT.md`：两个并行任务的文件所有权、接口约定与评审备注。

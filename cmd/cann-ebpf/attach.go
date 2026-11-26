@@ -10,7 +10,6 @@ import (
 	"strings"
 	"time"
 
-	"cann-ebpf/internal/device"
 	"cann-ebpf/internal/discovery"
 	"cann-ebpf/internal/probes"
 )
@@ -104,12 +103,6 @@ func cmdAttach(args []string) int {
 	if *outputDir == "" {
 		*outputDir = filepath.Join("runs", fmt.Sprintf("ebpf-%d", time.Now().Unix()))
 	}
-	var pidMapArtifact *device.PIDMapArtifact
-	if artifact, mapErr := device.CapturePIDMaps(pids); mapErr != nil {
-		fmt.Fprintf(os.Stderr, "attach: pidmap warning: %v\n", mapErr)
-	} else {
-		pidMapArtifact = artifact
-	}
 	ctx, cancel := context.WithTimeout(context.Background(), *duration+10*time.Second)
 	defer cancel()
 	result, err := probes.Run(probes.Options{
@@ -137,11 +130,6 @@ func cmdAttach(args []string) int {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "attach: %v\n", err)
 		return 5
-	}
-	if pidMapArtifact != nil {
-		if mapErr := device.WritePIDMap(filepath.Join(*outputDir, "pidmap.json"), pidMapArtifact); mapErr != nil {
-			fmt.Fprintf(os.Stderr, "attach: write pidmap: %v\n", mapErr)
-		}
 	}
 	fmt.Fprintf(os.Stderr, "capture_end=%s\n", time.Now().UTC().Format(time.RFC3339Nano))
 	if *jsonOut {

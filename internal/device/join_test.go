@@ -66,6 +66,43 @@ func TestJoinAPIRecordPath(t *testing.T) {
 	}
 }
 
+func TestJoinAppliesContainerPIDMap(t *testing.T) {
+	host := []runlog.Span{
+		hostSpan("h1", 900, 91, 1000, 2000, "aclrtSynchronizeStream", "sync"),
+	}
+	dev := []Span{
+		{Schema: SchemaV1, Kind: KindAPI, Name: "aclrtSynchronizeStream", PID: 10, TID: 11, StartNS: 1000, EndNS: 2000, CorrelationID: 7},
+		{Schema: SchemaV1, Kind: KindKernel, Name: "ffn", DeviceID: 0, StartNS: 1100, EndNS: 1900, CorrelationID: 7},
+	}
+	report := Join(host, dev, Options{
+		PIDMap: map[int]int{10: 900},
+		TIDMap: map[int]int{11: 91},
+	})
+	if !report.PIDMapApplied || report.PIDMapEntries != 2 {
+		t.Fatalf("pid map = %+v", report)
+	}
+	if report.MatchedHostSpans != 1 || report.Hosts[0].Reason != ReasonOK {
+		t.Fatalf("host = %+v", report.Hosts[0])
+	}
+}
+
+func TestTranslateIDsOnlyAPIRecords(t *testing.T) {
+	spans := []Span{
+		{Kind: KindAPI, PID: 10, TID: 11},
+		{Kind: KindKernel, PID: 10, TID: 11},
+	}
+	translated := TranslateIDs(spans, map[int]int{10: 900}, map[int]int{11: 91})
+	if translated[0].PID != 900 || translated[0].TID != 91 {
+		t.Fatalf("api = %+v", translated[0])
+	}
+	if translated[1].PID != 10 || translated[1].TID != 11 {
+		t.Fatalf("kernel should be unchanged: %+v", translated[1])
+	}
+	if spans[0].PID != 10 {
+		t.Fatal("input mutated")
+	}
+}
+
 func TestJoinTimeWindowFallback(t *testing.T) {
 	host := []runlog.Span{hostSpan("h1", 100, 11, 1000, 2000, "aclrtSynchronizeStream", "sync")}
 	dev := []Span{
@@ -104,6 +141,46 @@ func TestJoinNoDeviceRecords(t *testing.T) {
 	dev := []Span{{Schema: SchemaV1, Kind: KindAPI, Name: "aclrtSynchronizeStream", PID: 100, TID: 11, StartNS: 1000, EndNS: 2000, CorrelationID: 9}}
 	report := Join(host, dev, Options{})
 	if report.MatchedHostSpans != 0 || report.Hosts[0].Reason != ReasonNoDeviceRecord {
+		t.Fatalf("host = %+v", report.Hosts[0])
+	}
+}
+
+func TestJoinAcceptsAdjacentCorrelatedKernelWithinTolerance(t *testing.T) {
+	host := []runlog.Span{hostSpan("h1", 100, 11, 1000, 2000, "aclrtSynchronizeStream", "sync")}
+	dev := []Span{
+		{Schema: SchemaV1, Kind: KindAPI, Name: "aclrtSynchronizeStream", PID: 100, TID: 11, StartNS: 1000, EndNS: 2000, CorrelationID: 7},
+		{Schema: SchemaV1, Kind: KindKernel, Name: "ffn", DeviceID: 0, StartNS: 2000 + 1677, EndNS: 2200 + 1677, CorrelationID: 7},
+	}
+	report := Join(host, dev, Options{TimeToleranceNS: 100_000, SlowThresholdNS: 200})
+	if !report.Hosts[0].Matched || report.Hosts[0].Reason != ReasonOK {
+		t.Fatalf("host = %+v", report.Hosts[0])
+	}
+	if len(report.Hosts[0].Matches) != 1 {
+		t.Fatalf("matches = %+v", report.Hosts[0].Matches)
+	}
+	match := report.Hosts[0].Matches[0]
+	if !match.Adjacent || match.GapNS != 1677 || match.OverlapNS != 0 {
+		t.Fatalf("match = %+v", match)
+	}
+	if report.Hosts[0].DeviceBusyNS != 0 || report.Hosts[0].KernelNS != 0 {
+		t.Fatalf("adjacent interval must not contribute busy/kernel time: %+v", report.Hosts[0])
+	}
+	if report.AdjacentMatches != 1 {
+		t.Fatalf("adjacent matches = %d", report.AdjacentMatches)
+	}
+	if report.SlowSyncSpans != 1 || report.MatchedSlowSync != 1 || report.SlowSyncMatchRate != 1 {
+		t.Fatalf("slow sync = %+v", report)
+	}
+}
+
+func TestJoinRejectsAdjacentKernelOutsideTolerance(t *testing.T) {
+	host := []runlog.Span{hostSpan("h1", 100, 11, 1000, 2000, "aclrtSynchronizeStream", "sync")}
+	dev := []Span{
+		{Schema: SchemaV1, Kind: KindAPI, Name: "aclrtSynchronizeStream", PID: 100, TID: 11, StartNS: 1000, EndNS: 2000, CorrelationID: 7},
+		{Schema: SchemaV1, Kind: KindKernel, Name: "ffn", DeviceID: 0, StartNS: 2000 + 1677, EndNS: 2200 + 1677, CorrelationID: 7},
+	}
+	report := Join(host, dev, Options{TimeToleranceNS: 1000})
+	if report.Hosts[0].Matched || report.Hosts[0].Reason != ReasonNoDeviceRecord {
 		t.Fatalf("host = %+v", report.Hosts[0])
 	}
 }

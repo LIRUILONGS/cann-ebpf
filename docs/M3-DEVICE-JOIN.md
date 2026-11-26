@@ -1,9 +1,9 @@
 # M3：device 时间线与 host/device join
 
 日期：2026-11-26
-状态：**schema、join 算法、诊断输出、单测完成**；已在真实 V4 host span 上用合成 `device.jsonl`
-验证 100% 匹配。真实设备数据生产端**尚未接通**：`msprof --pid` 动态采集在本环境不可用
-（见 `docs/M3-FEASIBILITY.md`），需要容器内 in-process collector 或维护窗口。
+状态：**schema、join 算法、诊断输出、单测、in-process msPTI collector 与合成 ACL 上机验证完成**。
+最新 final7：11,859 host spans + 148,466 device spans，慢 Sync 305/305（100%）。真实 V4/Orinfer
+生产注入仍需维护窗口；`msprof --pid` 动态采集在本环境不可用（见 `docs/M3-FEASIBILITY.md`）。
 
 ## 1. 设计
 
@@ -19,6 +19,10 @@ host span (pid, tid, api, start, end)
 - 没有 API record 时退化为“时间窗重叠”，报告 `time_window_fallback=true`，置信度下降；
 - 时钟偏移：用同一批 host span 与 API record 的 start 差值中位数估计，写入 `clock_offset_ns`；
   设备区间的起止先减去该偏移再与 host 求交。
+- 相邻区间容差：同一 correlationId 的 KERNEL/MEMCPY/HCCL 与 host span 不重叠、但 gap ≤ `TimeToleranceNS`
+  （默认 100µs）时按相邻匹配计入；记录 `gap_ns` / `adjacent=true`，`overlap_ns=0`，不贡献 busy 时间。
+- 容器 pid/tid 映射：`attach` 在宿主采集 `pidmap.json`（`cann.pidmap.v1`），`diagnose` 优先使用该快照；
+  没有快照时才按 `container_id` 现场扫描 `/proc`。
 
 ## 2. device.jsonl schema
 
@@ -46,10 +50,11 @@ Schema `cann.device.join.v1`：
 | `matched_host_spans` / `match_rate` | 匹配数量与比例 |
 | `time_window_fallback` | 是否退化为时间窗 |
 | `clock_offset_ns` | 估计的 host/device 时钟偏移 |
+| `adjacent_matches` | 相邻区间容差匹配数量（不贡献 busy） |
 | `reasons[]` | `ok` / `no_api_record` / `api_name_mismatch` / `duplicate` / `no_device_record` / `time_window` |
 | `devices[]` | 每设备 busy 并集、kernel/memcpy/HCCL 重叠时长 |
 | `verdicts[]` | `device_bound` / `launch_starvation` / `copy_bound` / `communication_bound` 的计数 |
-| `hosts[]` | 每个匹配 host span 的 busy%、三类设备时长、correlationId |
+| `hosts[]` | 每个匹配 host span 的 busy%、三类设备时长、correlationId；`matches[]` 可带 `gap_ns` / `adjacent` |
 
 阈值（可由 diagnose 覆盖）：
 
@@ -83,7 +88,7 @@ CLI 新增 `--device-tolerance`（默认 100µs）。
 外部 collector 在容器内写 `device.jsonl` / `device.jsonl.meta.json` 后，用 attach 导入：
 
 ```bash
-./cann-ebpf-linux-arm64-m2 attach --pid auto --profile vllm-ascend --profiles-dir profiles \
+./cann-ebpf-linux-arm64-m3 attach --pid auto --profile vllm-ascend --profiles-dir profiles \
   --duration 30s --device-jsonl /host/path/to/device.jsonl --output runs/ebpf-m3
 ```
 
@@ -104,21 +109,21 @@ CLI 新增 `--device-tolerance`（默认 100µs）。
 | 测试 | 结果 |
 |---|---|
 | 单测：API+correlationId、名称不匹配、duplicate、no_device_record、时钟偏移、时间窗 fallback | 通过 |
-| 服务器：用真实 V4 10 秒 run（7,794 host spans）生成 API+KERNEL 合成时间线 | 7,794/7,794 匹配（100%），reason 全 `ok`，`device_bound` 5,721 条 |
+| 服务器：in-process msPTI collector + 合成 ACL（final7） | 11,859 host spans / 148,466 device spans；慢 Sync 305/305（100%）；`pid_map_entries=27`，进程退出后仍可 join |
+| 服务器：修复前 final2 | 4,171 host spans / 65,375 device spans；慢 Sync 9/11（81.8%），两个 kernel 分别晚 1,677ns / 10,387ns |
 | 服务器：只给 KERNEL 不给 API，验证 fallback | 200 条 kernel 命中 215 host span，`time_window_fallback=true`，匹配率 2.8% 并写入 unknown |
 | 单测 + 服务器 | Markdown/JSON 均输出设备章节；没有 device.jsonl 时明确 unknown |
 
-**注意**：上述 7,794/7,794 与 `device_bound` 是**合成时间线**，只证明 join/诊断代码路径正确，
-不是真实设备执行时间，不能写进性能结论。
+**注意**：final7 是合成 ACL 的真实 msPTI 设备时间线（不是 V4 生产流量）。它证明 collector、correlationId、
+时钟归一化、pid/tid 映射和 join 路径可用，但不能当作 V4/Orinfer 的性能结论。
 
-## 6. 生产端（未完成）
+## 6. 生产端（collector 已实现，待维护窗口注入）
 
-优先路线是容器内 in-process collector：
+容器内 in-process collector 已完成，产物和启用方式见 `docs/M3-COLLECTOR.md`：
 
-- 在 V4 容器里编译一个使用 `libmspti.so` 的 helper（C 或 Python），采集 API/KERNEL/MEMCPY/HCCL，
-  输出 `cann.device.v1`；
-- 通过 Unix socket 或按 run 目录写 `device.jsonl`，host 侧 `diagnose` 直接读取；
-- 需要重启 V4 或容器入口 wrapper，只能在维护窗口执行；
+- `libcannmspti.so` 在目标进程内订阅 API/KERNEL/MEMCPY/HCCL，输出 `cann.device.v1`；
+- `attach` 采集 `pidmap.json`，`diagnose` 直接读取 `device.jsonl` + `pidmap.json`；
+- 需要重启 V4/Orinfer 或容器入口 wrapper，只能在维护窗口执行；
 - 与 vLLM 插件分开：它只做设备时间线，不做 request/batch 上下文。
 
 备选：若维护窗口不可得，只能保留硬件层（`docs/HARDWARE.md`）的 run 级判断，并明确写

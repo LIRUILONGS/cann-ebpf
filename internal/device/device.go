@@ -16,6 +16,23 @@ import (
 
 const SchemaV1 = "cann.device.v1"
 
+const CollectorMetaSchemaV1 = "cann.mspti.collector.v1"
+
+// CollectorMeta is the sidecar written by m3/mspti_collector. ContainerID is
+// used to translate the collector's namespace-local pid/tid to the host
+// pid/tid that eBPF spans record.
+type CollectorMeta struct {
+	Schema      string `json:"schema"`
+	Version     string `json:"version,omitempty"`
+	PID         int    `json:"pid,omitempty"`
+	RunID       string `json:"run_id,omitempty"`
+	ContainerID string `json:"container_id,omitempty"`
+	Activities  string `json:"activities,omitempty"`
+	Clock       string `json:"clock,omitempty"`
+	Records     int64  `json:"records_written,omitempty"`
+	Truncated   bool   `json:"truncated,omitempty"`
+}
+
 // Activity kinds. API records are the bridge from a host span to a device
 // correlation id; KERNEL/MEMCPY/HCCL are the actual device intervals.
 const (

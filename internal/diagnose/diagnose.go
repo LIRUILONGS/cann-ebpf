@@ -46,6 +46,7 @@ type Options struct {
 	FutexRatioThreshold   float64
 	HBMFreePctThreshold   float64
 	DeviceTimeToleranceNS int64
+	DeviceContainerID     string
 }
 
 func (o *Options) normalize() {
@@ -71,16 +72,20 @@ func (o *Options) normalize() {
 
 // Input is one loaded evidence run.
 type Input struct {
-	Path         string
-	JSONLPath    string
-	ManifestPath string
-	HardwarePath string
-	DevicePath   string
-	Manifest     *runlog.Manifest
-	Spans        []runlog.Span
-	Hardware     []hardware.Sample
-	DeviceSpans  []device.Span
-	Warnings     []string
+	Path           string
+	JSONLPath      string
+	ManifestPath   string
+	HardwarePath   string
+	DevicePath     string
+	DeviceMetaPath string
+	PIDMapPath     string
+	Manifest       *runlog.Manifest
+	Spans          []runlog.Span
+	Hardware       []hardware.Sample
+	DeviceSpans    []device.Span
+	DeviceMeta     *device.CollectorMeta
+	PIDMap         *device.PIDMapArtifact
+	Warnings       []string
 }
 
 // Load reads spans.jsonl (and manifest.json when present) from a run directory
@@ -99,11 +104,15 @@ func Load(path string) (*Input, error) {
 		in.ManifestPath = filepath.Join(path, "manifest.json")
 		in.HardwarePath = filepath.Join(path, "hardware.jsonl")
 		in.DevicePath = filepath.Join(path, "device.jsonl")
+		in.DeviceMetaPath = filepath.Join(path, "device.jsonl.meta.json")
+		in.PIDMapPath = filepath.Join(path, "pidmap.json")
 	} else {
 		in.JSONLPath = path
 		in.ManifestPath = filepath.Join(filepath.Dir(path), "manifest.json")
 		in.HardwarePath = filepath.Join(filepath.Dir(path), "hardware.jsonl")
 		in.DevicePath = filepath.Join(filepath.Dir(path), "device.jsonl")
+		in.DeviceMetaPath = filepath.Join(filepath.Dir(path), "device.jsonl.meta.json")
+		in.PIDMapPath = filepath.Join(filepath.Dir(path), "pidmap.json")
 	}
 	file, err := os.Open(in.JSONLPath)
 	if err != nil {
@@ -144,6 +153,23 @@ func Load(path string) (*Input, error) {
 		}
 	} else if !os.IsNotExist(dErr) {
 		in.Warnings = append(in.Warnings, fmt.Sprintf("device.jsonl 读取失败：%v", dErr))
+	}
+	if data, mErr := os.ReadFile(in.DeviceMetaPath); mErr == nil {
+		var meta device.CollectorMeta
+		if jErr := json.Unmarshal(data, &meta); jErr != nil {
+			in.Warnings = append(in.Warnings, fmt.Sprintf("device.jsonl.meta.json 无法解析：%v", jErr))
+		} else if meta.Schema == "" || meta.Schema == device.CollectorMetaSchemaV1 {
+			in.DeviceMeta = &meta
+		} else {
+			in.Warnings = append(in.Warnings, fmt.Sprintf("device.jsonl.meta.json schema=%q 不识别", meta.Schema))
+		}
+	} else if !os.IsNotExist(mErr) {
+		in.Warnings = append(in.Warnings, fmt.Sprintf("device.jsonl.meta.json 读取失败：%v", mErr))
+	}
+	if artifact, pErr := device.ReadPIDMap(in.PIDMapPath); pErr == nil {
+		in.PIDMap = artifact
+	} else if !os.IsNotExist(pErr) {
+		in.Warnings = append(in.Warnings, fmt.Sprintf("pidmap.json 读取失败：%v", pErr))
 	}
 	return in, nil
 }
@@ -408,9 +434,33 @@ func Build(in *Input, opts Options) (Report, error) {
 	deviceEvidence := false
 	if len(in.DeviceSpans) > 0 {
 		report.DevicePath = in.DevicePath
+		pidMap := map[int]int(nil)
+		tidMap := map[int]int(nil)
+		containerID := opts.DeviceContainerID
+		if containerID == "" && in.DeviceMeta != nil {
+			containerID = in.DeviceMeta.ContainerID
+		}
+		if opts.DeviceContainerID == "" && in.PIDMap != nil && len(in.PIDMap.PIDMap) > 0 {
+			pidMap = in.PIDMap.PIDMap
+			tidMap = in.PIDMap.TIDMap
+			report.Warnings = append(report.Warnings, fmt.Sprintf(
+				"device pid 映射来自采集时快照 pidmap.json：pid=%d tid=%d container=%s",
+				len(pidMap), len(tidMap), in.PIDMap.ContainerID))
+		} else if containerID != "" {
+			var mapErr error
+			pidMap, tidMap, mapErr = device.ResolveContainerPIDMap(containerID)
+			if mapErr != nil {
+				report.Warnings = append(report.Warnings, fmt.Sprintf("device pid 映射失败（%s）：%v；先按原始 pid/tid join", containerID, mapErr))
+				pidMap, tidMap = nil, nil
+			} else {
+				report.Warnings = append(report.Warnings, fmt.Sprintf("device pid 映射已应用：container=%s pid=%d tid=%d", containerID, len(pidMap), len(tidMap)))
+			}
+		}
 		joined := device.Join(matched, in.DeviceSpans, device.Options{
 			TimeToleranceNS: opts.DeviceTimeToleranceNS,
 			SlowThresholdNS: opts.SlowThresholdNS,
+			PIDMap:          pidMap,
+			TIDMap:          tidMap,
 		})
 		report.Verdicts = append(report.Verdicts, deviceVerdicts(joined)...)
 		report.Warnings = append(report.Warnings, joined.Warnings...)

@@ -32,6 +32,7 @@ func cmdDiagnose(args []string) int {
 	futexRatio := fs.Float64("futex-ratio", 0.3, "futex/wall threshold for host_lock_contention")
 	hbmFreePct := fs.Float64("hbm-free-pct", 5, "HBM free percentage threshold for hbm_pressure")
 	deviceTolerance := fs.Duration("device-tolerance", 100*time.Microsecond, "max host/device API start skew for the M3 join")
+	deviceContainerID := fs.String("device-container-id", "", "container id used to translate device pid/tid to host ids")
 	jsonOut := fs.Bool("json", false, "json output")
 	outPath := fs.String("out", "", "write the report to this file instead of stdout")
 	if err := fs.Parse(args); err != nil {
@@ -73,6 +74,7 @@ func cmdDiagnose(args []string) int {
 		OffCPURatioThreshold: *offcpuRatio, FutexRatioThreshold: *futexRatio,
 		HBMFreePctThreshold:   *hbmFreePct,
 		DeviceTimeToleranceNS: int64(*deviceTolerance),
+		DeviceContainerID:     *deviceContainerID,
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "diagnose: %v\n", err)

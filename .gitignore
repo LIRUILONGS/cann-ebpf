@@ -7,3 +7,7 @@ coverage.out
 runs/
 __pycache__/
 *.pyc
+m3/mspti_collector/build/
+m3/mspti_collector/**/*.so
+m3/mspti_collector/**/*.so.*
+.tmp-mspti-inspect/

@@ -1,8 +1,9 @@
 # cann-ebpf 开发任务
 
-状态（2026-11-26，`0.6.0-m2` + M3-dev）：M0 完成；M1 host core 完成（`diagnose` 覆盖原 `top`/`why`）；
+状态（2026-11-26，`0.6.0-m2` + M3）：M0 完成；M1 host core 完成（`diagnose` 覆盖原 `top`/`why`）；
 M4 vLLM-Ascend host profile 与上下文协议完成，插件未激活；M2 已完成并上机验证；
-E 层 npu-smi 硬件指标完成并验证；M3 join 管线完成、生产端因 `msprof --pid` 段错误改走维护窗口；
+E 层 npu-smi 硬件指标完成并验证；M3 join 管线完成、in-process msPTI collector 与合成 ACL 验证完成；
+真实 V4/Orinfer 生产注入待维护窗口；
 M6 未完成；Orinfer 未运行验证；`execute_model` 函数级耗时本轮不做。
 
 ## P0 低层定位命令（已完成）
@@ -124,10 +125,9 @@ M1 的 8 个核心函数和 2088 spans 是历史基线。当前 37 个 host 探�
 
 ## M3 msPTI join
 
-状态（2026-11-26）：join 管线已完成并用合成时间线验证；生产端未接通。
+状态（2026-11-26）：join 管线与 in-process collector 已完成；合成 ACL 上机验证通过；真实 V4/Orinfer 注入待维护窗口。
 容器内有 CANN 9.0.1 `tools/mspti` 和 `msprof`，宿主只有驱动；
 **`msprof --pid` 三变体均段错误，动态 attach 路线不可用**（`docs/M3-FEASIBILITY.md`）。
-生产端改为容器内 in-process collector，需要维护窗口。
 
 - [x] M3.0 `msprof --pid` 动态采集可行性（结论：不可用，exit 139）
 - [x] `cann.device.v1` schema 与 device.jsonl 读取/校验
@@ -136,9 +136,13 @@ M1 的 8 个核心函数和 2088 spans 是历史基线。当前 37 个 host 探�
 - [x] `diagnose` 读取 device.jsonl，输出 device 证据与四类 verdict
 - [x] 真实 V4 host span + 合成 device.jsonl：7,794/7,794 匹配
 - [x] host 侧接入：`attach --device-jsonl` 导入 device/meta、抓 `pidmap.json`、封存 artifact
-- [ ] 容器内 in-process msPTI collector（C/Python），产出真实 device.jsonl（维护窗口；并行任务）
-- [ ] 已知 kernel 上验证 correlationId；95% 慢 Sync 匹配、偏差 <100µs
-- [ ] `docs/M3-VALIDATION.md`
+- [x] 容器内 in-process msPTI collector（C++），产出真实 `cann.device.v1`
+- [x] 合成 ACL 上验证 API/KERNEL/MEMCPY 与 correlationId
+- [x] 慢 Sync 匹配：final7 305/305（100%），`clock_offset_ns=761`（<100µs）
+- [x] 宿主侧 `pidmap.json`，进程退出后仍可 join（27 条 pid/tid）
+- [x] `docs/M3-COLLECTOR.md`、`docs/M3-VALIDATION.md`
+- [ ] 真实 V4/Orinfer 生产注入与 10–30 秒设备时间线（维护窗口）
+- [ ] 真实 HCCL 工作负载与 `Communication` correlationId 验证
 
 ## E 层 npu-smi 硬件指标
 

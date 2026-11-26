@@ -3,6 +3,7 @@ package device
 import (
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"cann-ebpf/internal/runlog"
@@ -26,6 +27,10 @@ type Options struct {
 	IdleThreshold   float64
 	CopyThreshold   float64
 	CommThreshold   float64
+	// PIDMap/TIDMap translate namespace-local collector ids to the host ids
+	// recorded by eBPF. They are only applied to API records.
+	PIDMap map[int]int
+	TIDMap map[int]int
 }
 
 func (o *Options) normalize() {
@@ -58,6 +63,8 @@ type Match struct {
 	EndNS         int64  `json:"end_ns"`
 	DurationNS    int64  `json:"duration_ns"`
 	OverlapNS     int64  `json:"overlap_ns"`
+	GapNS         int64  `json:"gap_ns,omitempty"`
+	Adjacent      bool   `json:"adjacent,omitempty"`
 	CorrelationID int64  `json:"correlation_id,omitempty"`
 }
 
@@ -105,8 +112,14 @@ type Report struct {
 	HostSpans          int             `json:"host_spans"`
 	DeviceSpans        int             `json:"device_spans"`
 	DeviceKinds        string          `json:"device_kinds"`
+	PIDMapApplied      bool            `json:"pid_map_applied,omitempty"`
+	PIDMapEntries      int             `json:"pid_map_entries,omitempty"`
 	MatchedHostSpans   int             `json:"matched_host_spans"`
 	MatchRate          float64         `json:"match_rate"`
+	SlowSyncSpans      int             `json:"slow_sync_spans,omitempty"`
+	MatchedSlowSync    int             `json:"matched_slow_sync_spans,omitempty"`
+	SlowSyncMatchRate  float64         `json:"slow_sync_match_rate,omitempty"`
+	AdjacentMatches    int             `json:"adjacent_matches,omitempty"`
 	TimeWindowFallback bool            `json:"time_window_fallback"`
 	ClockOffsetNS      int64           `json:"clock_offset_ns"`
 	Reasons            []ReasonCount   `json:"reasons"`
@@ -122,6 +135,9 @@ type Report struct {
 // says so explicitly.
 func Join(host []runlog.Span, dev []Span, opts Options) Report {
 	opts.normalize()
+	if len(opts.PIDMap) > 0 || len(opts.TIDMap) > 0 {
+		dev = TranslateIDs(dev, opts.PIDMap, opts.TIDMap)
+	}
 	report := Report{
 		Schema:      JoinReportSchemaV1,
 		HostSpans:   len(host),
@@ -131,6 +147,10 @@ func Join(host []runlog.Span, dev []Span, opts Options) Report {
 		Devices:     []DeviceSummary{},
 		Verdicts:    []VerdictCount{},
 		Hosts:       []HostResult{},
+	}
+	if len(opts.PIDMap) > 0 || len(opts.TIDMap) > 0 {
+		report.PIDMapApplied = true
+		report.PIDMapEntries = len(opts.PIDMap) + len(opts.TIDMap)
 	}
 	if len(dev) == 0 {
 		report.Warnings = append(report.Warnings, "没有 device span，无法做设备侧 join")
@@ -164,14 +184,26 @@ func Join(host []runlog.Span, dev []Span, opts Options) Report {
 	deviceIntervals := map[int][][2]int64{}
 	verdicts := map[string]int64{}
 	matched := 0
+	slowSyncSpans := 0
+	matchedSlowSync := 0
+	adjacentMatches := 0
 
 	for _, h := range host {
 		result := joinOne(h, apiByThread, deviceByCorr, allDevice, offset, opts)
 		if result.Matched {
 			matched++
 		}
+		if isSyncFunction(h.Function) && h.DurationNS >= opts.SlowThresholdNS {
+			slowSyncSpans++
+			if result.Matched {
+				matchedSlowSync++
+			}
+		}
 		reasons[result.Reason]++
 		for _, match := range result.Matches {
+			if match.Adjacent {
+				adjacentMatches++
+			}
 			summary := devices[match.DeviceID]
 			if summary == nil {
 				summary = &DeviceSummary{DeviceID: match.DeviceID}
@@ -208,8 +240,22 @@ func Join(host []runlog.Span, dev []Span, opts Options) Report {
 	}
 
 	report.MatchedHostSpans = matched
+	report.AdjacentMatches = adjacentMatches
 	if len(host) > 0 {
 		report.MatchRate = float64(matched) / float64(len(host))
+	}
+	if slowSyncSpans > 0 {
+		report.SlowSyncSpans = slowSyncSpans
+		report.MatchedSlowSync = matchedSlowSync
+		report.SlowSyncMatchRate = float64(matchedSlowSync) / float64(slowSyncSpans)
+		if report.SlowSyncMatchRate < 0.95 {
+			report.Warnings = append(report.Warnings, fmt.Sprintf("慢 Sync 匹配率 %.1f%% 低于 95%%", report.SlowSyncMatchRate*100))
+		}
+	}
+	if adjacentMatches > 0 {
+		report.Warnings = append(report.Warnings, fmt.Sprintf(
+			"%d 个设备区间与 host span 不重叠，但在 ±%dns 容差内按相邻区间计入关联；这些区间不贡献 busy 时间",
+			adjacentMatches, opts.TimeToleranceNS))
 	}
 	for reason, count := range reasons {
 		report.Reasons = append(report.Reasons, ReasonCount{Reason: reason, Count: count})
@@ -233,6 +279,11 @@ func Join(host []runlog.Span, dev []Span, opts Options) Report {
 		report.Warnings = append(report.Warnings, fmt.Sprintf("设备侧匹配率 %.1f%% 偏低，结论只能作为线索", report.MatchRate*100))
 	}
 	return report
+}
+
+func isSyncFunction(name string) bool {
+	return strings.HasPrefix(name, "aclrtSynchronizeStream") ||
+		strings.HasPrefix(name, "aclrtSynchronizeEvent")
 }
 
 func joinOne(h runlog.Span, apiByThread map[[2]int][]Span, deviceByCorr map[int64][]Span, allDevice []Span, offset int64, opts Options) HostResult {
@@ -290,11 +341,16 @@ func joinOne(h runlog.Span, apiByThread map[[2]int][]Span, deviceByCorr map[int6
 	for _, span := range correlated {
 		dStart, dEnd := span.StartNS-offset, span.EndNS-offset
 		overlap := overlapNS(start, end, dStart, dEnd)
-		if overlap <= 0 {
+		gap := intervalGapNS(start, end, dStart, dEnd)
+		if overlap <= 0 && gap > opts.TimeToleranceNS {
 			continue
 		}
 		match := toMatch(span, overlap)
 		match.StartNS, match.EndNS = dStart, dEnd
+		if overlap == 0 {
+			match.GapNS = gap
+			match.Adjacent = true
+		}
 		result.Matches = append(result.Matches, match)
 	}
 	if len(result.Matches) == 0 {
@@ -373,7 +429,18 @@ func fillHostMetrics(result *HostResult, start, end int64) {
 	})
 	var intervals [][2]int64
 	for _, match := range result.Matches {
-		intervals = append(intervals, [2]int64{match.StartNS, match.EndNS})
+		// busy 只统计 host span 窗口内的设备执行时间；相邻匹配没有重叠，
+		// 不能因为 kernel 区间本身而抬高 BusyPct。
+		clipStart, clipEnd := match.StartNS, match.EndNS
+		if clipStart < start {
+			clipStart = start
+		}
+		if clipEnd > end {
+			clipEnd = end
+		}
+		if clipEnd > clipStart {
+			intervals = append(intervals, [2]int64{clipStart, clipEnd})
+		}
 		switch match.Kind {
 		case KindKernel:
 			result.KernelNS += match.OverlapNS
@@ -436,6 +503,19 @@ func overlapNS(aStart, aEnd, bStart, bEnd int64) int64 {
 		return 0
 	}
 	return end - start
+}
+
+// intervalGapNS returns the distance between two half-open intervals. It is 0
+// when they overlap or touch. It is used only for correlationId-bound device
+// records, where a small gap is timestamp skew rather than a different call.
+func intervalGapNS(aStart, aEnd, bStart, bEnd int64) int64 {
+	if aEnd < bStart {
+		return bStart - aEnd
+	}
+	if bEnd < aStart {
+		return aStart - bEnd
+	}
+	return 0
 }
 
 func hostStart(s runlog.Span) int64 {
