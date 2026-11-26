@@ -129,3 +129,14 @@ cd build
 - `msptiActivityHccl` 无 correlationId，时间窗回退必须在报告中标注。
 - stop 等待 callback 超过 5 秒时只写 warning，不强行 `fclose`；此时 `callbacks_active` 会大于 0，
   证据目录不能当作完整归档。
+
+## 多进程输出模板（B1）
+
+`CANN_MSPTI_OUTPUT` 支持 `{pid}` 占位符：
+
+```text
+CANN_MSPTI_OUTPUT=/cache/cann-ebpf/device-{pid}.jsonl
+```
+
+每个继承 `LD_PRELOAD` 的 Worker 会写自己的文件，避免多进程竞争同一路径；
+验证后用 `scripts/b1_merge_device.py` 合并成单个 `device.jsonl` + meta。

@@ -1,0 +1,47 @@
+groups:
+  - name: cann-ebpf
+    rules:
+      - alert: CannEbpfDroppedEvents
+        expr: cann_ebpf_dropped_events_total > 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "cann-ebpf 丢事件（{{ $labels.run_id }}）"
+          description: "ringbuf dropped_events_total > 0，检查采样阈值与 ringbuf 大小。"
+
+      - alert: CannEbpfHbmPressure
+        expr: cann_ebpf_hardware_device_hbm_free_percent < 5
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "device {{ $labels.device }} HBM 余量 <5%"
+          description: "HBM free 低于 5%，可能导致新请求 OOM/排队。"
+
+      - alert: CannEbpfDeviceMatchLow
+        expr: cann_ebpf_device_match_rate > 0 and cann_ebpf_device_match_rate < 0.9
+        for: 15m
+        labels:
+          severity: info
+        annotations:
+          summary: "device join 匹配率 <90%"
+          description: "检查 pidmap、时钟偏移或 device.jsonl 是否缺失。"
+
+      - alert: CannEbpfHostBlockingHigh
+        expr: cann_ebpf_blocking_offcpu_ratio > 0.5
+        for: 15m
+        labels:
+          severity: info
+        annotations:
+          summary: "host off-CPU 比例 >50%"
+          description: "host 线程大量等待；结合 futex ratio 与 span 判断锁竞争/调度。"
+
+      - alert: CannEbpfExporterDown
+        expr: up{job="cann-ebpf"} == 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "cann-ebpf exporter 不可达"
+          description: "检查 metrics --listen 进程与端口。"

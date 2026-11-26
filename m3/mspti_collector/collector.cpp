@@ -1067,11 +1067,19 @@ __attribute__((constructor)) static void CannMsptiAutoStart() {
     if (output == nullptr || *output == '\0') {
         return;
     }
+    // {pid} lets a service-level LD_PRELOAD give every worker its own file;
+    // otherwise all ranks would race on one output path.
+    std::string output_path(output);
+    const std::string pid_token = "{pid}";
+    const auto pid_pos = output_path.find(pid_token);
+    if (pid_pos != std::string::npos) {
+        output_path.replace(pid_pos, pid_token.size(), std::to_string(static_cast<long long>(getpid())));
+    }
     const char *run_id = std::getenv("CANN_MSPTI_RUN_ID");
     const char *activities = std::getenv("CANN_MSPTI_ACTIVITIES");
     const uint64_t max_bytes = EnvU64("CANN_MSPTI_MAX_BYTES", 0);
     const int pid = static_cast<int>(EnvU64("CANN_MSPTI_PID", 0));
-    if (cann_mspti_start(output, run_id, activities, max_bytes, pid) == 0) {
+    if (cann_mspti_start(output_path.c_str(), run_id, activities, max_bytes, pid) == 0) {
         g_auto_started.store(true);
     }
 }

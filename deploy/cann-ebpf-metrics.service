@@ -1,0 +1,17 @@
+[Unit]
+Description=cann-ebpf Prometheus exporter (latest completed run)
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/opt/cann-ebpf/bin/cann-ebpf metrics --input /var/log/cann-ebpf/runs --listen 127.0.0.1:9101
+Restart=on-failure
+RestartSec=5s
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadOnlyPaths=/var/log/cann-ebpf
+
+[Install]
+WantedBy=multi-user.target

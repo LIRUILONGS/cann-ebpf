@@ -8,6 +8,9 @@
   不能安全注入，必然需要一次 V4 重启或备用实例。
 - 已准备：`m3/mspti_collector` 可从当前源码构建并通过 selftest；`attach --device-jsonl`
   可导入 collector 产物、抓 pidmap 并封存 artifact。
+- 进一步准备（2026-11-26）：`deploy/b1/stage-collector.sh --stage` 已把
+  `libcannmspti.so` 放到 `/data/cache/cann-ebpf/` 并生成 `/etc/cann-ebpf/collector.env`；
+  **未改 `/etc/vllm-ds4.env`、未重启 V4**。激活/回滚步骤见 `docs/B1-PREP.md`。
 - 需要：一次计划重启（把 wrapper 永久加到服务入口）或一台备用节点。
 
 ## B2 V4/Orinfer M5 A/B
@@ -31,6 +34,7 @@
   因此不在共享卡上执行。
 - 需要：备用节点/独占卡测试环境，或维护窗口内与 B1 一起做；同时验证
   `msptiActivityHccl` 无 correlationId、只有 `Communication` 有的降级路径。
+- 方案与命令模板已写入 `docs/B4-HCCL-PLAN.md`，未执行。
 
 ## 可以在不停机下继续做的
 

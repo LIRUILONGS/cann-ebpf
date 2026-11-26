@@ -94,3 +94,9 @@ sh scripts/make-release.sh --apply   --binary dist/cann-ebpf-linux-arm64-m3 \
 - `capture-once.sh` 固定 `vllm-ascend` profile，Orinfer 需覆盖 `PROFILE` 环境变量；
 - 服务单元是 oneshot 周期采集，不是常驻 daemon；常驻模式仍需后续实现；
 - 采集仍需要 root/CAP；非 root 部署未验证。
+
+## 7. 监控与 B1 准备
+
+- Prometheus/Grafana：见 `docs/OBSERVABILITY.md`，资产在 `deploy/prometheus/`、`deploy/grafana/`、`deploy/cann-ebpf-metrics.service`。
+- B1 collector 注入：见 `docs/B1-PREP.md`，脚本 `deploy/b1/stage-collector.sh` / `rollback-collector.sh`；当前只 stage，未改 V4 env、未重启。
+- B4 HCCL：见 `docs/B4-HCCL-PLAN.md`，需独占卡/备用节点，未在共享卡执行。

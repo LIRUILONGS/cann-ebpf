@@ -168,10 +168,10 @@ M1 的 8 个核心函数和 2088 spans 是历史基线。当前 37 个 host 探�
 
 维护窗口/受限项（V4 不停机）：
 
-- [ ] B1 V4 真实设备时间线注入（需一次重启或备用节点；见 `docs/B-STATUS.md`）
+- [~] B1 V4 真实设备时间线注入：lib + env fragment 已 stage 到 `/data/cache`、`/etc/cann-ebpf`；未改 V4 env、未重启；见 `docs/B1-PREP.md`
 - [~] B2 M5 V4/Orinfer A/B：V4 基线已采 1,765 spans；Orinfer 未运行，真实 A/B 待环境
 - [~] B3 固定负载吞吐门禁：在线 smoke 通过（客户端 +6.7%、CPU +0.06pp、0 dropped）；正式 ≤3% 待隔离/低峰
-- [ ] B4 真实 HCCL correlation：需独占卡/备用节点；共享卡 HBM 余量仅 6.3%，未执行
+- [~] B4 真实 HCCL correlation：方案与命令模板就绪（`docs/B4-HCCL-PLAN.md`）；需独占卡，未在共享卡执行
 
 ## M5 V4/Orinfer A/B（需要人工窗口）
 

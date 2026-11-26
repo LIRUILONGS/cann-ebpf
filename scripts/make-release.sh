@@ -31,6 +31,7 @@ cp "$BINARY" "$PKG/bin/cann-ebpf"
 cp "$ROOT"/profiles/*.yaml "$PKG/profiles/"
 cp "$ROOT/configs/base.yaml" "$PKG/configs/"
 cp "$ROOT"/deploy/*.sh "$ROOT"/deploy/*.service "$ROOT"/deploy/*.timer "$PKG/deploy/"
+cp -R "$ROOT/deploy/b1" "$ROOT/deploy/grafana" "$ROOT/deploy/prometheus" "$PKG/deploy/" 2>/dev/null || true
 cp "$ROOT"/scripts/*.py "$ROOT"/scripts/*.sh "$PKG/scripts/" 2>/dev/null || true
 cp "$ROOT"/docs/*.md "$PKG/docs/"
 cp -R "$ROOT/adapters/vllm_ascend" "$PKG/adapters/" 2>/dev/null || true
