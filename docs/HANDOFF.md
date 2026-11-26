@@ -11,11 +11,11 @@
 |---|---|
 | 本地工作区 | `C:\Users\liruilong\pentagi\cann-ebpf` |
 | Git 分支 | `main` |
-| 最新提交 | 见 `git log -1`（`diagnose`、M2 off-CPU/futex 及上机验证记录） |
+| 最新提交 | 见 `git log -1`（M3 A1/A2、diagnose/metrics、A3-A8 收尾） |
 | Git remote | 未配置；交接前建议先配置内部 Git 远程并推送 |
-| Linux/arm64 二进制（M3 + A1/A2） | `dist/cann-ebpf-linux-arm64-m3-a2` |
-| 二进制大小 | 见 `SHA256SUMS.txt` 与本次提交说明 |
-| 二进制 SHA-256 | 见 `dist/SHA256SUMS.txt` |
+| Linux/arm64 二进制（M3 + A1/A2） | `dist/cann-ebpf-linux-arm64-m3` |
+| 二进制大小 | `13,402,332` bytes |
+| 二进制 SHA-256 | `12fb457164710bc42a379a77ed04c7d9566a1c9c43d184f235ebd0ddf6160632` |
 | collector A2 产物 | `dist/cann-mspti-a2-20261126/`（`libcannmspti.so`、`cann-mspti-selftest`、`synthetic_acl`、`SHA256SUMS.txt`） |
 | collector A2 服务器副本 | `/root/cann-ebpf/cann-mspti-a2-20261126/` |
 | 历史已验证二进制 | `dist/cann-ebpf-linux-arm64-batch`（`0.5.0-m5`，上表 SHA 已替换为 M2 构建，旧包仍保留在 dist/） |

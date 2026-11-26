@@ -7,7 +7,13 @@ PREFIX=${PREFIX:-/opt/cann-ebpf}
 UNITDIR=${UNITDIR:-/etc/systemd/system}
 SOURCE_DIR=${SOURCE_DIR:-$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)}
 BINARY=${BINARY:-$SOURCE_DIR/dist/cann-ebpf-linux-arm64-m3}
+if [ ! -f "$BINARY" ] && [ -f "$SOURCE_DIR/bin/cann-ebpf" ]; then
+  BINARY=$SOURCE_DIR/bin/cann-ebpf
+fi
 CHECKSUMS=${CHECKSUMS:-$SOURCE_DIR/dist/SHA256SUMS.txt}
+if [ ! -f "$CHECKSUMS" ] && [ -f "$SOURCE_DIR/SHA256SUMS.txt" ]; then
+  CHECKSUMS=$SOURCE_DIR/SHA256SUMS.txt
+fi
 DRY_RUN=1
 ENABLE_TIMER=1
 
@@ -41,7 +47,7 @@ run() {
 [ -f "$BINARY" ] || { echo "binary not found: $BINARY" >&2; exit 4; }
 NAME=$(basename "$BINARY")
 if [ -f "$CHECKSUMS" ]; then
-  EXPECTED=$(awk -v name="$NAME" '$2 == name { print $1 }' "$CHECKSUMS" | head -1)
+  EXPECTED=$(awk -v name="$NAME" '$2 == name || $2 ~ ("(^|/)" name "$") { print $1; exit }' "$CHECKSUMS")
   if [ -n "$EXPECTED" ]; then
     ACTUAL=$(sha256sum "$BINARY" | awk '{ print $1 }')
     [ "$EXPECTED" = "$ACTUAL" ] || { echo "SHA-256 mismatch for $NAME" >&2; exit 7; }

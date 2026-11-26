@@ -163,6 +163,19 @@ warnings                   ""
 本地逐行 `json.loads` 校验：32,809 行全部为合法 `cann.device.v1` JSON，0 行损坏；
 `API=28,259`、`MEMCPY=3,640`、`KERNEL=910`，与 `records_written` 一致。
 
+### 3.7 收尾独立复验（2026-11-26）
+
+提交后从当前仓库源码重新验证，不依赖 `.analysis/` 临时产物：
+
+- 容器内 `docker cp` 当前 `m3/mspti_collector` 源码，`cmake -DBUILD_SELFTEST=ON && make -j4` 通过；
+  `./cann-mspti-selftest` 输出 `all selftests passed`；
+- 当前 Go 二进制对 `final7` 证据复跑 `diagnose`：`spans=11859`、`matchable 305/305（100%）`、
+  `slow sync 305/305（100%）`、`reasons: not_applicable=11554 / ok=305`、`clock_offset=-18359ns`；
+- 同一证据 `metrics` 输出 `cann_ebpf_spans_total=11859`、`device_match_rate=1`、
+  `device_slow_sync_match_rate=1`；
+- 最终二进制 V4 5 秒回归：850 spans、8 个 Worker、`blocking attached=4 failed=0`、
+  uprobe 残留 0、health 200→200、墙钟 12.2s（setup 1.2s + capture 5s + teardown 1.1s + exit ~5s）。
+
 ## 4. 验证步骤（可复现）
 
 ```bash

@@ -80,6 +80,96 @@ M3 合成 ACL 验证；M3 生产注入仍待维护窗口，详见 `docs/M3-FEASI
 仓库已包含 `internal/probes/bpf/cann.bpf.o`。修改 `cann.bpf.c` 后必须用 clang BPF
 target 重新生成对象；不要依赖目标机现编，也不要修改目标进程或 CANN 库。
 
+## 部署
+
+### 依赖
+
+**目标机（Linux/arm64）零运行时依赖。** `cann-ebpf` 是纯 Go 静态编译的单一二进制，
+不依赖 `libc`、Python、容器运行时或 CANN 头文件；Prometheus exporter 也编译在同一二进制里。
+
+前提是内核编译选项（`CONFIG_BPF_SYSCALL`、`CONFIG_UPROBE_EVENTS`、`CONFIG_DEBUG_INFO_BTF`、
+`CONFIG_PERF_EVENTS`），openEuler 5.10 默认满足。正式运行前用 `preflight` 确认：
+
+```bash
+/opt/cann-ebpf/bin/cann-ebpf preflight
+```
+
+**构建机（Windows）** 需要 Go 1.24 和 clang（LLVM BPF target，仅修改
+`internal/probes/bpf/cann.bpf.c` 时需要）。日常只改 Go 代码时不需要 clang，
+也不需要 CANN 头文件或 Linux 交叉编译工具链。
+
+### 发布包与安装
+
+`sh scripts/make-release.sh --apply` 生成：
+
+```text
+cann-ebpf-<version>/
+├── bin/cann-ebpf             # 静态编译的 Linux/arm64 二进制
+├── profiles/                 # vllm-ascend / orinfer / cann-generic
+├── configs/base.yaml
+├── deploy/                   # install/uninstall/upgrade、capture-once、systemd unit+timer
+├── scripts/                  # 采集、smoke、开销、M5 对比
+├── docs/
+├── adapters/vllm_ascend/
+├── m3/mspti_collector/       # 容器内 msPTI collector 源码（不含构建产物）
+├── SHA256SUMS.txt
+└── README.md
+```
+
+安装到 `/opt/cann-ebpf`（默认 dry-run，`--apply` 才写主机，会校验 SHA-256）：
+
+```bash
+tar xzf cann-ebpf-0.6.0-m2-m3.tar.gz
+cd cann-ebpf-0.6.0-m2-m3
+sh deploy/install.sh --dry-run
+sh deploy/install.sh --apply --binary bin/cann-ebpf
+```
+
+安装后布局：`/opt/cann-ebpf/{bin/cann-ebpf,capture-once.sh,profiles,configs,docs}`，
+以及 `/etc/systemd/system/cann-ebpf.{service,timer}`（每 5 分钟一次短采集）。
+
+卸载/升级：
+
+```bash
+sh deploy/uninstall.sh --dry-run --keep-data
+sh deploy/uninstall.sh --apply --keep-data
+
+sh deploy/upgrade.sh --dry-run --binary bin/cann-ebpf
+sh deploy/upgrade.sh --apply   --binary bin/cann-ebpf
+```
+
+升级会先备份到 `/opt/cann-ebpf.bak.<UTC>`，失败自动回滚。完整说明见 `docs/OPERATIONS.md`。
+
+### 使用模式
+
+`cann-ebpf` 是**诊断工具**，不是常驻监控 agent；推荐按需短窗口运行：
+
+```bash
+# 1. 环境预检（15 项检查）
+./cann-ebpf preflight
+
+# 2. 发现目标进程和符号（只读）
+./cann-ebpf discover --profile vllm-ascend --profiles-dir profiles --dry-run
+
+# 3. 采集（按需，短窗口）
+./cann-ebpf attach --pid auto --profile vllm-ascend --profiles-dir profiles \
+  --duration 10s --blocking on --output runs/ebpf-$(date -u +%Y%m%dT%H%M%SZ)
+
+# 4. 分析结果（只读，不需要目标机）
+./cann-ebpf diagnose --input runs/ebpf-... --last 5s
+./cann-ebpf metrics --input runs --listen 127.0.0.1:9101
+```
+
+一键采集脚本：
+
+```bash
+# 采集 + health/service 检查 + 不覆盖证据目录
+PROFILE=vllm-ascend LABEL=v4 DURATION=10s BINARY=./cann-ebpf sh scripts/m5_capture.sh
+# 或服务器自动采集（带 uprobe 残留检查）
+OUT="/root/cann-ebpf/runs/ebpf-auto-$(date -u +%Y%m%dT%H%M%SZ)" \
+DURATION=10s sh scripts/server_auto_capture.sh
+```
+
 ## CLI
 
 ```text
@@ -235,16 +325,10 @@ OUT="runs/ebpf-m2-$(date -u +%Y%m%dT%H%M%SZ)"
 `msprof --pid` 动态采集已确认段错误，真实 device 数据需要容器内 in-process collector + 维护窗口。
 详见 `docs/M3-DEVICE-JOIN.md`、`docs/M3-FEASIBILITY.md`、`docs/WORK-SPLIT.md`。
 
-### 自动服务器采集
+### 一键采集
 
-```bash
-OUT="/root/cann-ebpf/m4-20261126/runs/ebpf-auto-10s-$(date -u +%Y%m%dT%H%M%SZ)" \
-DURATION=10s \
-sh scripts/server_auto_capture.sh
-```
-
-脚本拒绝覆盖已有证据目录，并记录开始/结束时间、退出码、前后 health、service
-状态和 uprobe 残留。
+部署部分的 `server_auto_capture.sh` 封装了完整的采集流程（health 检查、
+数据收集、服务确认、uprobe 残留检查），详见[部署 > 使用模式](#部署)。
 
 ## 输出
 
