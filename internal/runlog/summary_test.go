@@ -155,6 +155,42 @@ func TestBuildSummaryFromReaderAndValidation(t *testing.T) {
 	}
 }
 
+func TestBuildSummaryContextCoverageAndBatches(t *testing.T) {
+	batchAttribution := &Attribution{Level: "batch", Source: "test", Confidence: 1}
+	threadAttribution := &Attribution{Level: "thread", Source: "ebpf_tid", Confidence: 0.3}
+	spans := []Span{
+		{Function: "A", Category: "sync", DurationNS: 10, PID: 1, BatchID: "b-1", RequestIDs: []string{"r-2", "r-1"}, Attribution: batchAttribution, RunID: "run-1", SpanID: "s-1"},
+		{Function: "A", Category: "sync", DurationNS: 20, PID: 1, BatchID: "b-1", RequestIDs: []string{"r-3"}, Attribution: batchAttribution, RunID: "run-1", SpanID: "s-2"},
+		{Function: "B", Category: "submit", DurationNS: 30, PID: 2, Attribution: threadAttribution, RunID: "run-1", SpanID: "s-3"},
+	}
+	summary, err := BuildSummary(spans)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if summary.Coverage.BatchSpans != 2 || summary.Coverage.ThreadSpans != 1 || summary.Coverage.UniqueBatches != 1 || summary.Coverage.UniqueRequests != 3 {
+		t.Fatalf("coverage = %+v", summary.Coverage)
+	}
+	if len(summary.PIDs) != 2 || summary.PIDs[0].PID != 1 || summary.PIDs[0].BatchSpans != 2 || summary.PIDs[1].ThreadSpans != 1 {
+		t.Fatalf("pids = %+v", summary.PIDs)
+	}
+	if len(summary.Attribution) != 2 {
+		t.Fatalf("attribution = %+v", summary.Attribution)
+	}
+	if len(summary.TopSlowBatches) != 1 {
+		t.Fatalf("batches = %+v", summary.TopSlowBatches)
+	}
+	batch := summary.TopSlowBatches[0]
+	if batch.BatchID != "b-1" || batch.Count != 2 || batch.TotalNS != 30 || len(batch.RequestIDs) != 3 || len(batch.PIDs) != 1 || batch.PIDs[0] != 1 {
+		t.Fatalf("batch = %+v", batch)
+	}
+	markdown := summary.Markdown()
+	for _, wanted := range []string{"上下文与归因覆盖", "Top slow batch", "| `b-1` |"} {
+		if !strings.Contains(markdown, wanted) {
+			t.Fatalf("markdown missing %q:\n%s", wanted, markdown)
+		}
+	}
+}
+
 func summarySpan(function, category string, duration int64) Span {
 	return Span{Function: function, Category: category, DurationNS: duration}
 }

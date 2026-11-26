@@ -6,22 +6,24 @@ import (
 	"time"
 
 	"cann-ebpf/internal/config"
+	"cann-ebpf/internal/contextfeed"
 	"cann-ebpf/internal/runlog"
 )
 
-const DefaultToolVersion = "0.1.0-m1"
+const DefaultToolVersion = "0.4.0-m4"
 
 type Options struct {
-	Context     context.Context
-	PIDs        []int
-	ProcRoot    string
-	Profile     *config.Document
-	ProfileName string
-	Duration    time.Duration
-	OutputDir   string
-	ToolVersion string
-	MaxSpans    int
-	MinDuration time.Duration
+	Context       context.Context
+	PIDs          []int
+	ProcRoot      string
+	Profile       *config.Document
+	ProfileName   string
+	Duration      time.Duration
+	OutputDir     string
+	ToolVersion   string
+	MaxSpans      int
+	MinDuration   time.Duration
+	ContextSocket string
 }
 
 type Attachment struct {
@@ -38,6 +40,7 @@ type Attachment struct {
 type Result struct {
 	Started      time.Time
 	Ended        time.Time
+	EventCount   uint64
 	Spans        []runlog.Span
 	JSONLPath    string
 	ManifestPath string
@@ -45,6 +48,7 @@ type Result struct {
 	Attachments  []Attachment
 	Warnings     []string
 	Stats        probeStats
+	Context      contextfeed.Snapshot
 }
 
 func (o *Options) normalize() error {

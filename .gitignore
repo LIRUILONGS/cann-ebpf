@@ -5,3 +5,5 @@ dist/
 *.out
 coverage.out
 runs/
+__pycache__/
+*.pyc

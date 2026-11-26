@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cann-ebpf-vllm-ascend"
+version = "0.2.0"
+description = "vLLM general plugin for cann-ebpf batch/request attribution"
+requires-python = ">=3.9"
+dependencies = []
+
+[project.entry-points."vllm.general_plugins"]
+cann_ebpf = "cann_ebpf_vllm.plugin:register"
+
+[tool.setuptools.packages.find]
+include = ["cann_ebpf_vllm*"]

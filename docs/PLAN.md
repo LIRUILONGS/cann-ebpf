@@ -51,7 +51,9 @@
 
 - Orinfer Phase A 没有稳定 request hook，只能到 `thread`；回答“哪个请求”需要反向代理/USDT/访问日志，见 8.3。
 - msPTI 的 `correlationId`、`shared`/`exclusive` 行为尚未实测；不成立时只能退化为时间窗 join，置信度下降。
-- vLLM-Ascend 当前未运行；M4 只做 profile 和 discovery，不启动真实 `vllm serve`。
+- vLLM-Ascend（V4，`vllm-ds4-8905.service`）已运行；M4 已完成 profile、10 个目标的自动 discovery、
+  37 个 host uprobe 和 10 秒实采。vLLM general plugin 代码完成但未装入/重启激活；逐 request 时长、
+  msPTI 设备侧关联仍未实现。
 - 不开 msPTI 时，eBPF 只能看 host 入队/阻塞，看不到 kernel/memcpy/HCCL 的设备执行时间。
 - `aclrtRecordEvent` 的设备侧完成时间 `t_d` 不在 eBPF 中；只能用 msPTI 或 event 查询补。
 - DCMI 字段、HCCL activity 是否可用，需在目标机实测；不可用时按 7.1 的降级路径处理。
@@ -395,11 +397,13 @@ Phase A 默认选“仅 tid”，报告明确写 `attribution.level=thread`；�
 
 - `batch_begin/end` 必须成对；缺失时标记 `context_incomplete`。
 - 一个 batch 可以有多个 `request_ids`，一个 ACL span 可以对应整个 batch。
-- 并发 batch 重叠时，按 `pid + tid + 时间窗` 再匹配；仍不唯一就标记 `attribution.level=batch_window`。
+- 并发 batch 重叠时，按 `pid + tid + 时间窗` 再匹配；仍不唯一时保留 `attribution.level=batch`，
+  并在 `attribution.verdict` 标记 `batch_window`，不能把多个 batch 的 request 列表合并。
 - 插件事件可能晚于 span 到达；agent 保留最近 30s 的 span 做回填，超过窗口标记 `context_late`，不能把晚到的 batch 硬贴到旧 span 上。
 - 事件缓冲上限 10 万条；超出丢最旧并计数。
 - 插件崩溃不影响 eBPF 采集；agent 只失去上下文，不丢 host span。
-- socket 权限 0600、owner root；agent 用 `SO_PEERCRED` 校验对端 pid/uid，只接受目标进程树的连接。
+- socket 目录 0755、socket 默认 0600；目标为非 root 时 chown 到目标 UID/GID 并设为 0660。
+  agent 用 `SO_PEERCRED` 校验对端 uid，只接受 collector UID 和已发现目标 UID 的连接。
 - 事件必须做 schema 校验；未知 `type` 丢弃并计数，不让插件把任意字段写进 agent。
 - `request_id`/`batch_id` 只作为关联键，不写入 prompt、响应内容或图片。
 
@@ -690,12 +694,17 @@ cann-ebpf/
 - 时钟校准、时间窗匹配、correlationId join。
 - 对齐率报告；未匹配原因分类。
 
-### M4：vLLM-Ascend profile（2–3 天）
+### M4：vLLM-Ascend host profile（host 部分已完成）
 
-- 新增 `vllm-ascend.yaml`。
-- launch 层 auto discovery。
-- vLLM batch/request 插件骨架（Unix socket/USDT）。
-- 先在空容器或测试实例验证 discovery；真实 `vllm serve` 按资源情况启动。
+- [x] 新增 `vllm-ascend.yaml`，覆盖 8 个 Worker_TP、frontend、EngineCore。
+- [x] launch 层 auto discovery；最终 V4 discovery 为 10 个目标，每目标 37/148 符号。
+- [x] 37 个 host uprobe、74 个 entry/exit 程序；10 秒实采 6,991 spans，dropped 0。
+- [x] batch 上下文协议与 vLLM general plugin 代码；5 个 Python 单测通过。
+- [x] 非 root UID/GID socket 权限与 `protocol_smoke` 验证。
+- [ ] 插件安装、重启激活和真实 vLLM request 路径验证；需要单独维护窗口。
+- [ ] 逐 request 时长拆分；当前只有 batch 窗口归因。
+
+设备侧 join 仍属于 M3；不能用 M4 的 host span 代替 kernel/memcpy/HCCL 执行时间。
 
 ### M5：V4/vLLM A/B（等你授权，1–2 天）
 
@@ -805,32 +814,34 @@ watchdog：
 - 不输出 prompt/tensor/buffer 内容。
 - 错误码原样记录，不只写“失败”。
 
-## 16. 当前环境基线（2026-11-25）
+## 16. 当前环境基线（2026-11-26）
 
 | 项 | 值 |
 |---|---|
 | 主机 | `bms-84865758`，openEuler 5.10，aarch64 |
 | NPU | 8 × 910B2，每卡 64GB HBM |
-| Orinfer | PID 1691816，容器 `orinfer-cann920`，host network，端口 8000 |
-| CANN | 9.2.0，`libascendcl.so`、`libruntime.so`、`libmspti.so` |
+| Orinfer | 当前未运行；历史 PID `1691816` 已不存在；等待单独授权窗口 |
+| V4 / vLLM-Ascend | `vllm-ds4-8905.service` active；8 Worker_TP + frontend + EngineCore |
+| CANN（V4 目标进程） | `9.0.1`，目标 root 下 `libascendcl.so`、`libruntime.so`、`libhccl.so`、`libtorch_npu.so` |
+| CANN（宿主/msPTI 规划） | `9.2.0`，包含 `libmspti.so`；M3 尚未初始化 |
 | msPTI 头 | `/usr/local/Ascend/cann-9.2.0/tools/mspti/include` |
 | 当前 HBM | 约 60.9/65.5 GB 每卡，余量约 4.6GB |
-| vLLM-Ascend | 当前未运行；`vllm-*` systemd 单元均 disabled/inactive |
 | CPU 推理 | 5 个 llama.cpp systemd 服务（embedding/reranker/4B/8B） |
 
-当前状态下不启动真实 vLLM-Ascend，避免抢 Orinfer 的 HBM；M4 只做 profile 和 discovery 验证，真实 `vllm serve` 等资源窗口。
+当前 V4 已运行并完成 10 秒 host 采集；本轮没有停止、重启或修改 V4。vLLM 插件仍未激活，
+激活需要单独维护窗口。Orinfer 当前未运行，不能用 V4 进程替代 Orinfer 验证。
 
 ### 16.1 兼容性矩阵
 
 | 项 | 已验证/目标 | 说明 |
 |---|---|---|
 | 内核 | 5.10.0-136 openEuler aarch64 | ringbuf/BPF/UPROBE 均可用 |
-| CANN | 9.2.0 | `aclrtLaunchKernel`、`aclrtQueryEventStatus` 存在 |
+| CANN | 9.2.0（宿主）/ 9.0.1（V4 目标进程） | `aclrtLaunchKernel`、`aclrtQueryEventStatus` 存在；两个版本不能混写 |
 | CANN 8.x | 目标兼容 | 可能无 `aclrtLaunchKernel`，自动降级到 Runtime/msPTI |
 | msPTI | CANN 9.2 `tools/mspti/include` | API/kernel/memcpy/HCCL activity |
 | 驱动/固件 | 以 `npu-smi info` 为准 | 兼容性矩阵必须记录 driver/firmware，不只记 CANN |
-| Orinfer | 0.3.14 | 当前 PID 1691816，容器 `orinfer-cann920` |
-| vLLM-Ascend | 0.30/0.32 镜像 | 当前未运行，按 profile 适配 |
+| Orinfer | 0.3.14 | 历史版本；当前未运行，等待授权窗口 |
+| vLLM-Ascend | `v0.23.0rc1-nonroot` | V4 已运行并完成 host 采集；插件代码完成但未激活 |
 | Python 插件 | 3.10/3.11 | 仅 vLLM 插件需要 |
 | 架构 | aarch64 | 参数从 `pt_regs` 取，返回从 x0 取 |
 | DCMI | 待验证 | 需要 `libdcmi.so`/`/dev/davinci_manager`；不可用时降级 npu-exporter |

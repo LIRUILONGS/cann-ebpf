@@ -16,7 +16,7 @@ import (
 	"cann-ebpf/internal/elfutil"
 )
 
-const toolVersion = "0.1.0-m1"
+const toolVersion = "0.4.0-m4"
 
 func main() {
 	os.Exit(run(os.Args[1:]))
@@ -261,6 +261,7 @@ func chooseTargets(procs []*discovery.Process, profiles []*discovery.LoadedProfi
 	selector := all[0].Profile.Doc.Spec.Target.Selector
 	switch selector {
 	case "first_match", "":
+		all = expandProcessTree(all, procs)
 		all = all[:1]
 	case "all_matching":
 	case "explicit":
@@ -278,6 +279,50 @@ func chooseTargets(procs []*discovery.Process, profiles []*discovery.LoadedProfi
 		return nil, fmt.Errorf("matched %d processes, exceeds max_processes=%d; narrow selector", len(all), limit)
 	}
 	return all, nil
+}
+
+// expandProcessTree adds descendants of already-matched targets when the
+// profile requests process-tree coverage. The descendants are still subject to
+// symbol resolution and are reported as explicit per-PID warnings if they do
+// not map a CANN library.
+func expandProcessTree(matched []target, procs []*discovery.Process) []target {
+	if len(matched) == 0 {
+		return matched
+	}
+	profile := matched[0].Profile
+	targetSpec := profile.Doc.Spec.Target
+	if !targetSpec.ProcessTree && !targetSpec.IncludeChildren {
+		return matched
+	}
+	seen := make(map[int]struct{}, len(matched))
+	for _, target := range matched {
+		seen[target.Process.PID] = struct{}{}
+	}
+	changed := true
+	for changed {
+		changed = false
+		for _, proc := range procs {
+			if _, ok := seen[proc.PID]; ok {
+				continue
+			}
+			if _, ok := seen[proc.PPID]; !ok {
+				continue
+			}
+			seen[proc.PID] = struct{}{}
+			matched = append(matched, target{
+				Process: proc,
+				Profile: profile,
+				Match: discovery.MatchResult{
+					Matched:      true,
+					Confidence:   0.5,
+					MatchedRules: []string{fmt.Sprintf("process_tree: parent=%d", proc.PPID)},
+				},
+			})
+			changed = true
+		}
+	}
+	sort.Slice(matched, func(i, j int) bool { return matched[i].Process.PID < matched[j].Process.PID })
+	return matched
 }
 
 func inspect(t target, baseWarnings []string) discoverResult {

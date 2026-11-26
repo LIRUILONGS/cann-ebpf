@@ -13,7 +13,7 @@ typedef unsigned long long __u64;
 #define BPF_MAP_TYPE_HASH 1
 #define BPF_MAP_TYPE_ARRAY 2
 #define BPF_MAP_TYPE_RINGBUF 27
-#define MAX_FUNCTIONS 16
+#define MAX_FUNCTIONS 64
 
 struct bpf_map_def {
 	__u32 type;
@@ -83,7 +83,7 @@ struct bpf_map_def SEC("maps") probe_stats = {
 	.type = BPF_MAP_TYPE_ARRAY,
 	.key_size = sizeof(__u32),
 	.value_size = sizeof(struct probe_stats),
-	.max_entries = 1,
+	.max_entries = MAX_FUNCTIONS,
 };
 
 static void *(*bpf_map_lookup_elem)(void *map, const void *key) = (void *)1;
@@ -97,10 +97,9 @@ static void *(*bpf_ringbuf_reserve)(void *ringbuf, __u64 size,
 				    __u64 flags) = (void *)131;
 static void (*bpf_ringbuf_submit)(void *data, __u64 flags) = (void *)132;
 
-static __always_inline struct probe_stats *stats_value(void)
+static __always_inline struct probe_stats *stats_value(__u32 func_id)
 {
-	__u32 zero = 0;
-	return bpf_map_lookup_elem(&probe_stats, &zero);
+	return bpf_map_lookup_elem(&probe_stats, &func_id);
 }
 
 static __always_inline struct probe_cfg *cfg_value(__u32 func_id)
@@ -119,7 +118,7 @@ static __always_inline int on_entry(__u32 func_id)
 	struct inflight_value value = {
 		.start_ns = bpf_ktime_get_ns(),
 	};
-	struct probe_stats *stats = stats_value();
+	struct probe_stats *stats = stats_value(func_id);
 	struct probe_cfg *cfg = cfg_value(func_id);
 
 	if (!cfg || !cfg->enabled) {
@@ -146,7 +145,7 @@ static __always_inline int on_exit(__u32 func_id)
 		.tid = (__u32)pid_tgid,
 		.func_id = func_id,
 	};
-	struct probe_stats *stats = stats_value();
+	struct probe_stats *stats = stats_value(func_id);
 	struct inflight_value *value = bpf_map_lookup_elem(&inflight, &key);
 
 	if (!value) {
@@ -198,44 +197,48 @@ static __always_inline int on_exit(__u32 func_id)
 	return 0;
 }
 
-SEC("uprobe/enter_aclrtSynchronizeStream")
-int enter_aclrtSynchronizeStream(void *ctx) { return on_entry(1); }
-SEC("uretprobe/exit_aclrtSynchronizeStream")
-int exit_aclrtSynchronizeStream(void *ctx) { return on_exit(1); }
+#define CANN_PROBE(id, name)                                                    \
+	SEC("uprobe/enter_" #name)                                               \
+	int enter_##name(void *ctx) { return on_entry(id); }                      \
+	SEC("uretprobe/exit_" #name)                                             \
+	int exit_##name(void *ctx) { return on_exit(id); }
 
-SEC("uprobe/enter_aclrtSynchronizeStreamWithTimeout")
-int enter_aclrtSynchronizeStreamWithTimeout(void *ctx) { return on_entry(2); }
-SEC("uretprobe/exit_aclrtSynchronizeStreamWithTimeout")
-int exit_aclrtSynchronizeStreamWithTimeout(void *ctx) { return on_exit(2); }
-
-SEC("uprobe/enter_aclrtSynchronizeEvent")
-int enter_aclrtSynchronizeEvent(void *ctx) { return on_entry(3); }
-SEC("uretprobe/exit_aclrtSynchronizeEvent")
-int exit_aclrtSynchronizeEvent(void *ctx) { return on_exit(3); }
-
-SEC("uprobe/enter_aclrtRecordEvent")
-int enter_aclrtRecordEvent(void *ctx) { return on_entry(4); }
-SEC("uretprobe/exit_aclrtRecordEvent")
-int exit_aclrtRecordEvent(void *ctx) { return on_exit(4); }
-
-SEC("uprobe/enter_aclrtStreamWaitEvent")
-int enter_aclrtStreamWaitEvent(void *ctx) { return on_entry(5); }
-SEC("uretprobe/exit_aclrtStreamWaitEvent")
-int exit_aclrtStreamWaitEvent(void *ctx) { return on_exit(5); }
-
-SEC("uprobe/enter_aclrtMemcpyAsync")
-int enter_aclrtMemcpyAsync(void *ctx) { return on_entry(6); }
-SEC("uretprobe/exit_aclrtMemcpyAsync")
-int exit_aclrtMemcpyAsync(void *ctx) { return on_exit(6); }
-
-SEC("uprobe/enter_aclrtLaunchKernel")
-int enter_aclrtLaunchKernel(void *ctx) { return on_entry(7); }
-SEC("uretprobe/exit_aclrtLaunchKernel")
-int exit_aclrtLaunchKernel(void *ctx) { return on_exit(7); }
-
-SEC("uprobe/enter_HcclAllReduce")
-int enter_HcclAllReduce(void *ctx) { return on_entry(8); }
-SEC("uretprobe/exit_HcclAllReduce")
-int exit_HcclAllReduce(void *ctx) { return on_exit(8); }
+CANN_PROBE(1, aclrtSynchronizeStream)
+CANN_PROBE(2, aclrtSynchronizeStreamWithTimeout)
+CANN_PROBE(3, aclrtSynchronizeEvent)
+CANN_PROBE(4, aclrtRecordEvent)
+CANN_PROBE(5, aclrtStreamWaitEvent)
+CANN_PROBE(6, aclrtQueryEventStatus)
+CANN_PROBE(7, aclrtQueryEventWaitStatus)
+CANN_PROBE(8, aclrtQueryEvent)
+CANN_PROBE(9, aclrtSetDevice)
+CANN_PROBE(10, aclrtGetDevice)
+CANN_PROBE(11, aclrtSetCurrentContext)
+CANN_PROBE(12, aclrtCreateStream)
+CANN_PROBE(13, aclrtDestroyStream)
+CANN_PROBE(14, aclrtCreateEvent)
+CANN_PROBE(15, aclrtCreateEventWithFlag)
+CANN_PROBE(16, aclrtResetEvent)
+CANN_PROBE(17, aclrtDestroyEvent)
+CANN_PROBE(18, aclrtMalloc)
+CANN_PROBE(19, aclrtFree)
+CANN_PROBE(20, aclrtMallocHost)
+CANN_PROBE(21, aclrtFreeHost)
+CANN_PROBE(22, aclrtHostRegister)
+CANN_PROBE(23, aclrtHostUnregister)
+CANN_PROBE(24, aclrtGetMemInfo)
+CANN_PROBE(25, rtMemGetInfoEx)
+CANN_PROBE(26, aclrtMemcpyAsync)
+CANN_PROBE(27, aclrtLaunchKernel)
+CANN_PROBE(28, rtKernelLaunch)
+CANN_PROBE(29, rtKernelLaunchWithFlagV2)
+CANN_PROBE(30, rtMemcpyAsync)
+CANN_PROBE(31, HcclAllReduce)
+CANN_PROBE(32, HcclAlltoAll)
+CANN_PROBE(33, HcclAllGather)
+CANN_PROBE(34, HcclReduceScatter)
+CANN_PROBE(35, HcclBroadcast)
+CANN_PROBE(36, HcclSend)
+CANN_PROBE(37, HcclRecv)
 
 char _license[] SEC("license") = "GPL";

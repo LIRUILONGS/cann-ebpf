@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"sort"
+	"strings"
 )
 
 const SpanSchemaV1 = "cann.span.v1"
@@ -16,17 +17,24 @@ var spanKnownFields = map[string]struct{}{
 	"run_id":         {},
 	"profile":        {},
 	"ts_ns":          {},
+	"start_ns":       {},
+	"end_ns":         {},
 	"pid":            {},
 	"tid":            {},
 	"tgid":           {},
 	"comm":           {},
 	"thread_name":    {},
 	"function":       {},
+	"api":            {},
 	"library":        {},
 	"category":       {},
 	"duration_ns":    {},
 	"ret":            {},
 	"phase":          {},
+	"dev_id":         {},
+	"batch_id":       {},
+	"request_ids":    {},
+	"attribution":    {},
 	"span_id":        {},
 	"seq":            {},
 	"unknown_fields": {},
@@ -39,6 +47,16 @@ type UnknownField struct {
 	Value json.RawMessage `json:"value"`
 }
 
+// Attribution records how a span was associated with a higher-level unit.
+// The observed fields remain untouched; this is an explicitly derived context
+// annotation.
+type Attribution struct {
+	Level      string  `json:"level"`
+	Source     string  `json:"source,omitempty"`
+	Confidence float64 `json:"confidence,omitempty"`
+	Verdict    string  `json:"verdict,omitempty"`
+}
+
 // Span is the stable JSONL record for one host-observed CANN event.
 //
 // PID is the process ID (Linux thread-group ID), TID is the thread ID, and
@@ -49,17 +67,24 @@ type Span struct {
 	RunID         string         `json:"run_id"`
 	Profile       string         `json:"profile"`
 	TsNS          int64          `json:"ts_ns"`
+	StartNS       int64          `json:"start_ns,omitempty"`
+	EndNS         int64          `json:"end_ns,omitempty"`
 	PID           int            `json:"pid"`
 	TID           int            `json:"tid"`
 	TGID          int            `json:"tgid"`
 	Comm          string         `json:"comm,omitempty"`
 	ThreadName    string         `json:"thread_name,omitempty"`
 	Function      string         `json:"function"`
+	APIName       string         `json:"api,omitempty"`
 	Library       string         `json:"library"`
 	Category      string         `json:"category"`
 	DurationNS    int64          `json:"duration_ns"`
 	Ret           *int64         `json:"ret,omitempty"`
 	Phase         string         `json:"phase,omitempty"`
+	DevID         int            `json:"dev_id,omitempty"`
+	BatchID       string         `json:"batch_id,omitempty"`
+	RequestIDs    []string       `json:"request_ids,omitempty"`
+	Attribution   *Attribution   `json:"attribution,omitempty"`
 	SpanID        string         `json:"span_id"`
 	Seq           uint64         `json:"seq"`
 	UnknownFields []UnknownField `json:"unknown_fields,omitempty"`
@@ -111,6 +136,28 @@ func (s Span) Validate() error {
 	}
 	if s.DurationNS < 0 {
 		return fmt.Errorf("duration_ns must not be negative")
+	}
+	if s.StartNS < 0 || s.EndNS < 0 {
+		return fmt.Errorf("start_ns and end_ns must not be negative")
+	}
+	if s.EndNS > 0 && s.StartNS > 0 && s.EndNS < s.StartNS {
+		return fmt.Errorf("end_ns %d precedes start_ns %d", s.EndNS, s.StartNS)
+	}
+	if s.DevID < 0 {
+		return fmt.Errorf("dev_id must not be negative")
+	}
+	if s.Attribution != nil {
+		if s.Attribution.Level == "" {
+			return fmt.Errorf("attribution.level is empty")
+		}
+		if s.Attribution.Confidence < 0 || s.Attribution.Confidence > 1 {
+			return fmt.Errorf("attribution.confidence must be in [0,1]")
+		}
+	}
+	for i, requestID := range s.RequestIDs {
+		if strings.TrimSpace(requestID) == "" {
+			return fmt.Errorf("request_ids[%d] is empty", i)
+		}
 	}
 	if s.SpanID == "" {
 		return fmt.Errorf("span_id is empty")

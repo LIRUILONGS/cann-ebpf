@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"cann-ebpf/internal/contextfeed"
 	"cann-ebpf/internal/discovery"
 	"cann-ebpf/internal/elfutil"
 	"cann-ebpf/internal/runlog"
@@ -30,8 +31,37 @@ func Run(opts Options) (result *Result, retErr error) {
 	functions, warnings := requestedFunctions(opts.Profile)
 	result.Warnings = append(result.Warnings, warnings...)
 	if len(functions) == 0 {
-		return nil, fmt.Errorf("profile selects no supported M1 functions")
+		return nil, fmt.Errorf("profile selects no supported host probe functions")
 	}
+
+	var contextFeed *contextfeed.Feed
+	contextClosed := false
+	if opts.ContextSocket != "" {
+		startOptions, credentials := contextSocketOptions(opts.ProcRoot, opts.PIDs)
+		feed, feedWarnings, feedErr := contextfeed.StartWithOptions(opts.ContextSocket, startOptions)
+		contextFeed = feed
+		result.Warnings = append(result.Warnings, feedWarnings...)
+		if feedErr != nil {
+			result.Warnings = append(result.Warnings, "context attribution disabled: "+feedErr.Error())
+		} else {
+			result.Warnings = append(result.Warnings, "context attribution listening on "+opts.ContextSocket)
+			if startOptions.Chown {
+				result.Warnings = append(result.Warnings, fmt.Sprintf(
+					"context socket owner=%d:%d allowed_uids=%v target_credentials=%d",
+					startOptions.OwnerUID, startOptions.OwnerGID, startOptions.AllowedUIDs, len(credentials)))
+			}
+		}
+	}
+	closeContext := func() {
+		if contextFeed == nil || contextClosed {
+			return
+		}
+		contextClosed = true
+		_ = contextFeed.Close()
+		result.Warnings = append(result.Warnings, contextFeed.Warnings()...)
+		result.Context = contextFeed.Snapshot()
+	}
+	defer closeContext()
 
 	collection, err := loadCollection()
 	if err != nil {
@@ -87,18 +117,21 @@ func Run(opts Options) (result *Result, retErr error) {
 
 	var spanMu sync.Mutex
 	var captured []runlog.Span
+	spanLimitReached := false
 	sink := func(span runlog.Span) {
 		spanMu.Lock()
 		defer spanMu.Unlock()
 		if len(captured) < opts.MaxSpans {
 			captured = append(captured, span)
+		} else {
+			spanLimitReached = true
 		}
 	}
 	consumeDone := make(chan struct{})
 	var consumeErr error
 	go func() {
 		defer close(consumeDone)
-		consumeErr = consumeRing(reader, functionLibraries, writer, sink)
+		consumeErr = consumeRing(reader, functionLibraries, writer, sink, contextFeed)
 	}()
 
 	runCtx, cancel := context.WithCancel(opts.Context)
@@ -124,7 +157,13 @@ func Run(opts Options) (result *Result, retErr error) {
 	}
 	spanMu.Lock()
 	result.Spans = append([]runlog.Span(nil), captured...)
+	limitReached := spanLimitReached
 	spanMu.Unlock()
+	if limitReached {
+		result.Warnings = append(result.Warnings, fmt.Sprintf(
+			"in-memory span buffer reached max_spans=%d; JSONL remains complete and summary is derived from JSONL", opts.MaxSpans))
+	}
+	closeContext()
 	if consumeErr != nil && runErr == nil {
 		runErr = consumeErr
 	}
@@ -144,14 +183,18 @@ func Run(opts Options) (result *Result, retErr error) {
 		if opts.OutputDir != "" {
 			result.SummaryPath = filepath.Join(opts.OutputDir, "summary.json")
 		}
+		for _, warning := range result.Warnings {
+			_ = writer.AddWarning(warning)
+		}
 		closeErr := writer.CloseWithError(runErr)
+		result.EventCount = writer.SnapshotManifest().EventCount
 		writer = nil
 		if closeErr != nil {
 			result.Warnings = append(result.Warnings, "close output: "+closeErr.Error())
 		}
 	}
 	if opts.OutputDir != "" {
-		if summary, summaryErr := runlog.BuildSummary(result.Spans); summaryErr == nil {
+		if summary, summaryErr := runlog.BuildSummaryFromFile(result.JSONLPath); summaryErr == nil {
 			if summaryErr = summary.WriteJSON(filepath.Join(opts.OutputDir, "summary.json")); summaryErr == nil {
 				summaryErr = summary.WriteMarkdown(filepath.Join(opts.OutputDir, "summary.md"))
 			}
@@ -176,6 +219,14 @@ func attachTargets(opts Options, collection *ebpf.Collection, functions []Functi
 	var warnings []string
 	functionLibraries := map[string]string{}
 	attached := map[string]struct{}{}
+	pidAttached := map[int]int{}
+	type cachedLibrary struct {
+		executable *link.Executable
+		symbols    []elfutil.Symbol
+		warnings   []string
+		err        error
+	}
+	libraryCache := map[string]*cachedLibrary{}
 	var globs []string
 	if opts.Profile != nil {
 		globs = opts.Profile.Spec.Cann.LibraryGlobs
@@ -193,17 +244,30 @@ func attachTargets(opts Options, collection *ebpf.Collection, functions []Functi
 				warnings = append(warnings, fmt.Sprintf("pid %d library %s: %s", pid, library.Path, library.Note))
 				continue
 			}
-			symbols, symbolWarnings, err := elfutil.Resolve(library.RealPath, names)
-			warnings = append(warnings, symbolWarnings...)
-			if err != nil {
-				warnings = append(warnings, fmt.Sprintf("pid %d library %s: %v", pid, library.RealPath, err))
+			cacheKey := fmt.Sprintf("%d:%d:%s", library.Inode, library.Size, filepath.Base(library.RealPath))
+			cached := libraryCache[cacheKey]
+			if cached == nil {
+				cached = &cachedLibrary{}
+				cached.symbols, cached.warnings, cached.err = elfutil.Resolve(library.RealPath, names)
+				if cached.err == nil {
+					cached.executable, cached.err = link.OpenExecutable(library.RealPath)
+				}
+				libraryCache[cacheKey] = cached
+			}
+			if len(cached.warnings) > 0 {
+				for _, warning := range cached.warnings {
+					if !strings.Contains(warning, "symbol not found") && !strings.Contains(warning, "not found") {
+						warnings = append(warnings, fmt.Sprintf("library %s: %s", library.RealPath, warning))
+					}
+				}
+				cached.warnings = nil
+			}
+			if cached.err != nil {
+				warnings = append(warnings, fmt.Sprintf("pid %d library %s: %v", pid, library.RealPath, cached.err))
 				continue
 			}
-			executable, err := link.OpenExecutable(library.RealPath)
-			if err != nil {
-				warnings = append(warnings, fmt.Sprintf("pid %d library %s: %v", pid, library.RealPath, err))
-				continue
-			}
+			symbols := cached.symbols
+			executable := cached.executable
 			for _, symbol := range symbols {
 				if !symbol.Found || symbol.Error != "" {
 					continue
@@ -248,9 +312,17 @@ func attachTargets(opts Options, collection *ebpf.Collection, functions []Functi
 				linkMu.Unlock()
 				attachment.Entry, attachment.Exit = true, true
 				attached[key] = struct{}{}
+				pidAttached[pid]++
 				functionLibraries[fn.Name] = library.RealPath
 				attachments = append(attachments, attachment)
 			}
+		}
+	}
+	for _, pid := range opts.PIDs {
+		if count := pidAttached[pid]; count == 0 {
+			warnings = append(warnings, fmt.Sprintf("pid %d: no requested CANN symbol could be attached", pid))
+		} else if count < len(functions) {
+			warnings = append(warnings, fmt.Sprintf("pid %d: attached %d/%d requested CANN functions", pid, count, len(functions)))
 		}
 	}
 	sort.Slice(attachments, func(i, j int) bool {
@@ -262,7 +334,7 @@ func attachTargets(opts Options, collection *ebpf.Collection, functions []Functi
 	return attachments, functionLibraries, warnings
 }
 
-func consumeRing(reader *ringbuf.Reader, functionLibraries map[string]string, writer *runlog.Writer, sink func(runlog.Span)) error {
+func consumeRing(reader *ringbuf.Reader, functionLibraries map[string]string, writer *runlog.Writer, sink func(runlog.Span), contextFeed *contextfeed.Feed) error {
 	for {
 		reader.SetDeadline(time.Now().Add(250 * time.Millisecond))
 		record, err := reader.Read()
@@ -286,14 +358,25 @@ func consumeRing(reader *ringbuf.Reader, functionLibraries map[string]string, wr
 		}
 		span := runlog.Span{
 			TsNS:       int64(event.StartNS),
+			StartNS:    int64(event.StartNS),
+			EndNS:      int64(event.StartNS + event.DurNS),
 			PID:        int(event.PID),
 			TID:        int(event.TID),
 			TGID:       int(event.PID),
 			Function:   fn.Name,
+			APIName:    fn.Name,
 			Library:    functionLibraries[fn.Name],
 			Category:   fn.Category,
 			DurationNS: int64(event.DurNS),
 			Phase:      "host",
+		}
+		if contextFeed != nil {
+			span = contextFeed.Enrich(span)
+		} else {
+			span.Attribution = &runlog.Attribution{
+				Level: "thread", Source: "ebpf_tid", Confidence: 0.3,
+				Verdict: "no_plugin_context",
+			}
 		}
 		if writer != nil {
 			if err := writer.WriteSpan(span); err != nil {

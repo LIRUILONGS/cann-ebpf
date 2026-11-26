@@ -2,6 +2,10 @@
 
 日期：2026-11-26
 
+> 历史基线说明：本文的 8 个核心函数、18 个目标和 2,088 spans 是 M1 口径。M4 已改为
+> `comm` 稳定匹配的 10 个目标、37 个 host 探针，并在 V4 完成 10 秒 6,991 spans 实测；
+> 最新结果见 `docs/M4-VALIDATION.md`。Orinfer 仍未运行验证。
+
 ## 1. 范围
 
 本交付包含 M1 profile、smoke 脚本和已实测的 host 采集路径；不修改目标服务、容器、CANN 库或驱动，不重启 V4/Orinfer。默认 smoke 只执行 `validate` 和 `discover --dry-run`；只有显式传 `--attach` 才允许短时 attach。

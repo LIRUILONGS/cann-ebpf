@@ -20,9 +20,38 @@ var supportedFunctions = []Function{
 	{ID: 3, Name: "aclrtSynchronizeEvent", Category: "sync"},
 	{ID: 4, Name: "aclrtRecordEvent", Category: "event"},
 	{ID: 5, Name: "aclrtStreamWaitEvent", Category: "event"},
-	{ID: 6, Name: "aclrtMemcpyAsync", Category: "submit"},
-	{ID: 7, Name: "aclrtLaunchKernel", Category: "submit"},
-	{ID: 8, Name: "HcclAllReduce", Category: "hccl"},
+	{ID: 6, Name: "aclrtQueryEventStatus", Category: "event"},
+	{ID: 7, Name: "aclrtQueryEventWaitStatus", Category: "event"},
+	{ID: 8, Name: "aclrtQueryEvent", Category: "event"},
+	{ID: 9, Name: "aclrtSetDevice", Category: "handle"},
+	{ID: 10, Name: "aclrtGetDevice", Category: "handle"},
+	{ID: 11, Name: "aclrtSetCurrentContext", Category: "handle"},
+	{ID: 12, Name: "aclrtCreateStream", Category: "handle"},
+	{ID: 13, Name: "aclrtDestroyStream", Category: "handle"},
+	{ID: 14, Name: "aclrtCreateEvent", Category: "handle"},
+	{ID: 15, Name: "aclrtCreateEventWithFlag", Category: "handle"},
+	{ID: 16, Name: "aclrtResetEvent", Category: "handle"},
+	{ID: 17, Name: "aclrtDestroyEvent", Category: "handle"},
+	{ID: 18, Name: "aclrtMalloc", Category: "memory"},
+	{ID: 19, Name: "aclrtFree", Category: "memory"},
+	{ID: 20, Name: "aclrtMallocHost", Category: "memory"},
+	{ID: 21, Name: "aclrtFreeHost", Category: "memory"},
+	{ID: 22, Name: "aclrtHostRegister", Category: "memory"},
+	{ID: 23, Name: "aclrtHostUnregister", Category: "memory"},
+	{ID: 24, Name: "aclrtGetMemInfo", Category: "memory"},
+	{ID: 25, Name: "rtMemGetInfoEx", Category: "memory"},
+	{ID: 26, Name: "aclrtMemcpyAsync", Category: "submit"},
+	{ID: 27, Name: "aclrtLaunchKernel", Category: "submit"},
+	{ID: 28, Name: "rtKernelLaunch", Category: "submit"},
+	{ID: 29, Name: "rtKernelLaunchWithFlagV2", Category: "submit"},
+	{ID: 30, Name: "rtMemcpyAsync", Category: "submit"},
+	{ID: 31, Name: "HcclAllReduce", Category: "hccl"},
+	{ID: 32, Name: "HcclAlltoAll", Category: "hccl"},
+	{ID: 33, Name: "HcclAllGather", Category: "hccl"},
+	{ID: 34, Name: "HcclReduceScatter", Category: "hccl"},
+	{ID: 35, Name: "HcclBroadcast", Category: "hccl"},
+	{ID: 36, Name: "HcclSend", Category: "hccl"},
+	{ID: 37, Name: "HcclRecv", Category: "hccl"},
 }
 
 func SupportedFunctions() []Function {
@@ -78,7 +107,7 @@ func requestedFunctions(profile *config.Document) ([]Function, []string) {
 	sort.Strings(unsupported)
 	var warnings []string
 	if len(unsupported) > 0 {
-		warnings = append(warnings, fmt.Sprintf("M1 has no probe program for: %s", strings.Join(unsupported, ", ")))
+		warnings = append(warnings, fmt.Sprintf("no compiled host probe for: %s", strings.Join(unsupported, ", ")))
 	}
 	return out, warnings
 }
@@ -97,6 +126,10 @@ func probeConfigFor(profile *config.Document, fn Function) (enabled bool, sample
 		probe = profile.Spec.Probes.Submit
 	case "hccl":
 		probe = profile.Spec.Probes.Hccl
+	case "memory":
+		probe = profile.Spec.Probes.Memory
+	case "handle":
+		probe = profile.Spec.Probes.Handle
 	}
 	enabled = probe.IsEnabled()
 	if probe.SampleRate > 0 {

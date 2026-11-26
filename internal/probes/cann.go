@@ -10,7 +10,7 @@ import (
 	"github.com/cilium/ebpf"
 )
 
-const bpfFunctionSlots = 16
+const bpfFunctionSlots = 64
 
 type probeConfig struct {
 	Enabled       uint32
@@ -75,20 +75,33 @@ func configureProbeMaps(collection *ebpf.Collection, profile *config.Document, o
 	if !ok {
 		return fmt.Errorf("BPF map probe_stats not found")
 	}
-	if err := statsMap.Update(uint32(0), probeStats{}, ebpf.UpdateAny); err != nil {
-		return fmt.Errorf("reset probe_stats: %w", err)
+	for slot := uint32(0); slot < bpfFunctionSlots; slot++ {
+		if err := statsMap.Update(slot, probeStats{}, ebpf.UpdateAny); err != nil {
+			return fmt.Errorf("reset probe_stats[%d]: %w", slot, err)
+		}
 	}
 	return nil
 }
 
 func readProbeStats(collection *ebpf.Collection) (probeStats, error) {
-	var stats probeStats
+	var total probeStats
 	mapRef, ok := collection.Maps["probe_stats"]
 	if !ok {
-		return stats, fmt.Errorf("BPF map probe_stats not found")
+		return total, fmt.Errorf("BPF map probe_stats not found")
 	}
-	if err := mapRef.Lookup(uint32(0), &stats); err != nil {
-		return stats, err
+	for slot := uint32(0); slot < bpfFunctionSlots; slot++ {
+		var stats probeStats
+		if err := mapRef.Lookup(slot, &stats); err != nil {
+			return total, fmt.Errorf("lookup probe_stats[%d]: %w", slot, err)
+		}
+		total.Entries += stats.Entries
+		total.Exits += stats.Exits
+		total.Emitted += stats.Emitted
+		total.Filtered += stats.Filtered
+		total.RingbufLost += stats.RingbufLost
+		total.MissingInflight += stats.MissingInflight
+		total.Disabled += stats.Disabled
+		total.InflightUpdateErrors += stats.InflightUpdateErrors
 	}
-	return stats, nil
+	return total, nil
 }

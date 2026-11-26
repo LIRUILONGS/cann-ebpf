@@ -74,7 +74,7 @@
 
 | # | 缺口 | 说明 |
 |---|---|---|
-| P2-1 | vLLM 插件与 vLLM 版本兼容矩阵 | vLLM scheduler/plugin API 变化快；需 pin 0.30/0.32 并做 shim |
+| P2-1 | vLLM 插件与 vLLM 版本兼容矩阵 | 当前 V4 镜像为 `v0.23.0rc1-nonroot`；插件已按 `NPUModelRunner.execute_model` 适配，但仍需在真实激活窗口验证，并为后续版本做 shim |
 | P2-2 | Grafana dashboard JSON | 当前只有面板清单，没有可导入 JSON |
 | P2-3 | OTLP exporter schema | M6 才做；需定义 span/metric 映射 |
 | P2-4 | 火焰图/stack folded | 目前只有 off-CPU 聚合；排障需要 folded stack |

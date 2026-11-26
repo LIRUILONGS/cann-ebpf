@@ -87,6 +87,49 @@ func TestSpanValidateOwnershipAndRequiredFields(t *testing.T) {
 	}
 }
 
+func TestSpanValidateContextAttribution(t *testing.T) {
+	span := Span{
+		Schema:     SpanSchemaV1,
+		RunID:      "run-1",
+		Profile:    "vllm-ascend",
+		TsNS:       100,
+		StartNS:    100,
+		EndNS:      200,
+		PID:        100,
+		TID:        101,
+		TGID:       100,
+		Function:   "aclrtSynchronizeStream",
+		APIName:    "aclrtSynchronizeStream",
+		Category:   "sync",
+		DurationNS: 100,
+		BatchID:    "batch-1",
+		RequestIDs: []string{"request-1"},
+		Attribution: &Attribution{
+			Level: "batch", Source: "vllm_general_plugin", Confidence: 1, Verdict: "batch_window",
+		},
+		SpanID: "span-1",
+		Seq:    1,
+	}
+	if err := span.Validate(); err != nil {
+		t.Fatalf("valid contextual span: %v", err)
+	}
+	invalid := span
+	invalid.Attribution = &Attribution{Level: "batch", Confidence: 2}
+	if err := invalid.Validate(); err == nil {
+		t.Fatal("expected attribution confidence outside [0,1] to fail")
+	}
+	invalid = span
+	invalid.EndNS = 99
+	if err := invalid.Validate(); err == nil {
+		t.Fatal("expected reversed span window to fail")
+	}
+	invalid = span
+	invalid.RequestIDs = []string{"request-1", "  "}
+	if err := invalid.Validate(); err == nil {
+		t.Fatal("expected blank request_id to fail")
+	}
+}
+
 func TestReadSpansPreservesUnknownAndReportsLine(t *testing.T) {
 	body := `{"schema":"cann.span.v1","function":"f","category":"sync","duration_ns":1,"extra":{"x":1}}
 

@@ -13,15 +13,12 @@ spec:
     #   1 x frontend（cmdline 含 vllm serve）
     #   1 x VLLM::EngineCor（kernel comm 最长 15 字符，不能写成 EngineCore）
     # 进程树和 include_children 覆盖后续 fork；all_matching 覆盖当前已经存在的 worker。
+    # 不把 libascendcl.so 作为硬匹配条件：frontend/EngineCore 可能不直接映射
+    # 该库，attach 阶段会按 PID 解析符号并明确告警，而不是伪造覆盖。
     any:
       - comm: "VLLM::Worker_TP"
       - comm: "VLLM::EngineCor"
-      - cmdline_contains: vllm
-      - cmdline_contains: vllm_ascend
-      - maps_contains: libtorch_npu.so
-      - container_image_contains: vllm-ascend
-    all:
-      - maps_contains: libascendcl.so
+      - comm: vllm
     exclude:
       - comm: orinfer
       - cmdline_contains: start-orinfer.sh
@@ -100,6 +97,13 @@ spec:
       enabled: true
       mode: full
       min_duration_us: 500
+    # event/stream handle 生命周期是关联键，不是性能结论；DestroyEvent 在
+    # 稳态下非常高频，按 1/128 采样，避免证据被单一生命周期调用淹没。
+    handle:
+      enabled: true
+      mode: sample
+      sample_rate: 128
+      min_duration_us: 0
     submit:
       enabled: true
       mode: sample
