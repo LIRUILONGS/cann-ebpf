@@ -56,8 +56,8 @@
   msPTI 设备侧关联仍未实现。
 - 不开 msPTI 时，eBPF 只能看 host 入队/阻塞，看不到 kernel/memcpy/HCCL 的设备执行时间。
 - `aclrtRecordEvent` 的设备侧完成时间 `t_d` 不在 eBPF 中；只能用 msPTI 或 event 查询补。
-- M2 的 `sched_switch`/`futex` 代码已完成并有单测，但未在真实内核 attach 验证；`offcpu_ns`/`futex_ns`
-  目前是代码能力，不是已验证结论。
+- M2 的 `sched_switch`/`futex` 已实现并在 V4 与合成锁竞争目标上验证；`offcpu_ns`/`futex_ns` 只覆盖
+  最外层 CANN span 的 host 阻塞，不能当成 request 延迟或 NPU 时间。
 - DCMI 字段、HCCL activity 是否可用，需在目标机实测；不可用时按 7.1 的降级路径处理。
 - 当前每卡 HBM 余量约 4.6GB，不能为验证 vLLM 硬起一个抢 HBM 的实例。
 
@@ -693,11 +693,10 @@ cann-ebpf/
 - 计算 `offcpu_ns`、`futex_ns`。
 - 输出 `host_lock_contention` / `launch_starvation` 初版。
 
-状态（2026-11-26）：`sched_switch` + `futex_wait` kprobe、`offcpu_ns`/`futex_ns` span 字段、
-`--blocking auto|on|off`、主/blocking collection 分离加载、`diagnose` 的 host 判定均已实现并有单测；
-**尚未在真实内核 attach 验证**，因此 `host_lock_contention` 目前是代码能力，不是已验证结论。
-`pthread_mutex_lock` uprobe 暂不实现。`launch_starvation` 仍需设备侧证据，M2 本身不下该结论。
-详见 `docs/M2-OFFCPU.md`。
+状态（2026-11-26）：`sched_switch` + futex syscall tracepoint、`offcpu_ns`/`futex_ns` span 字段、
+`--blocking auto|on|off`、主/blocking collection 分离加载、`diagnose` 的 host 判定均已实现并有单测，
+且已在 V4 生产服务和合成锁竞争目标上验证。`launch_starvation` 仍需设备侧证据，M2 本身不下该结论。
+详见 `docs/M2-OFFCPU.md` 与 `docs/M2-VALIDATION.md`。
 
 ### M3：msPTI join（3–5 天）
 

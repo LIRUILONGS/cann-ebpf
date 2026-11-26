@@ -1,8 +1,8 @@
 # cann-ebpf 开发任务
 
 状态（2026-11-26，`0.6.0-m2`）：M0 完成；M1 host core 完成（`diagnose` 覆盖原 `top`/`why` 初版的只读定位）；
-M4 的 vLLM-Ascend host profile 与上下文协议完成，vLLM 插件代码完成但未激活；M2 代码+单测完成、未上机；
-M3、M6 未完成；Orinfer 未运行验证；`execute_model` 函数级耗时本轮不做。
+M4 的 vLLM-Ascend host profile 与上下文协议完成，vLLM 插件代码完成但未激活；M2 已完成并上机验证
+（V4 10 秒 + 合成锁竞争）；M3、M6 未完成；Orinfer 未运行验证；`execute_model` 函数级耗时本轮不做。
 
 ## P0 低层定位命令（已完成）
 
@@ -76,20 +76,22 @@ M1 的 8 个核心函数和 2088 spans 是历史基线。当前 37 个 host 探�
 ## M2 off-CPU 与锁归因（代码完成，未上机）
 
 - [x] `sched_switch` tracepoint 累计线程 off-CPU
-- [x] `futex_wait` / `futex_wait_requeue_pi` kprobe 累计 futex 等待
+- [x] `sys_enter_futex` / `sys_exit_futex` tracepoint 累计 futex 等待（`futex_wait` kprobe 覆盖不足，已弃用）
 - [x] `offcpu_ns` / `futex_ns` 写入标准 span；区分“未测量”与“测得 0”
-- [x] 嵌套调用快照（8 层）与漏配对复位（64 层）
+- [x] 只测最外层 span；entry 清陈旧 since；`sched_process_exit` 清理 tid 状态；漏配对/深度泄漏防护
 - [x] 主 uprobe collection 与 blocking collection 分离加载，blocking 失败不影响 host span
 - [x] `attach --blocking auto|on|off`；按 profile `probes.sched/futex` 默认值
-- [x] `diagnose` 输出 `host_lock_contention` / `host_blocked_non_futex` / `host_cpu_running`
-- [x] 单测：48 字节事件解码、测量 flag、模式解析、BPF 程序类型
-- [ ] 真实内核 verifier/attach（预期 `offcpu=true futex=true failed=0`）
-- [ ] 合成 pthread mutex 竞争对照
-- [ ] V4 10 秒短窗口 + `/health`/service/残留检查
-- [ ] 10 秒窗口开销基线（sched_switch 为全系统 tracepoint）
+- [x] `diagnose` 输出 `host_lock_contention` / `host_blocked_non_futex` / `host_cpu_running`，排除 `>duration` 无效样本
+- [x] 单测：48 字节事件解码、测量 flag、模式解析、BPF 程序类型、无效样本排除
+- [x] 真实内核 verifier/attach：`blocking mode=on offcpu=true futex=true attached=4 failed=0`
+- [x] 合成 pthread mutex 竞争：off-CPU 99.7%、futex 99.9%，`host_lock_contention` 1.00
+- [x] V4 10 秒短窗口：7,561 spans、无效样本 0、health 200/200、service active/active、残留 0
+- [x] `--blocking off`：无 blocking 字段，服务状态不变
+- [ ] 10 秒窗口开销基线（sched_switch 为全系统 tracepoint）；长跑前仍未量化
 - [ ] 暂不实现 `pthread_mutex_lock` uprobe（由 futex 等待覆盖主要锁场景）
 
-验证步骤见 `docs/M2-OFFCPU.md`；在完成上机验证前，不得把 M2 数字写成已验证事实。
+完整证据见 `docs/M2-VALIDATION.md`。M2 数字来自 2026-11-26 的真实验证；嵌套 span 不采样，
+不能把缺 blocking 字段当成“没有阻塞”。
 
 ## 纯 eBPF vLLM batch 标准采集
 

@@ -329,6 +329,53 @@ func TestLoadMissingInput(t *testing.T) {
 	}
 }
 
+func TestBlockingDropsImpossibleSamples(t *testing.T) {
+	spans := testSpans()
+	huge := int64(5000) // s1 duration is 1000
+	spans[0].FutexNS = &huge
+	report, err := Build(newInput(spans), Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Blocking.InvalidSamples != 1 {
+		t.Fatalf("invalid samples = %d", report.Blocking.InvalidSamples)
+	}
+	if report.Blocking.FutexNS != 0 || report.Blocking.FutexRatio != 0 {
+		t.Fatalf("invalid futex leaked into ratio: %+v", report.Blocking)
+	}
+	if report.Blocking.OffCPUNS != 800 || !report.Blocking.Measured {
+		t.Fatalf("valid offcpu sample was dropped: %+v", report.Blocking)
+	}
+	if !contains(report.Unknowns, "大于 span duration") {
+		t.Fatalf("unknowns = %v", report.Unknowns)
+	}
+	if len(report.Verdicts) != 1 || report.Verdicts[0].Verdict != "host_blocked_non_futex" {
+		t.Fatalf("verdicts = %+v", report.Verdicts)
+	}
+}
+
+func TestBlockingAllSamplesInvalid(t *testing.T) {
+	spans := testSpans()
+	over := int64(5000)
+	spans[0].OffCPUNS = &over
+	spans[0].FutexNS = &over
+	spans[1].OffCPUNS = nil
+	spans[1].FutexNS = nil
+	report, err := Build(newInput(spans), Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Blocking.Measured {
+		t.Fatalf("measured should be false when all samples are invalid: %+v", report.Blocking)
+	}
+	if len(report.Verdicts) != 1 || report.Verdicts[0].Verdict != "blocking_unknown" {
+		t.Fatalf("verdicts = %+v", report.Verdicts)
+	}
+	if !contains(report.Unknowns, "blocking 采样全部不可用") {
+		t.Fatalf("unknowns = %v", report.Unknowns)
+	}
+}
+
 func contains(values []string, substr string) bool {
 	for _, value := range values {
 		if strings.Contains(value, substr) {

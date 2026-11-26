@@ -191,17 +191,18 @@ type BatchSummary struct {
 // BlockingSummary aggregates host-side off-CPU and futex samples for the
 // population where blocking matters (sync spans when present, else all spans).
 type BlockingSummary struct {
-	Measured      bool     `json:"measured"`
-	Population    string   `json:"population"`
-	Spans         int64    `json:"spans"`
-	SampledSpans  int64    `json:"sampled_spans"`
-	WallNS        int64    `json:"wall_ns"`
-	OffCPUNS      int64    `json:"offcpu_ns"`
-	FutexNS       int64    `json:"futex_ns"`
-	OffCPURatio   float64  `json:"offcpu_ratio"`
-	FutexRatio    float64  `json:"futex_ratio"`
-	NestedWarning string   `json:"nested_warning,omitempty"`
-	Evidence      []string `json:"evidence,omitempty"`
+	Measured       bool     `json:"measured"`
+	Population     string   `json:"population"`
+	Spans          int64    `json:"spans"`
+	SampledSpans   int64    `json:"sampled_spans"`
+	InvalidSamples int64    `json:"invalid_samples"`
+	WallNS         int64    `json:"wall_ns"`
+	OffCPUNS       int64    `json:"offcpu_ns"`
+	FutexNS        int64    `json:"futex_ns"`
+	OffCPURatio    float64  `json:"offcpu_ratio"`
+	FutexRatio     float64  `json:"futex_ratio"`
+	NestedWarning  string   `json:"nested_warning,omitempty"`
+	Evidence       []string `json:"evidence,omitempty"`
 }
 
 type Verdict struct {
@@ -468,14 +469,15 @@ func aggregate(report *Report, spans []runlog.Span, opts Options) {
 		}
 		fa.durs = append(fa.durs, span.DurationNS)
 		fa.total += span.DurationNS
-		if span.OffCPUNS != nil || span.FutexNS != nil {
+		offcpu, futex, _ := validBlockingSample(span)
+		if offcpu != nil || futex != nil {
 			fa.samples++
 		}
-		if span.OffCPUNS != nil {
-			fa.offcpu += *span.OffCPUNS
+		if offcpu != nil {
+			fa.offcpu += *offcpu
 		}
-		if span.FutexNS != nil {
-			fa.futex += *span.FutexNS
+		if futex != nil {
+			fa.futex += *futex
 		}
 
 		ca := catGroups[span.Category]
@@ -615,20 +617,27 @@ func buildBlocking(spans []runlog.Span, opts Options) BlockingSummary {
 			continue
 		}
 		summary.Spans++
-		if span.OffCPUNS == nil && span.FutexNS == nil {
+		offcpu, futex, invalid := validBlockingSample(span)
+		if offcpu == nil && futex == nil {
+			if invalid {
+				summary.InvalidSamples++
+			}
 			continue
+		}
+		if invalid {
+			summary.InvalidSamples++
 		}
 		summary.SampledSpans++
 		summary.Measured = true
 		summary.WallNS += span.DurationNS
 		var total int64
-		if span.OffCPUNS != nil {
-			summary.OffCPUNS += *span.OffCPUNS
-			total += *span.OffCPUNS
+		if offcpu != nil {
+			summary.OffCPUNS += *offcpu
+			total += *offcpu
 		}
-		if span.FutexNS != nil {
-			summary.FutexNS += *span.FutexNS
-			total += *span.FutexNS
+		if futex != nil {
+			summary.FutexNS += *futex
+			total += *futex
 		}
 		if span.SpanID != "" {
 			evidence = append(evidence, struct {
@@ -654,6 +663,29 @@ func buildBlocking(spans []runlog.Span, opts Options) BlockingSummary {
 		summary.Evidence = append(summary.Evidence, evidence[i].spanID)
 	}
 	return summary
+}
+
+// validBlockingSample drops physically impossible values: off-CPU or futex
+// time cannot exceed the span's own wall duration. Such samples indicate
+// cross-call contamination (for example a reused tid) or a clock problem and
+// must not silently enter ratios. Valid fields of a partially bad span are
+// still kept, and invalid reports whether any field was discarded.
+func validBlockingSample(span runlog.Span) (offcpu, futex *int64, invalid bool) {
+	if span.OffCPUNS != nil {
+		if *span.OffCPUNS >= 0 && *span.OffCPUNS <= span.DurationNS {
+			offcpu = span.OffCPUNS
+		} else {
+			invalid = true
+		}
+	}
+	if span.FutexNS != nil {
+		if *span.FutexNS >= 0 && *span.FutexNS <= span.DurationNS {
+			futex = span.FutexNS
+		} else {
+			invalid = true
+		}
+	}
+	return offcpu, futex, invalid
 }
 
 func buildVerdicts(blocking BlockingSummary, opts Options) []Verdict {
@@ -700,11 +732,20 @@ func buildVerdicts(blocking BlockingSummary, opts Options) []Verdict {
 func buildUnknowns(blocking BlockingSummary, manifest *runlog.Manifest) []string {
 	unknowns := deviceUnknowns()
 	if !blocking.Measured {
-		unknowns = append(unknowns,
-			"host 阻塞原因无法判定：匹配窗口内没有 off-CPU/futex 采样（M2 未开启或未采到）。")
+		if blocking.InvalidSamples > 0 {
+			unknowns = append(unknowns,
+				fmt.Sprintf("blocking 采样全部不可用：%d 条 offcpu_ns/futex_ns 大于 span duration，已排除；无法判定 host 阻塞。", blocking.InvalidSamples))
+		} else {
+			unknowns = append(unknowns,
+				"host 阻塞原因无法判定：匹配窗口内没有 off-CPU/futex 采样（M2 未开启或未采到）。")
+		}
 	} else if blocking.FutexNS == 0 && blocking.SampledSpans > 0 {
 		unknowns = append(unknowns,
 			"futex 等待采样为 0：若目标线程未发生 futex 等待则属正常；若 futex 探针未生效，host_lock_contention 判定不完整。")
+	}
+	if blocking.InvalidSamples > 0 && blocking.Measured {
+		unknowns = append(unknowns,
+			fmt.Sprintf("已排除 %d 条 offcpu_ns/futex_ns 大于 span duration 的不可能样本（可能为 tid 复用或时钟异常）；剩余样本参与判定。", blocking.InvalidSamples))
 	}
 	if manifest == nil {
 		unknowns = append(unknowns, "缺少 manifest.json：无法核对运行环境、目标 PID、库 inode 和事件完整性。")

@@ -108,19 +108,13 @@ func Run(opts Options) (result *Result, retErr error) {
 	}
 	defer closeLinks()
 
-	attachments, functionLibraries, attachWarnings := attachTargets(opts, collection, functions, &links, &linkMu)
-	result.Attachments = attachments
-	result.Warnings = append(result.Warnings, attachWarnings...)
-	if len(functionLibraries) == 0 {
-		return result, fmt.Errorf("no uprobe could be attached")
-	}
-
 	blockingOffCPU, blockingFutex, blockingErr := resolveBlocking(opts.Profile, opts.Blocking)
 	if blockingErr != nil {
 		return result, blockingErr
 	}
 	var blockingResult BlockingResult
 	var blockingCollection *ebpf.Collection
+	var blockingAttachments []Attachment
 	if blockingOffCPU || blockingFutex {
 		loaded, loadErr := loadBlockingCollection(collection)
 		if loadErr != nil {
@@ -136,12 +130,11 @@ func Run(opts Options) (result *Result, retErr error) {
 					blockingCollection.Close()
 				}
 			}()
-			blockingAttachments, blockingWarnings, blocking := attachBlocking(blockingCollection, blockingOffCPU, blockingFutex, &links, &linkMu)
-			blocking.Mode = string(opts.Blocking)
-			result.Attachments = append(result.Attachments, blockingAttachments...)
+			var blockingWarnings []string
+			blockingAttachments, blockingWarnings, blockingResult = attachBlocking(blockingCollection, blockingOffCPU, blockingFutex, &links, &linkMu)
+			blockingResult.Mode = string(opts.Blocking)
 			result.Warnings = append(result.Warnings, blockingWarnings...)
-			blockingResult = blocking
-			if err := configureBlockingMap(collection, blocking.OffCPU, blocking.Futex); err != nil {
+			if err := configureBlockingMap(collection, blockingResult.OffCPU, blockingResult.Futex); err != nil {
 				result.Warnings = append(result.Warnings, "configure blocking map: "+err.Error())
 				blockingResult.OffCPU = false
 				blockingResult.Futex = false
@@ -152,6 +145,13 @@ func Run(opts Options) (result *Result, retErr error) {
 		_ = configureBlockingMap(collection, false, false)
 	}
 	result.Blocking = blockingResult
+
+	attachments, functionLibraries, attachWarnings := attachTargets(opts, collection, functions, &links, &linkMu)
+	result.Attachments = append(attachments, blockingAttachments...)
+	result.Warnings = append(result.Warnings, attachWarnings...)
+	if len(functionLibraries) == 0 {
+		return result, fmt.Errorf("no uprobe could be attached")
+	}
 
 	batchLayer, batchWarnings := startPythonBatchLayer(opts.Context, opts)
 	result.Warnings = append(result.Warnings, batchWarnings...)

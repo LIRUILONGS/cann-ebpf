@@ -1,7 +1,7 @@
 # cann-ebpf 项目交接文档
 
 文档日期：2026-11-26  
-适用版本：`0.6.0-m2`（新增 `diagnose` 命令与 M2 host off-CPU/futex 代码）  
+适用版本：`0.6.0-m2`（`diagnose` 命令 + M2 host off-CPU/futex，均已上机验证）  
 代码状态：`main` @ 本次交接提交（`git log -1` 见提交号）  
 文档性质：工程交接。本文只写已验证事实；代码完成但未上机验证的内容会单独标注。
 
@@ -11,11 +11,11 @@
 |---|---|
 | 本地工作区 | `C:\Users\liruilong\pentagi\cann-ebpf` |
 | Git 分支 | `main` |
-| 最新提交 | 见 `git log -1`（本次新增 `diagnose` 与 M2 off-CPU/futex 代码） |
+| 最新提交 | 见 `git log -1`（`diagnose`、M2 off-CPU/futex 及上机验证记录） |
 | Git remote | 未配置；交接前建议先配置内部 Git 远程并推送 |
 | Linux/arm64 二进制（M2） | `dist/cann-ebpf-linux-arm64-m2` |
-| 二进制大小 | `9,388,363` bytes |
-| 二进制 SHA-256 | `85DC494BE3E95DFB375B757E7AA4DE1BA5D5AAE1518658A03926E7B4BF31AB88` |
+| 二进制大小 | `9,389,783` bytes |
+| 二进制 SHA-256 | `8A515B96116EC19A28CBC73F7F629B99FA9F564D57FDCB3075380F37F7CC428E` |
 | 历史已验证二进制 | `dist/cann-ebpf-linux-arm64-batch`（`0.5.0-m5`，上表 SHA 已替换为 M2 构建，旧包仍保留在 dist/） |
 | 服务器验证副本（历史） | `/root/cann-ebpf`，V4 服务器 `bms-84865758` |
 | 服务器 profiles | `/root/cann-ebpf/profiles` |
@@ -35,7 +35,8 @@
 - 属于哪个 vLLM batch、batch 里有哪些 request ID；
 - 后续需要回答 host 阻塞、off-CPU、锁竞争、设备执行时间时，证据在哪里。
 
-当前阶段已经做到“host 侧调用链 + batch/request 关联 + 原始证据链”；还不能完整回答“为什么卡住”和“设备侧到底执行了多久”，这两项属于下一步的 M2/M3。
+当前阶段已经做到“host 侧调用链 + batch/request 关联 + 原始证据链 + host 阻塞归因”；还不能完整回答
+“设备侧到底执行了多久”，这项属于下一步的 M3。
 
 ## 3. 已经完成的内容
 
@@ -49,14 +50,15 @@
 | M5 trace context + CPython POC | 完成 | trace 链路树、纯 eBPF CPython batch POC |
 | 纯 eBPF vLLM batch 标准采集 | 完成 | 已并入 `spans.jsonl`/summary，真实 V4 验证通过 |
 | P0 `diagnose` 命令 | 完成 | 只读读取已有证据，JSON/Markdown，单测覆盖；不需要 NPU |
-| M2 off-CPU/futex 归因 | 代码和单测完成，未上机 | sched_switch + futex_wait 探针、`offcpu_ns`/`futex_ns`；需真实内核 verifier/attach 验证 |
+| M2 off-CPU/futex 归因 | 完成并上机验证 | sched_switch + syscalls futex tracepoint、`offcpu_ns`/`futex_ns`；V4 10 秒与合成锁竞争均通过 |
 | vLLM general plugin | 代码和单测完成，未激活 | 未安装到运行中的 V4，也未重启验证；本阶段不做 |
 | Orinfer | 仅 profile validate | 服务未运行，没有真实采集窗口 |
 | M3 msPTI 设备时间线 | 未实现 | 下一阶段重点 |
 | M6 生产化 | 未实现 | Prometheus/OTLP、Grafana、systemd 等未做 |
 
-注意：版本号 `0.6.0-m2` 只表示本次新增了 `diagnose` 和 M2 的 host 阻塞代码，不代表 M2 已上机验证。
-M2 的 verifier/attach 验证、合成锁竞争验证和 V4 短窗口验证都还没做；M5 的 V4/Orinfer A/B 对比也还没有做。
+注意：版本号 `0.6.0-m2` 表示本次交付 `diagnose` 与 M2 host 阻塞归因。M2 已在 V4 生产服务和
+合成锁竞争目标上验证（见 `docs/M2-VALIDATION.md`），但它仍不回答设备执行时间和单 request 延迟；
+M5 的 V4/Orinfer A/B 对比也还没有做。
 
 ### 3.2 M0：发现与符号解析
 
@@ -138,16 +140,20 @@ span_id, seq
 - 单测覆盖所有过滤维度、时间窗、空结果、判定分支和 CLI 退出码。
 - 详见 `docs/DIAGNOSE.md`。
 
-### 3.8 M2 host off-CPU / futex 归因（代码完成，未上机）
+### 3.8 M2 host off-CPU / futex 归因（已上机验证）
 
-- `sched_switch` tracepoint 累计线程在 CANN 调用期间被切出 CPU 的时间；`futex_wait` /
-  `futex_wait_requeue_pi` kprobe 累计 futex 等待。
+- `sched/sched_switch` 累计线程在 CANN 调用期间被切出 CPU 的时间；
+  `syscalls/sys_enter_futex` + `sys_exit_futex` 累计 futex 等待（按 op 过滤 WAIT 系列）。
+- 只测最外层 CANN span；嵌套 span 不写 blocking 字段，避免父子重复累计。
 - span 新增可选字段 `offcpu_ns` / `futex_ns`；字段缺失=未测量，字段为 0=测得 0。
-- 主 uprobe collection 与 blocking collection 分离加载；blocking 被 verifier 拒绝时只降级为无
+- `sched_process_exit` 清理 tid 状态，避免 tid 复用继承死线程的累计值。
+- 主 uprobe collection 与 blocking collection 分离加载；blocking attach 失败只降级为无
   off-CPU 数据，不会拖垮 host span 采集。
 - `attach --blocking auto|on|off`；默认按 profile（`vllm-ascend`/`orinfer` 当前为 true）。
-- 未做：真实内核 attach/verifier、合成锁竞争、V4 短窗口、开销基线。
-- 详见 `docs/M2-OFFCPU.md`。
+- 已验证：V4 生产服务 10 秒（7,561 spans、`attached=4 failed=0`、无效样本 0、health/service/残留正常）；
+  合成 pthread mutex 竞争（off-CPU 99.7%、futex 99.9%、`host_lock_contention` 1.00）；
+  `--blocking off` 不产生任何 blocking 字段。详见 `docs/M2-VALIDATION.md`。
+- 仍未做：设备侧 join、生产流量下的真实锁竞争样本、长跑开销基线。
 
 ## 4. 当前能回答和不能回答的问题
 
@@ -159,11 +165,12 @@ span_id, seq
 - 哪些 span 属于同一个 `trace_id`，链路上下游是什么。
 - 按函数、类别、PID、batch 的分布统计，以及原始证据的哈希和完整性。
 - 把已有证据按时间窗/PID/batch/request 转成低层定位报告（`diagnose`）。
-- 在 M2 探针成功采集时，给出每个 sync span 的 host off-CPU/futex 采样和 `host_lock_contention` 判定。
+- 在 M2 探针启用时，给出最外层 sync span 的 host off-CPU/futex 采样，以及
+  `host_lock_contention` / `host_blocked_non_futex` / `host_cpu_running` 判定（阈值可调）。
 
 ### 不能回答
 
-- 不能回答“为什么卡住”的完整因果：M2 代码未上机，当前没有真实 off-CPU/futex 证据。
+- 不能回答“为什么卡住”的完整因果：M2 只覆盖 host 阻塞，设备侧仍缺。
 - 不能可靠区分 `device_bound`、`launch_starvation`、`copy_bound`、`communication_bound`。
 - 不能回答 NPU kernel / memcpy / HCCL 的设备执行时间：msPTI 未接入。
 - 不能回答单 request 延迟；batch 窗口不能拆成逐 request 时长。
@@ -194,7 +201,8 @@ span_id, seq
 | `docs/PLAN.md` | 总体方案和判定规则 |
 | `docs/TASKS.md` | 任务清单和未完成项 |
 | `docs/DIAGNOSE.md` | `diagnose` 命令、时间窗语义、判定规则与边界 |
-| `docs/M2-OFFCPU.md` | M2 设计、未验证标注、服务器验证步骤 |
+| `docs/M2-OFFCPU.md` | M2 设计、判定口径与边界 |
+| `docs/M2-VALIDATION.md` | M2 上机验证数据、修复记录和证据位置 |
 | `docs/M4-VALIDATION.md` | V4 实测记录 |
 | `docs/VLLM-BATCH-POC.md` | 纯 eBPF batch POC 记录 |
 
@@ -218,12 +226,14 @@ span_id, seq
 | 纯 eBPF batch | 10 个 batch、6 个 request ID（单 Worker）；双 Worker 各 4 个 batch |
 | 构建验证 | `go test ./...`、`go vet ./...`、Linux/arm64 交叉编译通过（含 `diagnose` 与 M2 代码） |
 | `diagnose` 验证 | Windows 单测 + 对 M4 交付里的 V4 真实 evidence 只读运行：6,991 spans 的 10 秒 run、164 spans 的 batch run 均正常出报告 |
-| M2 验证 | 仅交叉编译与 BPF 对象解析/程序类型单测通过；**未在真实内核 attach** |
+| M2 验证（V4） | 7,561 spans，`attached=4 failed=0`，无效样本 0，off-CPU 1.1%、futex 0.0%，verdict `host_cpu_running`；health/service/残留正常 |
+| M2 验证（合成） | 791 spans，off-CPU 99.7%、futex 99.9%，verdict `host_lock_contention`（confidence 1.00） |
+| `--blocking off` | 7,145 spans，无任何 offcpu/futex 字段，服务状态不变 |
 
 ## 7. 下一步工作方向
 
-建议按以下顺序推进：先上机验证 M2，再补设备侧，最后做生产化。插件/`execute_model` 函数级耗时
-本轮明确不做，见 P2 说明。
+建议按以下顺序推进：M2 已完成，下一步补设备侧（M3），最后做生产化。插件/`execute_model`
+函数级耗时本轮明确不做，见 P2 说明。
 
 ### P0：`diagnose` 命令（已完成）
 
@@ -236,29 +246,30 @@ span_id, seq
 - 输出命中 PID/TID/batch/request、top slow function/category、类别分布、off-CPU/futex 迹象、
   证据 span、判定与无法判定原因。
 
-用法见 `docs/DIAGNOSE.md`。服务器上可以先拿已有 `runs/` 直接验证，不需要授权窗口。
+用法见 `docs/DIAGNOSE.md`；已对 V4 真实 evidence 只读验证，不需要授权窗口。
 
-### P1：M2 off-CPU 与锁归因（代码完成，等待上机）
+### P1：M2 off-CPU 与锁归因（已完成并上机验证）
 
-已实现（未上机）：
+已实现：
 
 - `sched_switch` tracepoint 统计线程 off-CPU 时间；
-- `futex_wait` / `futex_wait_requeue_pi` kprobe 统计 futex 等待；
+- `sys_enter_futex` / `sys_exit_futex` tracepoint 统计 futex 等待（`futex_wait` kprobe 覆盖不足，
+  已弃用）；
 - `offcpu_ns` / `futex_ns` 写入标准 span，区分“未测量”与“测得 0”；
-- `diagnose` 输出 `host_lock_contention` / `host_blocked_non_futex` / `host_cpu_running` 判定；
-- 主 uprobe collection 与 blocking collection 分离加载，blocking 失败不影响 host span。
+- `diagnose` 输出 `host_lock_contention` / `host_blocked_non_futex` / `host_cpu_running` 判定，
+  并排除 `>duration` 的不可能样本；
+- 主 uprobe collection 与 blocking collection 分离加载，blocking 失败不影响 host span；
+- `sched_process_exit` 清理 tid 状态，entry 清陈旧 since，只测最外层 span。
 
-待做（验收项）：
+验收结果（2026-11-26，`bms-84865758`）：
 
-- 合成锁竞争目标可稳定复现；
-- 真实内核 verifier/attach 通过（`blocking offcpu=true futex=true failed=0`）；
-- V4 短窗口采集不改变服务状态；
-- 给出 host wall time、off-CPU 占比、futex 占比和证据 span 的真实数据；
-- 10 秒窗口开销相对基线无明显回归；
-- 与设备时间线结合前，不轻易下 `device_bound` 结论。
+- 合成锁竞争：off-CPU 99.7%、futex 99.9%，`host_lock_contention` confidence 1.00；
+- V4 10 秒：`attached=4 failed=0`、7,561 spans、无效样本 0、`/health` 200/200、service active/active、
+  探针残留 0；该窗口 off-CPU 1.1%、futex 0.0%，判定 `host_cpu_running`；
+- `--blocking off`：无 blocking 字段，服务状态不变。
 
-验证步骤见 `docs/M2-OFFCPU.md` 第 6 节。注意 `vllm-ascend` profile 默认 `sched/futex=true`，
-长跑或怀疑开销时用 `--blocking off`。
+完整证据和修复记录见 `docs/M2-VALIDATION.md`。剩余限制：嵌套 span 不采样、没有生产流量下的
+真实锁竞争样本、长跑开销基线未做、仍不能下设备侧结论。
 
 ### P1：M3 msPTI / CANN profiler join
 
@@ -312,7 +323,8 @@ span_id, seq
 - 不覆盖旧证据目录；采集前后必须检查 health、service 状态和 uprobe 残留。
 - 不把 batch 窗口说成 `execute_model` 函数级耗时，不把 `duration_ns` 说成 request 延迟或 NPU 执行时间。
 - 不把 37 个已 attach 函数说成同一窗口全部触发；必须区分“可解析/可 attach”和“实际观测到”。
-- M2 未上机前，不把 `offcpu_ns`/`futex_ns` 或 `host_lock_contention` 当成已验证事实；只写“代码完成，未上机”。
+- M2 只覆盖最外层 span 的 host 阻塞，不能写成 request 延迟或 NPU 执行时间；嵌套 span 缺 blocking
+  字段是设计行为，不是数据丢失。
 - 插件默认不启用；插件路径和纯 eBPF 路径必须分开描述。
 - `dist/`、`runs/`、`__pycache__` 不提交；代码修改需要 Git 提交。
 
@@ -412,10 +424,10 @@ OUT="runs/ebpf-m2-$(date -u +%Y%m%dT%H%M%SZ)"
 - [ ] 确认 `profiles/vllm-ascend.yaml` 的目标发现规则仍匹配当前容器。
 - [ ] 确认 `runs/` 和旧证据目录不被覆盖。
 - [ ] 先跑 `go test ./...` 和 `go vet ./...`。
-- [ ] 用已有 `runs/` 跑一次 `diagnose`，确认只读、JSON/Markdown 都能出。
-- [ ] 上机验证 M2：`--blocking on` 的 10 秒窗口，确认 `offcpu=true futex=true failed=0`、无残留、
-      `/health` 和服务状态不变，并用合成锁竞争对照一次。
-- [ ] 按 M2 → M3 → 生产化的顺序推进，不要先做网关指标重复功能。
+- [x] 用已有 `runs/` 跑一次 `diagnose`，确认只读、JSON/Markdown 都能出。
+- [x] 上机验证 M2：`--blocking on` 的 10 秒窗口，确认 `offcpu=true futex=true failed=0`、无残留、
+      `/health` 和服务状态不变，并用合成锁竞争对照一次（见 `docs/M2-VALIDATION.md`）。
+- [ ] 按 M3 → 生产化的顺序推进，不要先做网关指标重复功能。
 - [ ] 插件/`execute_model` 函数级耗时未经明确维护窗口不要动。
 
 ---

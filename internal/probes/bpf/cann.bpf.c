@@ -74,7 +74,6 @@ struct probe_stats {
  * need a separate target map.
  */
 #define BLOCKING_MAX_DEPTH 64
-#define BLOCKING_STACK_DEPTH 8
 #define SPAN_FLAG_OFFCPU 1
 #define SPAN_FLAG_FUTEX 2
 
@@ -83,13 +82,16 @@ struct blocking_cfg {
 	__u32 futex;
 };
 
+/* Per-thread blocking state. Only the outermost CANN call is measured; nested
+ * calls report no blocking fields (they would otherwise double count the
+ * parent window). This keeps the map value layout free of variable-index
+ * arrays, which the 5.10 verifier cannot always bound.
+ */
 struct tid_state {
 	__u64 offcpu_since;
 	__u64 offcpu_acc;
 	__u64 futex_since;
 	__u64 futex_acc;
-	__u64 offcpu_stack[BLOCKING_STACK_DEPTH];
-	__u64 futex_stack[BLOCKING_STACK_DEPTH];
 	__u32 inflight;
 	__u32 pad;
 };
@@ -108,6 +110,30 @@ struct sched_switch_ctx {
 	__u32 next_pid;
 	int next_prio;
 };
+
+/* sched_process_exit: comm at 8, pid at 24. */
+struct sched_exit_ctx {
+	__u64 pad;
+	char comm[16];
+	__u32 pid;
+	int prio;
+};
+
+/* sys_enter_futex: __syscall_nr at 8, uaddr at 16, op at 24. */
+struct futex_enter_ctx {
+	__u64 pad;
+	__u32 syscall_nr;
+	__u32 pad2;
+	__u64 uaddr;
+	__u32 op;
+	__u32 pad3;
+};
+
+/* futex command values; FUTEX_PRIVATE_FLAG/CLOCK_REALTIME are masked off. */
+#define FUTEX_CMD_MASK 0x7f
+#define FUTEX_WAIT 0
+#define FUTEX_WAIT_BITSET 9
+#define FUTEX_WAIT_REQUEUE_PI 11
 
 
 struct bpf_map_def SEC("maps") events = {
@@ -171,10 +197,9 @@ static __always_inline struct probe_cfg *cfg_value(__u32 func_id)
 	return bpf_map_lookup_elem(&probe_cfg, &func_id);
 }
 
-/* blocking_enter snapshots the caller's accumulators so nested CANN calls get
- * their own inclusive off-CPU/futex window; the parent continues accumulating
- * after the child returns. Depths beyond BLOCKING_STACK_DEPTH share the parent
- * accumulator and are still bounded by BLOCKING_MAX_DEPTH.
+/* blocking_enter: the outermost CANN call starts a clean window. A thread is
+ * running while it executes an entry, so any pending since timestamp is stale
+ * (for example a tid reused after thread exit) and is dropped here.
  */
 static __always_inline void blocking_enter(__u32 tid)
 {
@@ -189,6 +214,8 @@ static __always_inline void blocking_enter(__u32 tid)
 			return;
 	}
 	depth = state->inflight;
+	state->offcpu_since = 0;
+	state->futex_since = 0;
 	if (depth >= BLOCKING_MAX_DEPTH) {
 		/* Missed uretprobe left the depth stuck: recover on next entry. */
 		state->offcpu_acc = 0;
@@ -196,35 +223,40 @@ static __always_inline void blocking_enter(__u32 tid)
 		state->inflight = 1;
 		return;
 	}
-	if (depth < BLOCKING_STACK_DEPTH) {
-		state->offcpu_stack[depth] = state->offcpu_acc;
-		state->futex_stack[depth] = state->futex_acc;
+	if (depth == 0) {
 		state->offcpu_acc = 0;
 		state->futex_acc = 0;
 	}
 	state->inflight = depth + 1;
 }
 
+/* blocking_exit drains the thread window on every exit, including calls
+ * dropped by the duration/sample filter, so the depth cannot leak. Nested
+ * calls report no sample: measured=false tells the caller not to set flags.
+ */
 static __always_inline void blocking_exit(__u32 tid, __u64 *offcpu_ns,
-					  __u64 *futex_ns)
+					  __u64 *futex_ns, __u32 *measured)
 {
 	struct tid_state *state = bpf_map_lookup_elem(&tid_state, &tid);
 	__u32 depth;
 
 	*offcpu_ns = 0;
 	*futex_ns = 0;
+	*measured = 0;
 	if (!state)
 		return;
+	depth = state->inflight;
+	if (depth == 0)
+		return;
+	depth--;
+	state->inflight = depth;
+	if (depth != 0)
+		return;
+	*measured = 1;
 	*offcpu_ns = state->offcpu_acc;
 	*futex_ns = state->futex_acc;
-	depth = state->inflight;
-	if (depth > 0)
-		depth--;
-	state->inflight = depth;
-	if (depth < BLOCKING_STACK_DEPTH) {
-		state->offcpu_acc = state->offcpu_stack[depth] + *offcpu_ns;
-		state->futex_acc = state->futex_stack[depth] + *futex_ns;
-	}
+	state->offcpu_acc = 0;
+	state->futex_acc = 0;
 }
 
 static __always_inline int on_entry(__u32 func_id)
@@ -267,6 +299,19 @@ static __always_inline int on_exit(__u32 func_id)
 		.func_id = func_id,
 	};
 	struct probe_stats *stats = stats_value(func_id);
+	struct probe_cfg *cfg = cfg_value(func_id);
+	__u64 offcpu_ns = 0;
+	__u64 futex_ns = 0;
+	__u32 measured = 0;
+
+	/* Drain the thread's blocking window on every exit, even when the
+	 * per-function inflight key is missing (overwritten or already deleted),
+	 * so the nesting depth cannot leak and later spans cannot report a
+	 * cumulative value from earlier calls.
+	 */
+	if (cfg && cfg->enabled)
+		blocking_exit(key.tid, &offcpu_ns, &futex_ns, &measured);
+
 	struct inflight_value *value = bpf_map_lookup_elem(&inflight, &key);
 
 	if (!value) {
@@ -282,19 +327,11 @@ static __always_inline int on_exit(__u32 func_id)
 	if (stats)
 		stats->exits++;
 
-	struct probe_cfg *cfg = cfg_value(func_id);
 	if (!cfg || !cfg->enabled) {
 		if (stats)
 			stats->disabled++;
 		return 0;
 	}
-
-	/* Drain the thread's blocking window on every exit, including calls
-	 * dropped by the duration/sample filter, so nesting depth stays balanced.
-	 */
-	__u64 offcpu_ns = 0;
-	__u64 futex_ns = 0;
-	blocking_exit(key.tid, &offcpu_ns, &futex_ns);
 
 	__u64 dur = now > start ? now - start : 0;
 	if (dur < cfg->min_duration_ns ||
@@ -320,7 +357,7 @@ static __always_inline int on_exit(__u32 func_id)
 	event->tid = key.tid;
 	event->func_id = func_id;
 	event->flags = 0;
-	if (bcfg) {
+	if (bcfg && measured) {
 		if (bcfg->offcpu)
 			event->flags |= SPAN_FLAG_OFFCPU;
 		if (bcfg->futex)
@@ -361,20 +398,43 @@ int on_sched_switch(struct sched_switch_ctx *ctx)
 	return 0;
 }
 
-/* futex_wait covers FUTEX_WAIT / FUTEX_WAIT_BITSET; requeue-PI waits use
- * futex_wait_requeue_pi. Both are timed as kprobes so no syscall argument
- * layout is assumed.
+/* Drop the per-thread state when the task exits. Without this, a reused tid
+ * would inherit inflight/accumulators from a dead thread.
  */
-static __always_inline void futex_wait_enter(void)
+SEC("tracepoint/sched/sched_process_exit")
+int on_sched_exit(struct sched_exit_ctx *ctx)
 {
-	__u32 tid = (__u32)bpf_get_current_pid_tgid();
-	struct tid_state *state = bpf_map_lookup_elem(&tid_state, &tid);
+	__u32 tid = ctx->pid;
 
-	if (state && state->inflight && !state->futex_since)
-		state->futex_since = bpf_ktime_get_ns();
+	bpf_map_delete_elem(&tid_state, &tid);
+	return 0;
 }
 
-static __always_inline void futex_wait_exit(void)
+/* Futex waits are captured at the syscall tracepoint rather than a kprobe on
+ * futex_wait: the kernel may inline or clone futex_wait at individual call
+ * sites, which made a symbol-based kprobe miss most waits. The syscall
+ * tracepoint fires for every futex call, so filtering by the op field gives
+ * complete coverage. FUTEX_WAIT / WAIT_BITSET / WAIT_REQUEUE_PI all block.
+ */
+SEC("tracepoint/syscalls/sys_enter_futex")
+int on_futex_enter(struct futex_enter_ctx *ctx)
+{
+	__u32 cmd = ctx->op & FUTEX_CMD_MASK;
+	__u32 tid;
+	struct tid_state *state;
+
+	if (cmd != FUTEX_WAIT && cmd != FUTEX_WAIT_BITSET &&
+	    cmd != FUTEX_WAIT_REQUEUE_PI)
+		return 0;
+	tid = (__u32)bpf_get_current_pid_tgid();
+	state = bpf_map_lookup_elem(&tid_state, &tid);
+	if (state && state->inflight && !state->futex_since)
+		state->futex_since = bpf_ktime_get_ns();
+	return 0;
+}
+
+SEC("tracepoint/syscalls/sys_exit_futex")
+int on_futex_exit(void *ctx)
 {
 	__u32 tid = (__u32)bpf_get_current_pid_tgid();
 	struct tid_state *state = bpf_map_lookup_elem(&tid_state, &tid);
@@ -386,33 +446,6 @@ static __always_inline void futex_wait_exit(void)
 		if (state->inflight && now > since)
 			state->futex_acc += now - since;
 	}
-}
-
-SEC("kprobe/futex_wait")
-int enter_futex_wait(void *ctx)
-{
-	futex_wait_enter();
-	return 0;
-}
-
-SEC("kretprobe/futex_wait")
-int exit_futex_wait(void *ctx)
-{
-	futex_wait_exit();
-	return 0;
-}
-
-SEC("kprobe/futex_wait_requeue_pi")
-int enter_futex_wait_requeue_pi(void *ctx)
-{
-	futex_wait_enter();
-	return 0;
-}
-
-SEC("kretprobe/futex_wait_requeue_pi")
-int exit_futex_wait_requeue_pi(void *ctx)
-{
-	futex_wait_exit();
 	return 0;
 }
 

@@ -94,6 +94,9 @@ func (r Report) Markdown() string {
 		b.WriteString("- 本窗口没有 offcpu_ns / futex_ns 采样，无法判断 host 是否被阻塞（原因见“当前无法判定”）。\n")
 	} else {
 		fmt.Fprintf(&b, "- 统计范围：`%s` span，样本 span `%d/%d`\n", blk.Population, blk.SampledSpans, blk.Spans)
+		if blk.InvalidSamples > 0 {
+			fmt.Fprintf(&b, "- 已排除不可能样本：`%d` 条（offcpu/futex 大于 span duration）\n", blk.InvalidSamples)
+		}
 		fmt.Fprintf(&b, "- host wall time：`%d` ns，off-CPU：`%d` ns（%.1f%%），futex：`%d` ns（%.1f%%）\n",
 			blk.WallNS, blk.OffCPUNS, blk.OffCPURatio*100, blk.FutexNS, blk.FutexRatio*100)
 		if blk.NestedWarning != "" {

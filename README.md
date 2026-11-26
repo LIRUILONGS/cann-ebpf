@@ -9,7 +9,7 @@
 - batch 上下文协议、可选 vLLM general plugin 适配器，以及不依赖插件的纯 eBPF batch 采集；
 - JSONL、manifest、summary 证据链；
 - 只读 `diagnose` 定位命令（JSON/Markdown，不 attach）；
-- M2 host off-CPU/futex 代码（`sched_switch` + `futex_wait`，**未上机验证**）；
+- M2 host off-CPU/futex（`sched_switch` + futex syscall tracepoint，已在 V4 和合成锁竞争上验证）；
 - 采集前后健康检查、uprobe 残留检查和不覆盖旧证据的运行脚本。
 
 > 本版本的 `M4` 指 **vLLM-Ascend host profile + batch 上下文协议**。它仍然不是
@@ -32,7 +32,7 @@
 | 纯 eBPF CPython POC | 完成；合成 Python 3.12 和真实 V4 Worker 1452 均验证通过 |
 | 纯 eBPF vLLM batch 标准采集 | 完成；`attach --python-batch` 已并入 `spans.jsonl`/`summary`，真实 V4 验证 10 个 batch、6 个 request ID，类型确认为 `SchedulerOutput` |
 | `diagnose` 只读定位命令 | 完成；JSON `cann.diagnose.report.v1` + Markdown，单测覆盖全部过滤与判定分支，并已在 V4 真实 evidence 上只读运行 |
-| M2 host off-CPU/futex | 代码和单测完成；**未在真实内核 attach 验证** |
+| M2 host off-CPU/futex | 完成并上机验证；V4 10 秒 `attached=4 failed=0`，合成锁竞争 `host_lock_contention` 1.00 |
 | Orinfer profile | 配置校验通过；服务未运行，尚无运行窗口验证 |
 | msPTI / 设备 kernel 时间线 | 未实现，属于 M3 |
 | 逐 request 执行时长 | 未实现；当前只做 batch 窗口归因 |
@@ -58,13 +58,13 @@ Remove-Item Env:GOOS, Env:GOARCH, Env:CGO_ENABLED
 当前 Linux/arm64 二进制 SHA-256 以交付包 `SHA256SUMS` 为准，构建后不得手工修改：
 
 ```text
-cann-ebpf-linux-arm64-m2  85dc494be3e95dfb375b757e7aa4de1ba5d5aae1518658a03926e7b4bf31ab88
+cann-ebpf-linux-arm64-m2  8a515b96116ec19a28cbc73f7f629b99fa9f564d57fdcb3075380f37f7cc428e
 cpy-poc-linux-arm64       08a5f05f92c15dd2d4b6475805ebbb3bfc3188b024c900745cb604a30826be53
 cpy-batch-poc-linux-arm64 见 batch POC 交付目录 SHA256SUMS
 ```
 
-`cann-ebpf-linux-arm64-m2` 只是交叉编译产物；M2 探针尚未在真实内核 attach，不能把它的构建成功
-当成 M2 验证通过。
+`cann-ebpf-linux-arm64-m2` 已在 `bms-84865758` 上完成 V4 与合成锁竞争验证，二进制大小
+`9,389,783` bytes；验证数据和证据位置见 `docs/M2-VALIDATION.md`。
 
 仓库已包含 `internal/probes/bpf/cann.bpf.o`。修改 `cann.bpf.c` 后必须用 clang BPF
 target 重新生成对象；不要依赖目标机现编，也不要修改目标进程或 CANN 库。
@@ -169,7 +169,7 @@ V4，只读取 `SchedulerOutput.num_scheduled_tokens` 的请求 ID 键和 dict �
 以及“当前无法判定”的原因（缺 off-CPU、缺 msPTI、batch 非 request、插件未激活）。
 时间窗使用与 span 相同的单调时钟 ns，详见 `docs/DIAGNOSE.md`。
 
-### M2 host off-CPU/futex 采集（未上机验证）
+### M2 host off-CPU/futex 采集
 
 ```bash
 OUT="runs/ebpf-m2-$(date -u +%Y%m%dT%H%M%SZ)"
@@ -184,9 +184,13 @@ OUT="runs/ebpf-m2-$(date -u +%Y%m%dT%H%M%SZ)"
 ```
 
 `--blocking auto|on|off`：`auto` 跟随 profile（`vllm-ascend`/`orinfer` 当前为 true），`on` 强制开启，
-`off` 关闭。成功后 span 带可选 `offcpu_ns`/`futex_ns`（字段缺失=未测量，0=测得 0）。
-blocking 程序单独加载，verifier 拒绝时只产生 warning，不影响 host span 采集。
-**该路径尚未在真实内核 attach 验证**，验证步骤见 `docs/M2-OFFCPU.md`。
+`off` 关闭。成功后最外层 CANN span 带可选 `offcpu_ns`/`futex_ns`（字段缺失=未测量，0=测得 0）；
+嵌套 span 不采样，避免父子重复累计。blocking 程序单独加载，attach 失败只产生 warning，
+不影响 host span 采集。
+
+已在 `bms-84865758` 验证：V4 10 秒 `attached=4 failed=0`、7,561 spans、无效样本 0；
+合成 pthread mutex 竞争 off-CPU 99.7%、futex 99.9%、`host_lock_contention` 1.00。
+数据与边界见 `docs/M2-VALIDATION.md` 与 `docs/M2-OFFCPU.md`。
 
 ### 自动服务器采集
 
@@ -264,8 +268,10 @@ Span 新增字段：
 - 如果容器使用独立 time namespace，插件与 host eBPF 的单调时钟可能不一致；上线
   插件前必须做同一命名空间/跨命名空间时钟校准。
 - msPTI、kernel/memcpy/HCCL 设备执行时间、correlationId join 未实现。
-- M2 的 `sched_switch`/`futex` 代码与单测完成，但尚未在真实内核 attach；`offcpu_ns`/`futex_ns`
-  和 `host_lock_contention` 在完成上机验证前不能写成已验证事实。
+- M2 已上机验证，但只覆盖最外层 CANN span 的 host 阻塞；嵌套 span 没有 blocking 字段是设计行为。
+  本次 V4 窗口没有真实 futex 竞争（futex≈0），`host_lock_contention` 由合成锁竞争目标验证。
+- `offcpu_ns`/`futex_ns` 是 host 线程的等待时间，不是 request 延迟、不是 NPU 执行时间；
+  没有 msPTI 时仍然不能下 `device_bound`/`launch_starvation`。
 - `diagnose` 只读已有证据；没有 off-CPU 采样时只输出 `blocking_unknown`，没有 msPTI 时永远不输出
   `device_bound` / `launch_starvation`。
 - Orinfer 当前未运行；profile 只能声明配置校验通过，不能写成真实采集验证。
@@ -308,7 +314,8 @@ unicode dict，单次最多 64 个 key；batch span 写入标准 `spans.jsonl`�
 
 - `docs/HANDOFF.md`：交接总览、已完成/未完成、下一步与硬约束。
 - `docs/DIAGNOSE.md`：`diagnose` 用法、时间窗语义、判定规则和边界。
-- `docs/M2-OFFCPU.md`：M2 设计、未验证标注和服务器验证步骤。
+- `docs/M2-OFFCPU.md`：M2 设计、判定口径和边界。
+- `docs/M2-VALIDATION.md`：M2 上机验证数据、修复记录和证据位置。
 - `docs/M4-VALIDATION.md`：当前交付的实测数据、复现命令、证据和边界。
 - `docs/M4-CONTEXT-PROTOCOL.md`：batch 协议、权限模型、插件安装与激活步骤。
 - `docs/M5-TRACE-AND-CPY-POC.md`：链路追踪 schema、POC 设计、真实 V4 证据和边界。

@@ -37,17 +37,17 @@ type BlockingResult struct {
 
 type blockingProgram struct {
 	name   string
-	kind   string // "tracepoint", "kprobe", or "kretprobe"
+	kind   string // "tracepoint"
 	group  string // tracepoint group
-	symbol string // tracepoint name or kprobe symbol
+	symbol string // tracepoint name
+	need   string // "offcpu", "futex", or "any"
 }
 
 var blockingPrograms = []blockingProgram{
-	{name: "on_sched_switch", kind: "tracepoint", group: "sched", symbol: "sched_switch"},
-	{name: "enter_futex_wait", kind: "kprobe", symbol: "futex_wait"},
-	{name: "exit_futex_wait", kind: "kretprobe", symbol: "futex_wait"},
-	{name: "enter_futex_wait_requeue_pi", kind: "kprobe", symbol: "futex_wait_requeue_pi"},
-	{name: "exit_futex_wait_requeue_pi", kind: "kretprobe", symbol: "futex_wait_requeue_pi"},
+	{name: "on_sched_switch", kind: "tracepoint", group: "sched", symbol: "sched_switch", need: "offcpu"},
+	{name: "on_sched_exit", kind: "tracepoint", group: "sched", symbol: "sched_process_exit", need: "any"},
+	{name: "on_futex_enter", kind: "tracepoint", group: "syscalls", symbol: "sys_enter_futex", need: "futex"},
+	{name: "on_futex_exit", kind: "tracepoint", group: "syscalls", symbol: "sys_exit_futex", need: "futex"},
 }
 
 // resolveBlocking merges the CLI mode with the profile's probes.sched/futex

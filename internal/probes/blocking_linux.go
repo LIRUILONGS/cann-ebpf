@@ -10,9 +10,10 @@ import (
 	"github.com/cilium/ebpf/link"
 )
 
-// attachBlocking attaches the sched_switch tracepoint and futex_wait kprobes.
-// Attach failures are warnings, not fatal errors: host span collection must
-// keep working even when tracefs/kprobes are unavailable.
+// attachBlocking attaches the sched_switch / sched_process_exit and
+// sys_enter_futex / sys_exit_futex tracepoints. Attach failures are warnings,
+// not fatal errors: host span collection must keep working when tracefs or
+// syscall tracepoints are unavailable.
 func attachBlocking(collection *ebpf.Collection, offcpu, futex bool, links *[]link.Link, linkMu *sync.Mutex) ([]Attachment, []string, BlockingResult) {
 	result := BlockingResult{OffCPU: offcpu, Futex: futex}
 	var attachments []Attachment
@@ -24,20 +25,20 @@ func attachBlocking(collection *ebpf.Collection, offcpu, futex bool, links *[]li
 		linkMu.Unlock()
 	}
 	for _, bp := range blockingPrograms {
-		wanted := offcpu
-		if bp.kind != "tracepoint" {
+		wanted := false
+		switch bp.need {
+		case "offcpu":
+			wanted = offcpu
+		case "futex":
 			wanted = futex
+		case "any":
+			wanted = offcpu || futex
 		}
 		if !wanted {
 			continue
 		}
 		prog := collection.Programs[bp.name]
 		attachment := Attachment{Function: bp.symbol, Category: "blocking"}
-		if bp.kind == "kprobe" {
-			attachment.Entry = true
-		} else if bp.kind == "kretprobe" {
-			attachment.Exit = true
-		}
 		if prog == nil {
 			attachment.Error = "compiled blocking program missing"
 			attachments = append(attachments, attachment)
@@ -45,25 +46,12 @@ func attachBlocking(collection *ebpf.Collection, offcpu, futex bool, links *[]li
 			warnings = append(warnings, fmt.Sprintf("blocking probe %s: %s", bp.name, attachment.Error))
 			continue
 		}
-		var (
-			l   link.Link
-			err error
-		)
-		switch bp.kind {
-		case "tracepoint":
-			l, err = link.Tracepoint(bp.group, bp.symbol, prog, nil)
-		case "kprobe":
-			l, err = link.Kprobe(bp.symbol, prog, nil)
-		case "kretprobe":
-			l, err = link.Kretprobe(bp.symbol, prog, nil)
-		default:
-			err = fmt.Errorf("unknown blocking program kind %q", bp.kind)
-		}
+		l, err := link.Tracepoint(bp.group, bp.symbol, prog, nil)
 		if err != nil {
 			attachment.Error = err.Error()
 			attachments = append(attachments, attachment)
 			result.Failed++
-			warnings = append(warnings, fmt.Sprintf("blocking probe %s (%s/%s): %v", bp.name, bp.kind, bp.symbol, err))
+			warnings = append(warnings, fmt.Sprintf("blocking probe %s (%s/%s): %v", bp.name, bp.group, bp.symbol, err))
 			continue
 		}
 		addLink(l)
@@ -71,15 +59,14 @@ func attachBlocking(collection *ebpf.Collection, offcpu, futex bool, links *[]li
 		attached[bp.name] = true
 		result.Attached++
 	}
-	// Only claim a metric when the complete entry/exit pair attached.
+	// Only claim a metric when every tracepoint it needs attached.
 	result.OffCPU = offcpu && attached["on_sched_switch"]
-	result.Futex = futex && ((attached["enter_futex_wait"] && attached["exit_futex_wait"]) ||
-		(attached["enter_futex_wait_requeue_pi"] && attached["exit_futex_wait_requeue_pi"]))
+	result.Futex = futex && attached["on_futex_enter"] && attached["on_futex_exit"]
 	if offcpu && !result.OffCPU {
 		warnings = append(warnings, "sched_switch off-CPU probe not active; offcpu_ns will be absent")
 	}
 	if futex && !result.Futex {
-		warnings = append(warnings, "futex_wait probe pair not active; futex_ns will be absent")
+		warnings = append(warnings, "futex syscall tracepoints not active; futex_ns will be absent")
 	}
 	result.Warnings = warnings
 	return attachments, warnings, result

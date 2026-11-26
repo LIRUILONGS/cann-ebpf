@@ -139,7 +139,10 @@ Markdown 报告包含同样的信息，并固定声明：原始值以 `spans.jso
 - 只读：不 attach、不修改 `spans.jsonl` / `manifest.json`，不覆盖旧证据目录。
 - `summary` 之类派生数字只来自原始 span；空数据/缺字段明确报 `unknown`。
 - 不把 batch 窗口写成 `execute_model` 函数边界，不把 `duration_ns` 写成 request 延迟或设备时间。
-- 嵌套 CANN span 的 off-CPU 时间会重叠，`blocking` 里显式提示不能跨嵌套函数直接相加。
+- 嵌套 CANN span 的 off-CPU 时间会重叠，`blocking` 里显式提示不能跨嵌套函数直接相加；
+  M2 只对最外层 span 采样，嵌套 span 没有 `offcpu_ns`/`futex_ns` 是设计行为。
+- `blocking.invalid_samples` 统计 `offcpu_ns`/`futex_ns` 大于 span `duration_ns` 的物理不可能样本；
+  这些值不会进入比例和函数汇总，并会写入 `unknowns`。当前实现实测为 0 条。
 
 ## 8. 测试与验证
 
@@ -166,3 +169,13 @@ go test ./internal/diagnose ./cmd/cann-ebpf
 go run ./cmd/cann-ebpf diagnose --input dist/cann-ebpf-m4-delivery-20261126/evidence/runs/ebpf-auto-10s-final-20261126 --out diag-10s.md
 go run ./cmd/cann-ebpf diagnose --input dist/cann-ebpf-m4-delivery-20261126/evidence/runs/context-test-final-20261126 --json --out diag-ctx.json
 ```
+
+服务器（`bms-84865758`）上已用同一个二进制验证：
+
+```bash
+./cann-ebpf-linux-arm64-m2 diagnose --input /root/cann-ebpf/m4-20261126/runs/ebpf-auto-10s-final-20261126 --out diag-m4.md
+./cann-ebpf-linux-arm64-m2 diagnose --input /root/cann-ebpf/m2-test-20261126T151851Z/runs/m2-blocking-10s-20261126T073824Z --pid 1452 --last 2s
+```
+
+结果：历史 6,991-span run 与 164-span batch run 都是 `status=ok`；最新 M2 run 上
+`--pid 1452 --last 2s` 命中 67 条 span，窗口来源为 `last`。详见 `docs/M2-VALIDATION.md`。
