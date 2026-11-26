@@ -16,6 +16,7 @@ import (
 	"cann-ebpf/internal/contextfeed"
 	"cann-ebpf/internal/discovery"
 	"cann-ebpf/internal/elfutil"
+	"cann-ebpf/internal/hardware"
 	"cann-ebpf/internal/runlog"
 
 	"github.com/cilium/ebpf"
@@ -108,6 +109,25 @@ func Run(opts Options) (result *Result, retErr error) {
 	}
 	defer closeLinks()
 
+	hardwareEnabled, hardwareErr := resolveHardwareMode(opts.Profile, opts.HardwareMode)
+	if hardwareErr != nil {
+		return result, hardwareErr
+	}
+	var hardwareCollector *hardware.Collector
+	if hardwareEnabled {
+		if opts.OutputDir == "" {
+			result.Warnings = append(result.Warnings, "hardware sampling skipped: no output directory")
+		} else {
+			interval := time.Duration(hardwareIntervalSeconds(opts.Profile)) * time.Second
+			collector, hwWarnings := hardware.Start(opts.Context, filepath.Join(opts.OutputDir, "hardware.jsonl"), interval)
+			hardwareCollector = collector
+			result.Warnings = append(result.Warnings, hwWarnings...)
+			defer hardwareCollector.Stop()
+		}
+	} else {
+		result.Hardware = hardware.Result{Enabled: false}
+	}
+
 	blockingOffCPU, blockingFutex, blockingErr := resolveBlocking(opts.Profile, opts.Blocking)
 	if blockingErr != nil {
 		return result, blockingErr
@@ -192,6 +212,16 @@ func Run(opts Options) (result *Result, retErr error) {
 	if blockingCollection != nil {
 		blockingCollection.Close()
 		blockingCollection = nil
+	}
+	if hardwareCollector != nil {
+		result.Hardware = hardwareCollector.Stop()
+		result.Warnings = append(result.Warnings, result.Hardware.Warnings...)
+		if result.Hardware.Samples > 0 && writer != nil {
+			path := filepath.Join(opts.OutputDir, "hardware.jsonl")
+			if artifactErr := writer.AddArtifact(path, "hardware_samples"); artifactErr != nil {
+				result.Warnings = append(result.Warnings, "seal hardware samples: "+artifactErr.Error())
+			}
+		}
 	}
 	_ = reader.Flush()
 	batchCaptures, batchWarnings := batchLayer.Collect(10 * time.Second)

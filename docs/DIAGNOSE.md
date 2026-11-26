@@ -27,6 +27,8 @@
 <run 目录>/
   spans.jsonl    # 原始 host span，一行一个对象
   manifest.json  # 运行环境、目标 PID、库 inode、统计与 warnings（可缺，缺则告警）
+  hardware.jsonl # 可选：npu-smi 硬件采样（run 级，不逐调用 join）
+  device.jsonl   # 可选：M3 设备时间线；有它才输出 device 侧结论
 ```
 
 `--input` 可以是 run 目录，也可以直接指向 `spans.jsonl`。命令只读取 span 元数据与 request_id，
@@ -68,6 +70,8 @@
 | `--slow-threshold` | 进入证据列表的最小耗时 | 1ms |
 | `--offcpu-ratio` | `host_lock_contention` 的 off-CPU/wall 阈值 | 0.5 |
 | `--futex-ratio` | `host_lock_contention` 的 futex/wall 阈值 | 0.3 |
+| `--hbm-free-pct` | `hbm_pressure` 的 HBM free% 阈值 | 5 |
+| `--device-tolerance` | host/device API start 最大偏差 | 100µs |
 | `--json` | 输出 JSON（`cann.diagnose.report.v1`） | Markdown |
 | `--out` | 写入文件 | stdout |
 
@@ -99,6 +103,8 @@ Schema 固定为 `cann.diagnose.report.v1`，主要字段：
 | `functions[]` | function、category、count、p50/p95/max/total、offcpu_ns、futex_ns、blocking_samples |
 | `categories[]` | category 分布（count / span_pct / total_ns） |
 | `blocking` | off-CPU/futex 采样范围、wall、offcpu、futex、比例、证据 span、嵌套提示 |
+| `hardware` | 可选：npu-smi 的每设备 AICore/HBM/功耗/温度与最低 HBM free% |
+| `device` | 可选：M3 join 的匹配率、时钟偏移、reason、每设备 busy、device verdict 计数 |
 | `verdicts[]` | verdict、reason、confidence、evidence |
 | `evidence[]` | 慢 span 的 span_id、function、pid/tid、start/end、duration、offcpu/futex |
 | `unknowns[]` | 当前无法判定的原因 |
@@ -119,9 +125,16 @@ Markdown 报告包含同样的信息，并固定声明：原始值以 `spans.jso
 | off-CPU/wall < 0.2 | `host_cpu_running` |
 | 其它 | `host_blocking_mixed` |
 
-无论数据如何，下列结论**不会**输出，只会写入 `unknowns`：
+硬件层：最低 HBM free% < `--hbm-free-pct` 且存在超过慢阈值的 `category=memory` span 时，
+追加 `hbm_pressure`（confidence 0.6）。它只是线索，需要设备侧证据确认。
 
-- `device_bound` / `launch_starvation` / `copy_bound` / `communication_bound`（需要 msPTI/M3）；
+设备侧：只有存在 `device.jsonl` 且 join 匹配成功时才输出
+`device_bound` / `launch_starvation` / `copy_bound` / `communication_bound`；
+具体阈值和 reason 见 `docs/M3-DEVICE-JOIN.md`。匹配率 <90% 或退化为时间窗时，结论会降置信度并写入 unknown。
+
+没有 `device.jsonl` 或 join 未匹配时，下列结论**不会**输出，只写入 `unknowns`：
+
+- `device_bound` / `launch_starvation` / `copy_bound` / `communication_bound`；
 - 单 request 延迟（batch 是 `SchedulerOutput.num_scheduled_tokens` 窗口）；
 - `execute_model` 的 Python 函数级耗时（插件未激活）。
 

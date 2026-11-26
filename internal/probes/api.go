@@ -7,6 +7,7 @@ import (
 
 	"cann-ebpf/internal/config"
 	"cann-ebpf/internal/contextfeed"
+	"cann-ebpf/internal/hardware"
 	"cann-ebpf/internal/runlog"
 )
 
@@ -26,6 +27,7 @@ type Options struct {
 	ContextSocket string
 	PythonBatch   PythonBatchOptions
 	Blocking      BlockingMode
+	HardwareMode  string
 }
 
 // PythonBatchOptions enables the read-only CPython/vLLM SchedulerOutput
@@ -63,6 +65,7 @@ type Result struct {
 	Context      contextfeed.Snapshot
 	PythonBatch  []PythonBatchCapture
 	Blocking     BlockingResult
+	Hardware     hardware.Result
 }
 
 type PythonBatchCapture struct {

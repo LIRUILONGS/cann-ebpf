@@ -7,6 +7,8 @@
 package diagnose
 
 import (
+	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -16,6 +18,8 @@ import (
 	"strings"
 	"time"
 
+	"cann-ebpf/internal/device"
+	"cann-ebpf/internal/hardware"
 	"cann-ebpf/internal/runlog"
 )
 
@@ -28,18 +32,20 @@ const (
 
 // Options are the read-only filters and thresholds for one diagnosis.
 type Options struct {
-	StartNS              int64
-	EndNS                int64
-	Last                 time.Duration
-	PIDs                 []int
-	TIDs                 []int
-	BatchID              string
-	RequestID            string
-	TraceID              string
-	TopN                 int
-	SlowThresholdNS      int64
-	OffCPURatioThreshold float64
-	FutexRatioThreshold  float64
+	StartNS               int64
+	EndNS                 int64
+	Last                  time.Duration
+	PIDs                  []int
+	TIDs                  []int
+	BatchID               string
+	RequestID             string
+	TraceID               string
+	TopN                  int
+	SlowThresholdNS       int64
+	OffCPURatioThreshold  float64
+	FutexRatioThreshold   float64
+	HBMFreePctThreshold   float64
+	DeviceTimeToleranceNS int64
 }
 
 func (o *Options) normalize() {
@@ -55,6 +61,12 @@ func (o *Options) normalize() {
 	if o.FutexRatioThreshold <= 0 {
 		o.FutexRatioThreshold = 0.3
 	}
+	if o.HBMFreePctThreshold <= 0 {
+		o.HBMFreePctThreshold = 5
+	}
+	if o.DeviceTimeToleranceNS <= 0 {
+		o.DeviceTimeToleranceNS = 100_000
+	}
 }
 
 // Input is one loaded evidence run.
@@ -62,8 +74,12 @@ type Input struct {
 	Path         string
 	JSONLPath    string
 	ManifestPath string
+	HardwarePath string
+	DevicePath   string
 	Manifest     *runlog.Manifest
 	Spans        []runlog.Span
+	Hardware     []hardware.Sample
+	DeviceSpans  []device.Span
 	Warnings     []string
 }
 
@@ -81,9 +97,13 @@ func Load(path string) (*Input, error) {
 	if info.IsDir() {
 		in.JSONLPath = filepath.Join(path, "spans.jsonl")
 		in.ManifestPath = filepath.Join(path, "manifest.json")
+		in.HardwarePath = filepath.Join(path, "hardware.jsonl")
+		in.DevicePath = filepath.Join(path, "device.jsonl")
 	} else {
 		in.JSONLPath = path
 		in.ManifestPath = filepath.Join(filepath.Dir(path), "manifest.json")
+		in.HardwarePath = filepath.Join(filepath.Dir(path), "hardware.jsonl")
+		in.DevicePath = filepath.Join(filepath.Dir(path), "device.jsonl")
 	}
 	file, err := os.Open(in.JSONLPath)
 	if err != nil {
@@ -107,7 +127,54 @@ func Load(path string) (*Input, error) {
 	} else {
 		in.Warnings = append(in.Warnings, "缺少 manifest.json：运行环境与完整性无法核对")
 	}
+	if file, hErr := os.Open(in.HardwarePath); hErr == nil {
+		defer file.Close()
+		samples, parseWarnings := readHardwareSamples(file)
+		in.Hardware = samples
+		in.Warnings = append(in.Warnings, parseWarnings...)
+	} else if !os.IsNotExist(hErr) {
+		in.Warnings = append(in.Warnings, fmt.Sprintf("hardware.jsonl 读取失败：%v", hErr))
+	}
+	if file, dErr := os.Open(in.DevicePath); dErr == nil {
+		defer file.Close()
+		spans, readErr := device.ReadSpans(file)
+		in.DeviceSpans = spans
+		if readErr != nil {
+			in.Warnings = append(in.Warnings, fmt.Sprintf("device.jsonl 读取中断（已保留 %d 条）：%v", len(spans), readErr))
+		}
+	} else if !os.IsNotExist(dErr) {
+		in.Warnings = append(in.Warnings, fmt.Sprintf("device.jsonl 读取失败：%v", dErr))
+	}
 	return in, nil
+}
+
+func readHardwareSamples(file *os.File) ([]hardware.Sample, []string) {
+	var samples []hardware.Sample
+	var warnings []string
+	scanner := bufio.NewScanner(file)
+	scanner.Buffer(make([]byte, 64*1024), 4*1024*1024)
+	line := 0
+	bad := 0
+	for scanner.Scan() {
+		line++
+		raw := bytes.TrimSpace(scanner.Bytes())
+		if len(raw) == 0 {
+			continue
+		}
+		var sample hardware.Sample
+		if err := json.Unmarshal(raw, &sample); err != nil {
+			bad++
+			continue
+		}
+		samples = append(samples, sample)
+	}
+	if err := scanner.Err(); err != nil {
+		warnings = append(warnings, fmt.Sprintf("hardware.jsonl 读取中断：%v", err))
+	}
+	if bad > 0 {
+		warnings = append(warnings, fmt.Sprintf("hardware.jsonl 有 %d 行无法解析，已跳过", bad))
+	}
+	return samples, warnings
 }
 
 type Filters struct {
@@ -228,6 +295,30 @@ type EvidenceSpan struct {
 	TraceID    string   `json:"trace_id,omitempty"`
 }
 
+type DeviceHardware struct {
+	DeviceID      int     `json:"device_id"`
+	Name          string  `json:"name,omitempty"`
+	Samples       int     `json:"samples"`
+	AICoreAvg     float64 `json:"aicore_avg_pct,omitempty"`
+	AICoreMax     float64 `json:"aicore_max_pct,omitempty"`
+	HBMFreeMinMB  *int64  `json:"hbm_free_min_mb,omitempty"`
+	HBMFreePctMin float64 `json:"hbm_free_min_pct,omitempty"`
+	PowerAvgW     float64 `json:"power_avg_w,omitempty"`
+	TempMaxC      float64 `json:"temp_max_c,omitempty"`
+}
+
+// HardwareSummary is coarse E-layer data. Sample timestamps are wall clock and
+// are not joined to the monotonic host spans; it can only support run-level
+// statements such as HBM pressure, never a per-call device timeline.
+type HardwareSummary struct {
+	Available     bool             `json:"available"`
+	Source        string           `json:"source,omitempty"`
+	Samples       int              `json:"samples"`
+	Devices       []DeviceHardware `json:"devices,omitempty"`
+	HBMFreePctMin *float64         `json:"hbm_free_min_pct,omitempty"`
+	AICorePctMax  float64          `json:"aicore_max_pct,omitempty"`
+}
+
 type Report struct {
 	Schema       string            `json:"schema"`
 	Status       string            `json:"status"`
@@ -235,6 +326,7 @@ type Report struct {
 	InputPath    string            `json:"input_path"`
 	JSONLPath    string            `json:"jsonl_path"`
 	ManifestPath string            `json:"manifest_path"`
+	DevicePath   string            `json:"device_path,omitempty"`
 	Run          RunInfo           `json:"run"`
 	Window       Window            `json:"window"`
 	Filters      Filters           `json:"filters"`
@@ -247,6 +339,8 @@ type Report struct {
 	Functions    []FunctionSummary `json:"functions"`
 	Categories   []CategorySummary `json:"categories"`
 	Blocking     BlockingSummary   `json:"blocking"`
+	Hardware     HardwareSummary   `json:"hardware"`
+	Device       *device.Report    `json:"device,omitempty"`
 	Verdicts     []Verdict         `json:"verdicts"`
 	Evidence     []EvidenceSpan    `json:"evidence"`
 	Unknowns     []string          `json:"unknowns"`
@@ -294,11 +388,13 @@ func Build(in *Input, opts Options) (Report, error) {
 		}
 	}
 	report.MatchedSpans = len(matched)
+	report.Hardware = buildHardware(in.Hardware)
 	if len(matched) == 0 {
 		report.Status = StatusEmpty
 		report.Unknowns = append(report.Unknowns,
 			"没有 span 匹配当前时间窗和过滤条件：不生成任何统计，也不补造数据。")
-		report.Unknowns = append(report.Unknowns, deviceUnknowns()...)
+		report.Unknowns = append(report.Unknowns, deviceUnknowns(false)...)
+		report.Unknowns = append(report.Unknowns, hardwareUnknowns(report.Hardware)...)
 		return report, nil
 	}
 	report.Status = StatusOK
@@ -306,7 +402,26 @@ func Build(in *Input, opts Options) (Report, error) {
 	aggregate(&report, matched, opts)
 	report.Blocking = buildBlocking(matched, opts)
 	report.Verdicts = buildVerdicts(report.Blocking, opts)
-	report.Unknowns = buildUnknowns(report.Blocking, in.Manifest)
+	if verdict, ok := hbmPressureVerdict(report.Hardware, matched, opts); ok {
+		report.Verdicts = append(report.Verdicts, verdict)
+	}
+	deviceEvidence := false
+	if len(in.DeviceSpans) > 0 {
+		report.DevicePath = in.DevicePath
+		joined := device.Join(matched, in.DeviceSpans, device.Options{
+			TimeToleranceNS: opts.DeviceTimeToleranceNS,
+			SlowThresholdNS: opts.SlowThresholdNS,
+		})
+		report.Verdicts = append(report.Verdicts, deviceVerdicts(joined)...)
+		report.Warnings = append(report.Warnings, joined.Warnings...)
+		report.Unknowns = append(report.Unknowns, deviceJoinUnknowns(joined)...)
+		trimmed := trimDeviceReport(joined, opts.TopN*2)
+		report.Device = &trimmed
+		deviceEvidence = joined.MatchedHostSpans > 0
+	}
+	report.Unknowns = append(report.Unknowns, buildUnknowns(report.Blocking, in.Manifest)...)
+	report.Unknowns = append(report.Unknowns, hardwareUnknowns(report.Hardware)...)
+	report.Unknowns = append(report.Unknowns, deviceUnknowns(deviceEvidence)...)
 	report.Functions = topFunctions(report.Functions, opts.TopN)
 	report.Evidence = buildEvidence(matched, opts)
 	return report, nil
@@ -729,8 +844,210 @@ func buildVerdicts(blocking BlockingSummary, opts Options) []Verdict {
 	}
 }
 
+func buildHardware(samples []hardware.Sample) HardwareSummary {
+	summary := HardwareSummary{}
+	if len(samples) == 0 {
+		return summary
+	}
+	type agg struct {
+		name       string
+		count      int
+		aicoreSum  float64
+		aicoreN    int
+		aicoreMax  float64
+		hbmFreeMin int64
+		hbmFreeSet bool
+		hbmPctMin  float64
+		hbmPctSet  bool
+		powerSum   float64
+		powerN     int
+		tempMax    float64
+		tempSet    bool
+	}
+	groups := map[int]*agg{}
+	var order []int
+	var minPct float64
+	havePct := false
+	for _, sample := range samples {
+		g := groups[sample.DeviceID]
+		if g == nil {
+			g = &agg{name: sample.Name}
+			groups[sample.DeviceID] = g
+			order = append(order, sample.DeviceID)
+		}
+		g.count++
+		if sample.Name != "" {
+			g.name = sample.Name
+		}
+		if sample.AICorePct != nil {
+			g.aicoreSum += *sample.AICorePct
+			g.aicoreN++
+			if *sample.AICorePct > g.aicoreMax {
+				g.aicoreMax = *sample.AICorePct
+				if g.aicoreMax > summary.AICorePctMax {
+					summary.AICorePctMax = g.aicoreMax
+				}
+			}
+		}
+		if sample.HBMFreeMB != nil {
+			if !g.hbmFreeSet || *sample.HBMFreeMB < g.hbmFreeMin {
+				g.hbmFreeMin = *sample.HBMFreeMB
+				g.hbmFreeSet = true
+			}
+		}
+		if pct, ok := sample.HBMFreePct(); ok {
+			if !g.hbmPctSet || pct < g.hbmPctMin {
+				g.hbmPctMin = pct
+				g.hbmPctSet = true
+			}
+			if !havePct || pct < minPct {
+				minPct = pct
+				havePct = true
+			}
+		}
+		if sample.PowerW != nil {
+			g.powerSum += *sample.PowerW
+			g.powerN++
+		}
+		if sample.TempC != nil && (!g.tempSet || *sample.TempC > g.tempMax) {
+			g.tempMax = *sample.TempC
+			g.tempSet = true
+		}
+		summary.Samples++
+		if summary.Source == "" {
+			summary.Source = sample.Source
+		}
+	}
+	summary.Available = true
+	if havePct {
+		value := minPct
+		summary.HBMFreePctMin = &value
+	}
+	sort.Ints(order)
+	for _, id := range order {
+		g := groups[id]
+		device := DeviceHardware{
+			DeviceID: id, Name: g.name, Samples: g.count,
+			AICoreMax: g.aicoreMax, TempMaxC: g.tempMax,
+		}
+		if g.aicoreN > 0 {
+			device.AICoreAvg = g.aicoreSum / float64(g.aicoreN)
+		}
+		if g.hbmFreeSet {
+			value := g.hbmFreeMin
+			device.HBMFreeMinMB = &value
+		}
+		if g.hbmPctSet {
+			device.HBMFreePctMin = g.hbmPctMin
+		}
+		if g.powerN > 0 {
+			device.PowerAvgW = g.powerSum / float64(g.powerN)
+		}
+		summary.Devices = append(summary.Devices, device)
+	}
+	return summary
+}
+
+func hardwareUnknowns(summary HardwareSummary) []string {
+	if !summary.Available {
+		return []string{"没有硬件层数据（npu-smi/DCMI 不可用或 --hardware off）：无法给出 HBM 余量或 AICore 利用率。"}
+	}
+	if summary.HBMFreePctMin == nil {
+		return []string{"hardware.jsonl 缺少 HBM 字段：无法判断 HBM 余量。"}
+	}
+	return nil
+}
+
+func hbmPressureVerdict(summary HardwareSummary, spans []runlog.Span, opts Options) (Verdict, bool) {
+	if !summary.Available || summary.HBMFreePctMin == nil || *summary.HBMFreePctMin >= opts.HBMFreePctThreshold {
+		return Verdict{}, false
+	}
+	var evidence []string
+	for _, span := range spans {
+		if span.Category != "memory" || span.DurationNS < opts.SlowThresholdNS {
+			continue
+		}
+		if span.SpanID != "" && len(evidence) < 3 {
+			evidence = append(evidence, span.SpanID)
+		}
+	}
+	if len(evidence) == 0 {
+		return Verdict{}, false
+	}
+	return Verdict{
+		Verdict: "hbm_pressure",
+		Reason: fmt.Sprintf("最低 HBM 余量 %.1f%% < %.0f%%，且存在慢 memory 调用；提示 HBM 压力，但需设备侧证据确认。",
+			*summary.HBMFreePctMin, opts.HBMFreePctThreshold),
+		Confidence: 0.6,
+		Evidence:   evidence,
+	}, true
+}
+
+func deviceVerdicts(joined device.Report) []Verdict {
+	if joined.MatchedHostSpans == 0 {
+		return nil
+	}
+	mode := "api_record"
+	if joined.TimeWindowFallback {
+		mode = "time_window"
+	}
+	var out []Verdict
+	for _, item := range joined.Verdicts {
+		var evidence []string
+		for _, host := range joined.Hosts {
+			if host.SpanID != "" && len(evidence) < 3 && stringIn(host.Verdicts, item.Verdict) {
+				evidence = append(evidence, host.SpanID)
+			}
+		}
+		base := 0.4 + 0.1*float64(item.Count)
+		if base > 0.9 {
+			base = 0.9
+		}
+		confidence := clamp01(base * (0.5 + 0.5*joined.MatchRate))
+		out = append(out, Verdict{
+			Verdict: item.Verdict,
+			Reason: fmt.Sprintf("设备侧证据：%d 条慢 span 满足 %s（匹配率 %.1f%%，模式 %s，时钟偏移 %dns）。",
+				item.Count, item.Verdict, joined.MatchRate*100, mode, joined.ClockOffsetNS),
+			Confidence: confidence,
+			Evidence:   evidence,
+		})
+	}
+	return out
+}
+
+func deviceJoinUnknowns(joined device.Report) []string {
+	var out []string
+	if joined.TimeWindowFallback {
+		out = append(out, "device.jsonl 没有 API record：使用时间窗重叠匹配，不是精确 correlationId 关联。")
+	}
+	if joined.MatchRate > 0 && joined.MatchRate < 0.9 {
+		out = append(out, fmt.Sprintf("设备侧 join 匹配率仅 %.1f%%：未匹配 host span 不能用于设备侧结论。", joined.MatchRate*100))
+	}
+	return out
+}
+
+func trimDeviceReport(joined device.Report, limit int) device.Report {
+	var matched []device.HostResult
+	for _, host := range joined.Hosts {
+		if host.Matched {
+			matched = append(matched, host)
+		}
+	}
+	sort.Slice(matched, func(i, j int) bool {
+		if matched[i].DurationNS == matched[j].DurationNS {
+			return matched[i].SpanID < matched[j].SpanID
+		}
+		return matched[i].DurationNS > matched[j].DurationNS
+	})
+	if limit > 0 && len(matched) > limit {
+		matched = matched[:limit]
+	}
+	joined.Hosts = matched
+	return joined
+}
+
 func buildUnknowns(blocking BlockingSummary, manifest *runlog.Manifest) []string {
-	unknowns := deviceUnknowns()
+	unknowns := []string{}
 	if !blocking.Measured {
 		if blocking.InvalidSamples > 0 {
 			unknowns = append(unknowns,
@@ -755,13 +1072,17 @@ func buildUnknowns(blocking BlockingSummary, manifest *runlog.Manifest) []string
 	return unknowns
 }
 
-func deviceUnknowns() []string {
-	return []string{
-		"无法回答设备侧执行时间（NPU kernel / memcpy / HCCL）：msPTI（M3）未接入。",
-		"无法区分 device_bound / launch_starvation / copy_bound / communication_bound：缺少设备时间线证据。",
-		"无法回答单 request 延迟：batch span 是 SchedulerOutput.num_scheduled_tokens 的观测窗口，不是逐 request 执行时长。",
-		"无法回答 execute_model 的 Python 函数级耗时：vLLM 插件未激活，纯 eBPF 的 PyObject_GetAttr 不是函数边界。",
+func deviceUnknowns(hasEvidence bool) []string {
+	unknowns := []string{}
+	if !hasEvidence {
+		unknowns = append(unknowns,
+			"无法回答设备侧执行时间（NPU kernel / memcpy / HCCL）：没有可用的 device.jsonl（msPTI/M3 未接入或未匹配）。",
+			"无法区分 device_bound / launch_starvation / copy_bound / communication_bound：缺少设备时间线证据。")
 	}
+	unknowns = append(unknowns,
+		"无法回答单 request 延迟：batch span 是 SchedulerOutput.num_scheduled_tokens 的观测窗口，不是逐 request 执行时长。",
+		"无法回答 execute_model 的 Python 函数级耗时：vLLM 插件未激活，纯 eBPF 的 PyObject_GetAttr 不是函数边界。")
+	return unknowns
 }
 
 func buildEvidence(spans []runlog.Span, opts Options) []EvidenceSpan {

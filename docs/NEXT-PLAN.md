@@ -5,6 +5,13 @@
 
 ## 0. 结论先行
 
+> 2026-11-26 执行更新：
+> - ✅ E 层 npu-smi 硬件采样（代码 + V4 批量验证）
+> - ✅ M3 join 管线（schema/join/diagnose + 真实 host span 上的合成时间线验证）
+> - ❌ M3.0 `msprof --pid` 动态 attach：三种变体均段错误，判定不可用；证据见 `docs/M3-FEASIBILITY.md`
+> - ⏳ M3 生产端改为容器内 in-process collector，需要维护窗口
+> - ⏳ M2 开销基线、真实锁竞争窗口仍待做
+
 下一步不是“直接写 M3 代码”，而是先用 1 天做 **msPTI 可行性验证**，同时并行做两件不需要重启 V4 的事：
 
 1. **M3.0 msPTI 动态 attach 可行性**：目标机容器内 `msprof` 支持 `--pid` 动态 profiling，
@@ -40,42 +47,24 @@
 
 ## 2. 阶段与优先级
 
-### P0-1：M3.0 msPTI 动态 attach 可行性（0.5–1 天，短窗口、可回退）
+### P0-1：M3.0 msPTI 动态 attach 可行性（已完成：结论为不可用）
 
-产出：
-- 对 1 个 Worker PID 做 5 秒 `msprof --pid`，记录输出树、文件格式、activity 类型；
-- 对 V4 做 5 秒 `msprof --pid <engine/worker 列表> --sys-devices all`，前后 health/service/残留检查；
-- 写 `docs/M3-FEASIBILITY.md`：能采到什么、缺什么、开销、是否可 join、下一步选型。
+结果：`msprof --pid` 三种变体均段错误（exit 139），V4 未受影响；详见 `docs/M3-FEASIBILITY.md`。
+结论：动态 attach 路线拒绝，改为容器内 in-process collector + 维护窗口。
 
-验收：
-- 不重启 V4，health 200/200、service active/active；
-- 明确回答“correlationId 是否可见”“kernel/memcpy/HCCL 是否可用”“开销是否可接受”；
-- 给出选型结论：动态 attach 解析 vs 容器内 in-process collector。
+原计划产出（已由可行性记录替代）：
+- ~~对 1 个 Worker PID 做 5 秒 `msprof --pid`~~（已做，失败）
+- ~~对 V4 做 5 秒 `msprof --pid <engine/worker 列表>`~~（未做，单 Worker 已确认不可用）
+- `docs/M3-FEASIBILITY.md`：已写，含环境、三变体结果、影响与决策。
 
-建议命令（先只测一个 worker，5 秒）：
+### P0-2：E 层硬件指标（已完成）
 
-```bash
-docker exec deepseek-v4-flash-8905 sh -c '
-  /usr/local/Ascend/ascend-toolkit/latest/bin/msprof \
-    --pid 1452 --duration 5 --sys-devices 0 \
-    --output /tmp/m3probe-$(date +%s)'
-```
+实现：`internal/hardware` + `--hardware auto|on|off`，npu-smi 采样写入 `hardware.jsonl` 并纳入
+manifest artifact；`diagnose` 输出每设备 AICore/HBM/功耗/温度，并在 HBM free < 5% 且存在慢 memory
+调用时给出 `hbm_pressure`。
 
-风险与回退：`msprof --pid` 若需停止/暂停目标或报权限错误，立即终止，不重试强采；不修改容器配置。
-
-### P0-2：E 层硬件指标（1 天，无重启）
-
-目标：补 `hardware` 采样，回答 HBM 压力、粗粒度设备忙碌，不冒充 kernel 时间线。
-
-实现：
-- 新增 `internal/hardware`：优先 DCMI（宿主 `libdcmi.so`），回退 `npu-smi info` 解析；
-- 5–10 秒采样 AICore%、HBM used/total、power、temp，写入 `hardware.jsonl` 并纳入 manifest artifact；
-- `diagnose` 增加 `hardware` 汇总：HBM free%、AICore 均值/峰值；
-- 判定新增 `hbm_pressure`（Malloc 慢且 HBM free < 5%），不输出 `device_bound`。
-
-验收：
-- V4 上 10 秒采样，字段与 `npu-smi` 手工值一致；
-- 采集不改变服务状态；数值缺失时明确 `unknown`，不补造。
+验证：V4 10 秒 7,794 spans + 2 采样 × 8 设备；`--hardware off` 不产出文件；health/service 不变。
+详见 `docs/HARDWARE.md`。
 
 ### P0-3：M2 收尾（1 天，无重启）
 
@@ -89,15 +78,14 @@ docker exec deepseek-v4-flash-8905 sh -c '
 
 ### P1-1：M3.1–M3.3 设备时间线与 join（3–5 天，取决于 P0-1 结论）
 
-**路线 A：msprof 动态 attach 可解析（优先）**
-- `internal/mspti`（或 `internal/device`）解析 msprof 输出：API / KERNEL / MEMCPY / HCCL record；
-- 建立 device span：`device_id`、`stream_id`、`kind`、`start/end`、`correlation_id`、`name`；
-- host/device 时钟校准：用同一批 API record 与 eBPF span 的中位偏差，按 device 分别记录；
-- join：`(pid, tid, api, start±100µs)` 一对一匹配 API record，再用 `(device_id, correlationId)`
-  关联 kernel/memcpy/HCCL；
-- `join-report.md/json`：对齐率、未匹配数量与原因（no_record/time_skew/api_name_mismatch/duplicate/mspti_off）；
-- `diagnose` 增加 `device` 证据；只有 join 成功才输出 `device_bound` / `launch_starvation` /
-  `copy_bound` / `communication_bound`，否则明确降级为时间窗。
+**路线 A：msprof 动态 attach（已验证不可用，拒绝）**
+- 三种变体均段错误；不再重试。
+
+**已完成的 join 管线（`internal/device` + diagnose）**
+- `cann.device.v1` schema、API→correlationId→KERNEL/MEMCPY/HCCL 匹配、时间窗回退；
+- 时钟偏移估计、reason 分类、每设备 busy、四类 device verdict；
+- 已用真实 V4 host span + 合成 device.jsonl 验证 7,794/7,794 匹配；
+- 详见 `docs/M3-DEVICE-JOIN.md`。
 
 **路线 B：容器内 in-process msPTI collector（需要维护窗口）**
 - 在容器内编译/放置 helper，用 `libmspti.so` 采集 API/KERNEL/MEMCPY/HCCL；

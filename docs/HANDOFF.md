@@ -13,9 +13,9 @@
 | Git 分支 | `main` |
 | 最新提交 | 见 `git log -1`（`diagnose`、M2 off-CPU/futex 及上机验证记录） |
 | Git remote | 未配置；交接前建议先配置内部 Git 远程并推送 |
-| Linux/arm64 二进制（M2） | `dist/cann-ebpf-linux-arm64-m2` |
-| 二进制大小 | `9,389,783` bytes |
-| 二进制 SHA-256 | `8A515B96116EC19A28CBC73F7F629B99FA9F564D57FDCB3075380F37F7CC428E` |
+| Linux/arm64 二进制（M2/M3-dev） | `dist/cann-ebpf-linux-arm64-m2` |
+| 二进制大小 | `9,722,312` bytes |
+| 二进制 SHA-256 | `B4991B716B5F552F538CE92968D26B72B15C4EAED27ABB0F977BA2E6E059D094` |
 | 历史已验证二进制 | `dist/cann-ebpf-linux-arm64-batch`（`0.5.0-m5`，上表 SHA 已替换为 M2 构建，旧包仍保留在 dist/） |
 | 服务器验证副本（历史） | `/root/cann-ebpf`，V4 服务器 `bms-84865758` |
 | 服务器 profiles | `/root/cann-ebpf/profiles` |
@@ -51,13 +51,17 @@
 | 纯 eBPF vLLM batch 标准采集 | 完成 | 已并入 `spans.jsonl`/summary，真实 V4 验证通过 |
 | P0 `diagnose` 命令 | 完成 | 只读读取已有证据，JSON/Markdown，单测覆盖；不需要 NPU |
 | M2 off-CPU/futex 归因 | 完成并上机验证 | sched_switch + syscalls futex tracepoint、`offcpu_ns`/`futex_ns`；V4 10 秒与合成锁竞争均通过 |
+| E 层 npu-smi 硬件指标 | 完成并上机验证 | `hardware.jsonl`、manifest artifact、`hbm_pressure`；8 设备/HBM/AICore/功耗/温度 |
+| M3 device join 管线 | 代码完成，生产端未接通 | `cann.device.v1` schema、join、device verdict、diagnose 集成；真实设备数据需维护窗口 |
+| M3.0 msprof 动态 attach | 已验证不可用 | `msprof --pid` 三变体段错误；改为容器内 in-process collector |
 | vLLM general plugin | 代码和单测完成，未激活 | 未安装到运行中的 V4，也未重启验证；本阶段不做 |
 | Orinfer | 仅 profile validate | 服务未运行，没有真实采集窗口 |
-| M3 msPTI 设备时间线 | 未实现 | 下一阶段重点 |
+| M3 msPTI 设备时间线 | 未实现 | in-process collector 待维护窗口 |
 | M6 生产化 | 未实现 | Prometheus/OTLP、Grafana、systemd 等未做 |
 
-注意：版本号 `0.6.0-m2` 表示本次交付 `diagnose` 与 M2 host 阻塞归因。M2 已在 V4 生产服务和
-合成锁竞争目标上验证（见 `docs/M2-VALIDATION.md`），但它仍不回答设备执行时间和单 request 延迟；
+注意：版本号 `0.6.0-m2` 是功能基线；本次新增的 E 层硬件与 M3 device join 代码仍沿用该版本号，
+但 M3 生产端（in-process msPTI）未接通。M2 已在 V4 和合成锁竞争上验证（见 `docs/M2-VALIDATION.md`），
+硬件层见 `docs/HARDWARE.md`，join 管线见 `docs/M3-DEVICE-JOIN.md`。三者都不回答单 request 延迟；
 M5 的 V4/Orinfer A/B 对比也还没有做。
 
 ### 3.2 M0：发现与符号解析
@@ -155,6 +159,26 @@ span_id, seq
   `--blocking off` 不产生任何 blocking 字段。详见 `docs/M2-VALIDATION.md`。
 - 仍未做：设备侧 join、生产流量下的真实锁竞争样本、长跑开销基线。
 
+### 3.9 E 层 npu-smi 硬件指标（已完成并上机验证）
+
+- `internal/hardware` 周期采样 `npu-smi info`，写 `hardware.jsonl`，并作为 manifest artifact 封存；
+- 字段：AICore%、HBM used/total/free、功耗、温度、健康；缺失不补造；
+- 解析器只接受合法 Health 行，忽略 `npu-smi` 末尾的进程表（曾误解析成第 9 个设备，已修复）；
+- `attach --hardware auto|on|off`；`diagnose` 输出每设备硬件表，并在 HBM free<5% 且存在慢 memory
+  调用时给出 `hbm_pressure`；
+- 硬件是 wall-clock 采样，不能与 monotonic host span 逐调用 join。详见 `docs/HARDWARE.md`。
+
+### 3.10 M3 device 时间线 join（代码完成，生产端未接通）
+
+- `internal/device` 定义 `cann.device.v1`（API/KERNEL/MEMCPY/HCCL）与 join：
+  `(pid,tid,start±100µs)` 匹配 API record → `correlationId` → 设备区间；
+- 支持时钟偏移估计、reason 分类（ok/no_api_record/api_name_mismatch/duplicate/no_device_record/time_window）、
+  时间窗退化、每设备 busy 并集、四类 device verdict；
+- `diagnose` 自动读取 run 目录 `device.jsonl`，有设备证据才输出 `device_bound` 等结论；
+- 已用真实 V4 host span + 合成 device.jsonl 验证 7,794/7,794 匹配；合成数据只证明代码路径；
+- M3.0 `msprof --pid` 动态 attach 三变体均段错误，判定不可用；生产端改为容器内 in-process
+  collector，需维护窗口。详见 `docs/M3-DEVICE-JOIN.md`、`docs/M3-FEASIBILITY.md`。
+
 ## 4. 当前能回答和不能回答的问题
 
 ### 能回答
@@ -192,6 +216,8 @@ span_id, seq
 | `internal/probes/blocking_linux.go` | sched_switch/futex attach、blocking map 配置 |
 | `internal/probes/loader.go` | 主 collection 与 blocking collection 分离加载 |
 | `internal/diagnose/` | 已读证据的过滤、聚合、判定、JSON/Markdown |
+| `internal/hardware/` | E 层 npu-smi 采样、解析、JSONL |
+| `internal/device/` | `cann.device.v1` schema 与 host/device join |
 | `internal/probes/pythonbatch_linux_arm64.go` | 纯 eBPF CPython/vLLM batch 采集 |
 | `internal/runlog/` | JSONL、manifest、summary、span 读取 |
 | `profiles/vllm-ascend.yaml` | V4/vLLM-Ascend profile |
@@ -204,6 +230,9 @@ span_id, seq
 | `docs/M2-OFFCPU.md` | M2 设计、判定口径与边界 |
 | `docs/M2-VALIDATION.md` | M2 上机验证数据、修复记录和证据位置 |
 | `docs/NEXT-PLAN.md` | M2 之后的分阶段方案（M3 可行性、E 层、开销基线、生产化） |
+| `docs/HARDWARE.md` | E 层 npu-smi 采样、schema、验证与边界 |
+| `docs/M3-DEVICE-JOIN.md` | device 时间线 schema、join 算法、诊断接线与合成验证 |
+| `docs/M3-FEASIBILITY.md` | msprof/msPTI 动态采集可行性结论 |
 | `docs/M4-VALIDATION.md` | V4 实测记录 |
 | `docs/VLLM-BATCH-POC.md` | 纯 eBPF batch POC 记录 |
 
@@ -230,6 +259,9 @@ span_id, seq
 | M2 验证（V4） | 7,561 spans，`attached=4 failed=0`，无效样本 0，off-CPU 1.1%、futex 0.0%，verdict `host_cpu_running`；health/service/残留正常 |
 | M2 验证（合成） | 791 spans，off-CPU 99.7%、futex 99.9%，verdict `host_lock_contention`（confidence 1.00） |
 | `--blocking off` | 7,145 spans，无任何 offcpu/futex 字段，服务状态不变 |
+| E 层硬件验证 | 10 秒 7,794 spans + 2 采样×8 设备；HBM free 6.3%、AICore 峰值 46%；manifest artifact 4202 bytes |
+| M3 join 验证（合成时间线） | 真实 7,794 host spans + 合成 device.jsonl：100% 匹配、reason 全 `ok`、`device_bound` 5,721 条 |
+| M3.0 msprof 动态 attach | 三变体均 exit 139（Segmentation fault），V4 health/service/worker 全程正常 |
 
 ## 7. 下一步工作方向
 
@@ -273,22 +305,23 @@ span_id, seq
 完整证据和修复记录见 `docs/M2-VALIDATION.md`。剩余限制：嵌套 span 不采样、没有生产流量下的
 真实锁竞争样本、长跑开销基线未做、仍不能下设备侧结论。
 
-### P1：M3 msPTI / CANN profiler join
+### P1：M3 设备时间线与 join（部分完成）
 
-目标：把 host span 关联到 device kernel / memcpy / HCCL 时间线。
+已完成：
 
-实现：
+- `internal/device`：`cann.device.v1` schema、API→correlationId→KERNEL/MEMCPY/HCCL join、
+  时钟偏移、时间窗退化、reason 分类、四类 device verdict；
+- `diagnose` 自动读取 `device.jsonl`，有证据才输出设备结论；
+- 用真实 V4 host span（7,794 条）+ 合成 device.jsonl 验证 100% 匹配；
+- M3.0 可行性结论：`msprof --pid` 三变体段错误，动态 attach 路线不可用。
 
-- 接入 msPTI API / KERNEL / MEMCPY / HCCL record；
-- 校准 host 与容器/设备时钟；
-- 按 `(device_id, correlationId)` join；
-- 生成 join report：对齐率、未匹配数量、未匹配原因。
+待做（需要维护窗口）：
 
-验收：
+- 容器内 in-process msPTI collector（C/Python）产出 `cann.device.v1`；
+- 用已知 kernel 验证 correlationId 真能关联；95% 慢 Sync 匹配、偏差 <100µs；
+- 生产端接通后写 `docs/M3-VALIDATION.md`；join 失败时降级为时间窗，不伪造精确关联。
 
-- 在一个已知 kernel 上验证 correlationId 真能关联；
-- `device_bound`、`launch_starvation`、`copy_bound`、`communication_bound` 只有在有设备侧证据时才输出；
-- join 失败时明确降级为时间窗，不伪造精确关联。
+详见 `docs/M3-DEVICE-JOIN.md`、`docs/M3-FEASIBILITY.md`。
 
 ### P2：`execute_model` 边界（本轮明确不做）
 
@@ -327,6 +360,9 @@ span_id, seq
 - 不把 37 个已 attach 函数说成同一窗口全部触发；必须区分“可解析/可 attach”和“实际观测到”。
 - M2 只覆盖最外层 span 的 host 阻塞，不能写成 request 延迟或 NPU 执行时间；嵌套 span 缺 blocking
   字段是设计行为，不是数据丢失。
+- 合成 `device.jsonl` 只用于验证 join 代码路径，不能写成真实设备执行时间；没有真实 device 数据时
+  不输出 `device_bound` 等结论。
+- `msprof --pid` 已确认会段错误，不要在生产容器反复重试；M3 生产端走维护窗口。
 - 插件默认不启用；插件路径和纯 eBPF 路径必须分开描述。
 - `dist/`、`runs/`、`__pycache__` 不提交；代码修改需要 Git 提交。
 

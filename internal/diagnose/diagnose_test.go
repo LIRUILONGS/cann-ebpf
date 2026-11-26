@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"cann-ebpf/internal/device"
+	"cann-ebpf/internal/hardware"
 	"cann-ebpf/internal/runlog"
 	"cann-ebpf/internal/tracectx"
 )
@@ -375,6 +377,134 @@ func TestBlockingAllSamplesInvalid(t *testing.T) {
 		t.Fatalf("unknowns = %v", report.Unknowns)
 	}
 }
+
+func TestHardwareSummaryAndHbmPressure(t *testing.T) {
+	spans := testSpans()
+	spans = append(spans, runlog.Span{
+		Schema: runlog.SpanSchemaV1, RunID: "run-1", Profile: "vllm-ascend",
+		TsNS: 7000, StartNS: 7000, EndNS: 9000, PID: 100, TID: 13, TGID: 100,
+		Function: "aclrtMalloc", Category: "memory", DurationNS: 2000,
+		SpanID: "s-mem", Seq: 5,
+	})
+	used := int64(65000)
+	total := int64(65536)
+	samples := []hardware.Sample{
+		{Schema: hardware.SampleSchemaV1, DeviceID: 0, Name: "910B2", HBMUsedMB: &used, HBMTotalMB: &total, Source: "npu-smi",
+			AICorePct: hardwareFloat(25)},
+		{Schema: hardware.SampleSchemaV1, DeviceID: 1, Name: "910B2", HBMUsedMB: &used, HBMTotalMB: &total, Source: "npu-smi",
+			AICorePct: hardwareFloat(80)},
+	}
+	input := newInput(spans)
+	input.Hardware = samples
+	report, err := Build(input, Options{SlowThresholdNS: 500})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !report.Hardware.Available || len(report.Hardware.Devices) != 2 {
+		t.Fatalf("hardware = %+v", report.Hardware)
+	}
+	if report.Hardware.HBMFreePctMin == nil {
+		t.Fatal("hbm free pct missing")
+	}
+	if pct := *report.Hardware.HBMFreePctMin; pct < 0.7 || pct > 0.9 {
+		t.Fatalf("hbm free pct = %v", pct)
+	}
+	if report.Hardware.AICorePctMax != 80 {
+		t.Fatalf("aicore max = %v", report.Hardware.AICorePctMax)
+	}
+	found := false
+	for _, verdict := range report.Verdicts {
+		if verdict.Verdict == "hbm_pressure" {
+			found = true
+			if len(verdict.Evidence) != 1 || verdict.Evidence[0] != "s-mem" {
+				t.Fatalf("hbm evidence = %+v", verdict)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("hbm_pressure verdict missing: %+v", report.Verdicts)
+	}
+	md := report.Markdown()
+	if !strings.Contains(md, "硬件层") || !strings.Contains(md, "hbm_pressure") {
+		t.Fatalf("markdown missing hardware section:\n%s", md)
+	}
+}
+
+func TestHardwareMissingIsUnknown(t *testing.T) {
+	report, err := Build(newInput(testSpans()), Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Hardware.Available {
+		t.Fatal("hardware should be unavailable")
+	}
+	if !contains(report.Unknowns, "没有硬件层数据") {
+		t.Fatalf("unknowns = %v", report.Unknowns)
+	}
+}
+
+func TestLoadHardwareSamples(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "spans.jsonl"), []byte{}, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	line := `{"schema":"cann.hardware.v1","ts_ns":1,"device_id":0,"name":"910B2","hbm_used_mb":10,"hbm_total_mb":100,"source":"npu-smi"}` + "\n" + "not-json\n"
+	if err := os.WriteFile(filepath.Join(dir, "hardware.jsonl"), []byte(line), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	in, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(in.Hardware) != 1 {
+		t.Fatalf("hardware samples = %d", len(in.Hardware))
+	}
+	if !contains(in.Warnings, "无法解析") {
+		t.Fatalf("warnings = %v", in.Warnings)
+	}
+}
+
+func TestDeviceJoinIntegration(t *testing.T) {
+	input := newInput(testSpans())
+	input.DevicePath = "test-run/device.jsonl"
+	input.DeviceSpans = []device.Span{
+		{Schema: device.SchemaV1, Kind: device.KindAPI, Name: "aclrtSynchronizeStream", PID: 100, TID: 11, StartNS: 100, EndNS: 1100, CorrelationID: 1},
+		{Schema: device.SchemaV1, Kind: device.KindKernel, Name: "ffn", DeviceID: 0, StartNS: 120, EndNS: 1020, CorrelationID: 1},
+	}
+	report, err := Build(input, Options{SlowThresholdNS: 500})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Device == nil {
+		t.Fatal("device report missing")
+	}
+	if report.Device.MatchedHostSpans != 1 {
+		t.Fatalf("matched = %d", report.Device.MatchedHostSpans)
+	}
+	found := false
+	for _, verdict := range report.Verdicts {
+		if verdict.Verdict == "device_bound" {
+			found = true
+			if len(verdict.Evidence) != 1 || verdict.Evidence[0] != "s1" {
+				t.Fatalf("device evidence = %+v", verdict)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("device_bound missing: %+v", report.Verdicts)
+	}
+	if contains(report.Unknowns, "缺少设备时间线证据") {
+		t.Fatalf("device evidence present but unknown still claims no timeline: %v", report.Unknowns)
+	}
+	md := report.Markdown()
+	for _, want := range []string{"设备侧时间线", "device_bound", "correlationId"} {
+		if !strings.Contains(md, want) {
+			t.Fatalf("markdown missing %q", want)
+		}
+	}
+}
+
+func hardwareFloat(v float64) *float64 { return &v }
 
 func contains(values []string, substr string) bool {
 	for _, value := range values {

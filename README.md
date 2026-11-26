@@ -10,6 +10,8 @@
 - JSONL、manifest、summary 证据链；
 - 只读 `diagnose` 定位命令（JSON/Markdown，不 attach）；
 - M2 host off-CPU/futex（`sched_switch` + futex syscall tracepoint，已在 V4 和合成锁竞争上验证）；
+- E 层 npu-smi 硬件采样（HBM/AICore/功耗/温度，已上机验证）；
+- M3 device 时间线 join 管线（schema + join + diagnose，生产端待维护窗口）；
 - 采集前后健康检查、uprobe 残留检查和不覆盖旧证据的运行脚本。
 
 > 本版本的 `M4` 指 **vLLM-Ascend host profile + batch 上下文协议**。它仍然不是
@@ -33,6 +35,8 @@
 | 纯 eBPF vLLM batch 标准采集 | 完成；`attach --python-batch` 已并入 `spans.jsonl`/`summary`，真实 V4 验证 10 个 batch、6 个 request ID，类型确认为 `SchedulerOutput` |
 | `diagnose` 只读定位命令 | 完成；JSON `cann.diagnose.report.v1` + Markdown，单测覆盖全部过滤与判定分支，并已在 V4 真实 evidence 上只读运行 |
 | M2 host off-CPU/futex | 完成并上机验证；V4 10 秒 `attached=4 failed=0`，合成锁竞争 `host_lock_contention` 1.00 |
+| E 层 npu-smi 硬件指标 | 完成并上机验证；8 设备 HBM/AICore/功耗/温度，`hbm_pressure` |
+| M3 device 时间线 join | join/schema/diagnose 完成；真实 V4 span + 合成时间线 100% 匹配；`msprof --pid` 段错误，生产端待维护窗口 |
 | Orinfer profile | 配置校验通过；服务未运行，尚无运行窗口验证 |
 | msPTI / 设备 kernel 时间线 | 未实现，属于 M3 |
 | 逐 request 执行时长 | 未实现；当前只做 batch 窗口归因 |
@@ -58,13 +62,13 @@ Remove-Item Env:GOOS, Env:GOARCH, Env:CGO_ENABLED
 当前 Linux/arm64 二进制 SHA-256 以交付包 `SHA256SUMS` 为准，构建后不得手工修改：
 
 ```text
-cann-ebpf-linux-arm64-m2  8a515b96116ec19a28cbc73f7f629b99fa9f564d57fdcb3075380f37f7cc428e
+cann-ebpf-linux-arm64-m2  b4991b716b5f552f538ce92968d26b72b15c4eaed27abb0f977ba2e6e059d094
 cpy-poc-linux-arm64       08a5f05f92c15dd2d4b6475805ebbb3bfc3188b024c900745cb604a30826be53
 cpy-batch-poc-linux-arm64 见 batch POC 交付目录 SHA256SUMS
 ```
 
-`cann-ebpf-linux-arm64-m2` 已在 `bms-84865758` 上完成 V4 与合成锁竞争验证，二进制大小
-`9,389,783` bytes；验证数据和证据位置见 `docs/M2-VALIDATION.md`。
+`cann-ebpf-linux-arm64-m2` 已在 `bms-84865758` 上完成 V4、合成锁竞争和硬件层验证，二进制大小
+`9,722,312` bytes；M3 生产端未接通（`msprof --pid` 段错误），详见 `docs/M3-FEASIBILITY.md`。
 
 仓库已包含 `internal/probes/bpf/cann.bpf.o`。修改 `cann.bpf.c` 后必须用 clang BPF
 target 重新生成对象；不要依赖目标机现编，也不要修改目标进程或 CANN 库。
@@ -192,6 +196,25 @@ OUT="runs/ebpf-m2-$(date -u +%Y%m%dT%H%M%SZ)"
 合成 pthread mutex 竞争 off-CPU 99.7%、futex 99.9%、`host_lock_contention` 1.00。
 数据与边界见 `docs/M2-VALIDATION.md` 与 `docs/M2-OFFCPU.md`。
 
+### E 层硬件采样（npu-smi）
+
+```bash
+./cann-ebpf-linux-arm64-m2 attach --pid auto --profile vllm-ascend --profiles-dir profiles \
+  --duration 10s --blocking off --hardware on --output runs/ebpf-hw
+```
+
+`--hardware auto|on|off`：`auto` 按 profile；采样写入 `hardware.jsonl`（manifest artifact），
+`diagnose` 输出 8 设备 HBM/AICore/功耗/温度，并在 HBM free <5% 且存在慢 memory 调用时给出
+`hbm_pressure`。硬件是 run 级 wall-clock 数据，不能逐调用 join。详见 `docs/HARDWARE.md`。
+
+### device 时间线 join（M3，生产端待维护窗口）
+
+`diagnose` 会自动读取 run 目录的 `device.jsonl`（schema `cann.device.v1`），按
+`(pid,tid,start±100µs)` 匹配 API record，再用 `correlationId` 关联 KERNEL/MEMCPY/HCCL；
+有设备证据才输出 `device_bound` / `launch_starvation` / `copy_bound` / `communication_bound`。
+`msprof --pid` 动态采集已确认段错误，真实 device 数据需要容器内 in-process collector + 维护窗口。
+详见 `docs/M3-DEVICE-JOIN.md`、`docs/M3-FEASIBILITY.md`。
+
 ### 自动服务器采集
 
 ```bash
@@ -272,6 +295,9 @@ Span 新增字段：
   本次 V4 窗口没有真实 futex 竞争（futex≈0），`host_lock_contention` 由合成锁竞争目标验证。
 - `offcpu_ns`/`futex_ns` 是 host 线程的等待时间，不是 request 延迟、不是 NPU 执行时间；
   没有 msPTI 时仍然不能下 `device_bound`/`launch_starvation`。
+- 硬件层是周期性 wall-clock 快照，AICore/HBM 是整卡值，不能归因到单个 Worker 或单次调用。
+- M3 join 的 100% 匹配是用**合成** `device.jsonl` 验证的代码路径，不是真实设备时间；
+  `msprof --pid` 动态采集段错误，真实设备数据需要维护窗口的 in-process collector。
 - `diagnose` 只读已有证据；没有 off-CPU 采样时只输出 `blocking_unknown`，没有 msPTI 时永远不输出
   `device_bound` / `launch_starvation`。
 - Orinfer 当前未运行；profile 只能声明配置校验通过，不能写成真实采集验证。
@@ -316,6 +342,9 @@ unicode dict，单次最多 64 个 key；batch span 写入标准 `spans.jsonl`�
 - `docs/DIAGNOSE.md`：`diagnose` 用法、时间窗语义、判定规则和边界。
 - `docs/M2-OFFCPU.md`：M2 设计、判定口径和边界。
 - `docs/M2-VALIDATION.md`：M2 上机验证数据、修复记录和证据位置。
+- `docs/HARDWARE.md`：E 层 npu-smi 采样、schema、验证与边界。
+- `docs/M3-DEVICE-JOIN.md`：device 时间线 schema、join 算法与合成验证。
+- `docs/M3-FEASIBILITY.md`：msprof/msPTI 动态采集可行性结论。
 - `docs/NEXT-PLAN.md`：M2 之后的分阶段方案（M3 可行性、E 层指标、开销基线、生产化）。
 - `docs/M4-VALIDATION.md`：当前交付的实测数据、复现命令、证据和边界。
 - `docs/M4-CONTEXT-PROTOCOL.md`：batch 协议、权限模型、插件安装与激活步骤。

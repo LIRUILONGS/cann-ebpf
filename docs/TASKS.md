@@ -1,8 +1,9 @@
 # cann-ebpf 开发任务
 
-状态（2026-11-26，`0.6.0-m2`）：M0 完成；M1 host core 完成（`diagnose` 覆盖原 `top`/`why` 初版的只读定位）；
-M4 的 vLLM-Ascend host profile 与上下文协议完成，vLLM 插件代码完成但未激活；M2 已完成并上机验证
-（V4 10 秒 + 合成锁竞争）；M3、M6 未完成；Orinfer 未运行验证；`execute_model` 函数级耗时本轮不做。
+状态（2026-11-26，`0.6.0-m2` + M3-dev）：M0 完成；M1 host core 完成（`diagnose` 覆盖原 `top`/`why`）；
+M4 vLLM-Ascend host profile 与上下文协议完成，插件未激活；M2 已完成并上机验证；
+E 层 npu-smi 硬件指标完成并验证；M3 join 管线完成、生产端因 `msprof --pid` 段错误改走维护窗口；
+M6 未完成；Orinfer 未运行验证；`execute_model` 函数级耗时本轮不做。
 
 ## P0 低层定位命令（已完成）
 
@@ -110,15 +111,29 @@ M1 的 8 个核心函数和 2088 spans 是历史基线。当前 37 个 host 探�
 
 ## M3 msPTI join
 
-状态：未实现。目标机侦察（2026-11-26）：容器内有 CANN 9.0.1 `tools/mspti`（libmspti + 头文件 + samples）
-和 `msprof`，且 `msprof` 支持 `--pid` 动态 profiling；宿主只有驱动、没有 toolkit。
-下一步先做 5 秒可行性验证，方案见 `docs/NEXT-PLAN.md`。
+状态（2026-11-26）：join 管线已完成并用合成时间线验证；生产端未接通。
+容器内有 CANN 9.0.1 `tools/mspti` 和 `msprof`，宿主只有驱动；
+**`msprof --pid` 三变体均段错误，动态 attach 路线不可用**（`docs/M3-FEASIBILITY.md`）。
+生产端改为容器内 in-process collector，需要维护窗口。
 
-- [ ] M3.0 `msprof --pid` 动态采集可行性（输出格式、activity、correlationId、开销、时钟）
-- [ ] msPTI collector：API/KERNEL/MEMCPY/HCCL（或 msprof 输出解析）
-- [ ] 时钟校准、`(device_id, correlationId)` join
-- [ ] 对齐率报告、未匹配原因
-- [ ] 无设备证据时不输出 `device_bound` / `launch_starvation` 等结论
+- [x] M3.0 `msprof --pid` 动态采集可行性（结论：不可用，exit 139）
+- [x] `cann.device.v1` schema 与 device.jsonl 读取/校验
+- [x] `(pid,tid,start±tolerance)` → API record → `(correlationId)` → KERNEL/MEMCPY/HCCL join
+- [x] 时钟偏移估计、时间窗回退、reason 分类、每设备 busy
+- [x] `diagnose` 读取 device.jsonl，输出 device 证据与四类 verdict
+- [x] 真实 V4 host span + 合成 device.jsonl：7,794/7,794 匹配
+- [ ] 容器内 in-process msPTI collector（C/Python），产出真实 device.jsonl（维护窗口）
+- [ ] 已知 kernel 上验证 correlationId；95% 慢 Sync 匹配、偏差 <100µs
+- [ ] `docs/M3-VALIDATION.md`
+
+## E 层 npu-smi 硬件指标
+
+- [x] `internal/hardware`：npu-smi 解析（含进程表误解析修复）、周期采样、JSONL
+- [x] `attach --hardware auto|on|off`；manifest artifact
+- [x] `diagnose` 硬件汇总与 `hbm_pressure`
+- [x] V4 10 秒验证：2 采样×8 设备、health/service 不变
+- [ ] DCMI 后端（当前只有 npu-smi）
+- [ ] 短间隔（1–2s）开销评估
 
 ## M5 V4/Orinfer A/B（需要人工窗口）
 

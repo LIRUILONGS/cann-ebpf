@@ -52,6 +52,40 @@ func TestEmbeddedBPFObject(t *testing.T) {
 	}
 }
 
+func TestResolveHardwareMode(t *testing.T) {
+	enabled := &config.Document{Spec: config.Spec{Hardware: config.Hardware{Enabled: true, IntervalS: 5}}}
+	disabled := &config.Document{Spec: config.Spec{Hardware: config.Hardware{Enabled: "off"}}}
+	cases := []struct {
+		profile *config.Document
+		mode    string
+		want    bool
+		wantErr bool
+	}{
+		{nil, "auto", false, false},
+		{enabled, "", true, false},
+		{enabled, "auto", true, false},
+		{disabled, "auto", false, false},
+		{disabled, "on", true, false},
+		{enabled, "off", false, false},
+		{enabled, "sometimes", false, true},
+	}
+	for _, tc := range cases {
+		got, err := resolveHardwareMode(tc.profile, tc.mode)
+		if (err != nil) != tc.wantErr {
+			t.Fatalf("mode %q on %v: err=%v", tc.mode, tc.profile, err)
+		}
+		if got != tc.want {
+			t.Fatalf("mode %q: got %v want %v", tc.mode, got, tc.want)
+		}
+	}
+	if got := hardwareIntervalSeconds(enabled); got != 5 {
+		t.Fatalf("interval = %d", got)
+	}
+	if got := hardwareIntervalSeconds(nil); got != 10 {
+		t.Fatalf("default interval = %d", got)
+	}
+}
+
 func TestDecodeSpanEvent(t *testing.T) {
 	want := rawSpanEvent{
 		StartNS: 100, DurNS: 25, PID: 42, TID: 43, Function: 7, Flags: blockingFlagOffCPU,

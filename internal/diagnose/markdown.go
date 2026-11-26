@@ -107,6 +107,61 @@ func (r Report) Markdown() string {
 		}
 	}
 
+	b.WriteString("\n## 设备侧时间线（M3 join）\n\n")
+	dev := r.Device
+	if dev == nil {
+		b.WriteString("- 没有 `device.jsonl`：无法做 host→device join，设备侧结论不输出。\n")
+	} else {
+		mode := "api_record + correlationId"
+		if dev.TimeWindowFallback {
+			mode = "time_window（无 API record，置信度低）"
+		}
+		fmt.Fprintf(&b, "- host span：`%d`，device span：`%d`（%s）\n", dev.HostSpans, dev.DeviceSpans, dev.DeviceKinds)
+		fmt.Fprintf(&b, "- 匹配：`%d/%d`（%.1f%%），模式：%s，时钟偏移：`%d` ns\n",
+			dev.MatchedHostSpans, dev.HostSpans, dev.MatchRate*100, mode, dev.ClockOffsetNS)
+		if len(dev.Reasons) > 0 {
+			b.WriteString("\n| reason | count |\n|---|---:|\n")
+			for _, reason := range dev.Reasons {
+				fmt.Fprintf(&b, "| `%s` | %d |\n", escape(reason.Reason), reason.Count)
+			}
+		}
+		if len(dev.Devices) > 0 {
+			b.WriteString("\n| device | spans | busy ns | kernel ns | memcpy ns | hccl ns |\n|---:|---:|---:|---:|---:|---:|\n")
+			for _, d := range dev.Devices {
+				fmt.Fprintf(&b, "| %d | %d | %d | %d | %d | %d |\n", d.DeviceID, d.Spans, d.BusyNS, d.KernelNS, d.MemcpyNS, d.HCCLNS)
+			}
+		}
+		if len(dev.Hosts) > 0 {
+			b.WriteString("\n| span_id | function | duration ns | busy % | kernel ns | memcpy ns | hccl ns | verdicts |\n|---|---|---:|---:|---:|---:|---:|---|\n")
+			for _, h := range dev.Hosts {
+				fmt.Fprintf(&b, "| `%s` | `%s` | %d | %.1f | %d | %d | %d | %s |\n",
+					escape(h.SpanID), escape(h.Function), h.DurationNS, h.BusyPct*100,
+					h.KernelNS, h.MemcpyNS, h.HCCLNS, escape(strings.Join(h.Verdicts, ",")))
+			}
+		}
+	}
+
+	b.WriteString("\n## 硬件层（npu-smi，粗粒度）\n\n")
+	hw := r.Hardware
+	if !hw.Available {
+		b.WriteString("- 无硬件层数据；不能给出 HBM 余量或 AICore 利用率。\n")
+	} else {
+		fmt.Fprintf(&b, "- source：`%s`，采样点：`%d`，设备数：`%d`\n", orUnknown(hw.Source), hw.Samples, len(hw.Devices))
+		if hw.HBMFreePctMin != nil {
+			fmt.Fprintf(&b, "- 最低 HBM 余量：`%.1f%%`；AICore 峰值：`%.1f%%`\n", *hw.HBMFreePctMin, hw.AICorePctMax)
+		} else {
+			b.WriteString("- hardware.jsonl 缺少 HBM 字段。\n")
+		}
+		b.WriteString("\n| device | name | samples | aicore avg % | aicore max % | hbm free min MB | power avg W | temp max C |\n")
+		b.WriteString("|---:|---|---:|---:|---:|---:|---:|---:|\n")
+		for _, d := range hw.Devices {
+			fmt.Fprintf(&b, "| %d | %s | %d | %.1f | %.1f | %s | %.1f | %.1f |\n",
+				d.DeviceID, escape(d.Name), d.Samples, d.AICoreAvg, d.AICoreMax,
+				intOptional(d.HBMFreeMinMB), d.PowerAvgW, d.TempMaxC)
+		}
+		b.WriteString("\n硬件层是 wall-clock 采样，不能和 monotonic host span 做逐调用 join；它只支持 run 级判断。\n")
+	}
+
 	b.WriteString("\n## 判定\n\n")
 	if len(r.Verdicts) == 0 {
 		b.WriteString("无判定。\n")
@@ -159,6 +214,13 @@ func writeWarnings(b *strings.Builder, warnings []string) {
 func formatOptional(value *int64) string {
 	if value == nil {
 		return "未测量"
+	}
+	return fmt.Sprintf("%d", *value)
+}
+
+func intOptional(value *int64) string {
+	if value == nil {
+		return "未知"
 	}
 	return fmt.Sprintf("%d", *value)
 }
