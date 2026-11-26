@@ -353,6 +353,18 @@ func BuildBatchReport(in BatchReportInput) BatchReport {
 		report.Warnings = append(report.Warnings,
 			fmt.Sprintf("%d batch(es) were still open at capture end; end_ns is last observed/last_seen, not a function return", report.OpenBatchCount))
 	}
+	if report.Stats.RingbufLost > 0 {
+		report.Warnings = append(report.Warnings,
+			fmt.Sprintf("batch ring buffer lost %d event(s); batch set may be incomplete", report.Stats.RingbufLost))
+	}
+	if report.Stats.ReadErrors > 0 {
+		report.Warnings = append(report.Warnings,
+			fmt.Sprintf("batch probe recorded %d user-memory read error(s); affected IDs may be missing", report.Stats.ReadErrors))
+	}
+	if report.Stats.TypeReadErrors > 0 {
+		report.Warnings = append(report.Warnings,
+			fmt.Sprintf("batch owner type read failed %d time(s); type confirmation may be incomplete", report.Stats.TypeReadErrors))
+	}
 	if report.Warnings == nil {
 		report.Warnings = []string{}
 	}
