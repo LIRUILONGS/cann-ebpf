@@ -316,6 +316,7 @@ unicode dict，单次最多 64 个 key；batch span 写入标准 `spans.jsonl`�
 - `docs/DIAGNOSE.md`：`diagnose` 用法、时间窗语义、判定规则和边界。
 - `docs/M2-OFFCPU.md`：M2 设计、判定口径和边界。
 - `docs/M2-VALIDATION.md`：M2 上机验证数据、修复记录和证据位置。
+- `docs/NEXT-PLAN.md`：M2 之后的分阶段方案（M3 可行性、E 层指标、开销基线、生产化）。
 - `docs/M4-VALIDATION.md`：当前交付的实测数据、复现命令、证据和边界。
 - `docs/M4-CONTEXT-PROTOCOL.md`：batch 协议、权限模型、插件安装与激活步骤。
 - `docs/M5-TRACE-AND-CPY-POC.md`：链路追踪 schema、POC 设计、真实 V4 证据和边界。

@@ -203,6 +203,7 @@ span_id, seq
 | `docs/DIAGNOSE.md` | `diagnose` 命令、时间窗语义、判定规则与边界 |
 | `docs/M2-OFFCPU.md` | M2 设计、判定口径与边界 |
 | `docs/M2-VALIDATION.md` | M2 上机验证数据、修复记录和证据位置 |
+| `docs/NEXT-PLAN.md` | M2 之后的分阶段方案（M3 可行性、E 层、开销基线、生产化） |
 | `docs/M4-VALIDATION.md` | V4 实测记录 |
 | `docs/VLLM-BATCH-POC.md` | 纯 eBPF batch POC 记录 |
 
@@ -232,8 +233,9 @@ span_id, seq
 
 ## 7. 下一步工作方向
 
-建议按以下顺序推进：M2 已完成，下一步补设备侧（M3），最后做生产化。插件/`execute_model`
-函数级耗时本轮明确不做，见 P2 说明。
+详细的分阶段方案、依赖、验收和命令见 `docs/NEXT-PLAN.md`。结论：先用 1 天做 msPTI 动态 attach
+可行性（容器内 `msprof --pid`）+ E 层 npu-smi 指标 + M2 开销基线，再决定 M3 走动态解析还是
+容器内 in-process collector。插件/`execute_model` 函数级耗时本轮明确不做，见 P2 说明。
 
 ### P0：`diagnose` 命令（已完成）
 

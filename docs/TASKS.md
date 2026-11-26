@@ -110,11 +110,15 @@ M1 的 8 个核心函数和 2088 spans 是历史基线。当前 37 个 host 探�
 
 ## M3 msPTI join
 
-状态：未实现；M4 也没有初始化 msPTI。
+状态：未实现。目标机侦察（2026-11-26）：容器内有 CANN 9.0.1 `tools/mspti`（libmspti + 头文件 + samples）
+和 `msprof`，且 `msprof` 支持 `--pid` 动态 profiling；宿主只有驱动、没有 toolkit。
+下一步先做 5 秒可行性验证，方案见 `docs/NEXT-PLAN.md`。
 
-- [ ] msPTI collector：API/KERNEL/MEMCPY/HCCL
+- [ ] M3.0 `msprof --pid` 动态采集可行性（输出格式、activity、correlationId、开销、时钟）
+- [ ] msPTI collector：API/KERNEL/MEMCPY/HCCL（或 msprof 输出解析）
 - [ ] 时钟校准、`(device_id, correlationId)` join
 - [ ] 对齐率报告、未匹配原因
+- [ ] 无设备证据时不输出 `device_bound` / `launch_starvation` 等结论
 
 ## M5 V4/Orinfer A/B（需要人工窗口）
 
