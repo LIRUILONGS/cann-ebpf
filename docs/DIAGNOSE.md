@@ -3,6 +3,10 @@
 状态：代码与单元测试完成（`internal/diagnose` + `cmd/cann-ebpf/diagnose.go`）。本命令只读已有证据，
 不 attach、不重启、不修改原始文件，因此在任何环境都可以直接验证，不需要 NPU 授权窗口。
 
+已做过的只读验证：对 M4 交付包里的 V4 真实 evidence 运行通过——10 秒 run（6,991 spans、8 个 Worker）
+和 batch 上下文 run（164 spans、1 个 batch、2 个 request ID）都返回 `status=ok`，且旧数据没有
+`offcpu_ns`/`futex_ns` 时正确给出 `blocking_unknown` 和 5 条“无法判定”说明。
+
 ## 1. 它解决什么
 
 网关负责发现异常并给出时间窗、PID、trace/request 线索；`diagnose` 把这些线索转成低层定位：
@@ -154,4 +158,11 @@ go test ./internal/diagnose ./cmd/cann-ebpf
 ```bash
 ./cann-ebpf-linux-arm64-m2 diagnose --input /root/cann-ebpf/runs/<已有 evidence> 
 ./cann-ebpf-linux-arm64-m2 diagnose --input /root/cann-ebpf/runs/<...> --json --out /tmp/diagnose.json
+```
+
+本机已用 M4 交付包中的真实 evidence 验证过同样的命令：
+
+```powershell
+go run ./cmd/cann-ebpf diagnose --input dist/cann-ebpf-m4-delivery-20261126/evidence/runs/ebpf-auto-10s-final-20261126 --out diag-10s.md
+go run ./cmd/cann-ebpf diagnose --input dist/cann-ebpf-m4-delivery-20261126/evidence/runs/context-test-final-20261126 --json --out diag-ctx.json
 ```

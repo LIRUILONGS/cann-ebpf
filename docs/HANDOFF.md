@@ -217,7 +217,7 @@ span_id, seq
 | 采集影响 | `/health` 200/200，service active/active，uprobe 残留 0 |
 | 纯 eBPF batch | 10 个 batch、6 个 request ID（单 Worker）；双 Worker 各 4 个 batch |
 | 构建验证 | `go test ./...`、`go vet ./...`、Linux/arm64 交叉编译通过（含 `diagnose` 与 M2 代码） |
-| `diagnose` 验证 | Windows 本机单测 + 合成 run 目录的 Markdown/JSON 输出通过；未在服务器真数据上跑 |
+| `diagnose` 验证 | Windows 单测 + 对 M4 交付里的 V4 真实 evidence 只读运行：6,991 spans 的 10 秒 run、164 spans 的 batch run 均正常出报告 |
 | M2 验证 | 仅交叉编译与 BPF 对象解析/程序类型单测通过；**未在真实内核 attach** |
 
 ## 7. 下一步工作方向

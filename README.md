@@ -31,7 +31,7 @@
 | 链路追踪 | 完成；batch trace 传播、summary trace 覆盖、trace 链路树 |
 | 纯 eBPF CPython POC | 完成；合成 Python 3.12 和真实 V4 Worker 1452 均验证通过 |
 | 纯 eBPF vLLM batch 标准采集 | 完成；`attach --python-batch` 已并入 `spans.jsonl`/`summary`，真实 V4 验证 10 个 batch、6 个 request ID，类型确认为 `SchedulerOutput` |
-| `diagnose` 只读定位命令 | 完成；JSON `cann.diagnose.report.v1` + Markdown，单测覆盖全部过滤与判定分支 |
+| `diagnose` 只读定位命令 | 完成；JSON `cann.diagnose.report.v1` + Markdown，单测覆盖全部过滤与判定分支，并已在 V4 真实 evidence 上只读运行 |
 | M2 host off-CPU/futex | 代码和单测完成；**未在真实内核 attach 验证** |
 | Orinfer profile | 配置校验通过；服务未运行，尚无运行窗口验证 |
 | msPTI / 设备 kernel 时间线 | 未实现，属于 M3 |

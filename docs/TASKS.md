@@ -14,7 +14,8 @@ M3、M6 未完成；Orinfer 未运行验证；`execute_model` 函数级耗时本
 - [x] 明确输出“无法判定”原因（缺 off-CPU、缺 msPTI、batch 非 request、插件未激活）
 - [x] JSON（`cann.diagnose.report.v1`）与中文 Markdown
 - [x] 单测：时间窗、PID/TID/batch/request/trace、空结果、判定分支、CLI 退出码
-- [ ] 服务器真实 `runs/` 上跑一遍（不需要授权窗口）
+- [x] 对 M4 交付的真实 V4 evidence 只读运行（6,991 spans 与 164 spans batch run 均 status=ok）
+- [ ] 在新的服务器窗口里对最新采集目录再跑一遍
 
 ## M0 骨架与发现
 
