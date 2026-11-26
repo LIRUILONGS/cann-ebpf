@@ -4,13 +4,14 @@
 
 - 37 个 CANN/ACL/HCCL host uprobe 程序，entry/return 配对；
 - vLLM-Ascend 自动发现、8 个 `VLLM::Worker_TP` 并行 attach、frontend/EngineCore 覆盖；
-- batch 上下文协议与 vLLM general plugin 适配器；
+- batch 上下文协议、可选 vLLM general plugin 适配器，以及不依赖插件的纯 eBPF batch 采集；
 - JSONL、manifest、summary 证据链；
 - 采集前后健康检查、uprobe 残留检查和不覆盖旧证据的运行脚本。
 
 > 本版本的 `M4` 指 **vLLM-Ascend host profile + batch 上下文协议**。它仍然不是
-> msPTI 设备时间线，也不是逐 request 的执行时间归因。没有插件上下文时，span 会明确
-> 标记为 `attribution.level=thread`，不会伪造 batch。
+> msPTI 设备时间线，也不是逐 request 的执行时间归因。没有插件上下文时，host span 会明确
+> 标记为 `attribution.level=thread`；纯 eBPF batch span 单独标记为
+> `attribution.source=ebpf_scheduler_output_dict`，不会伪造 request 级数据。
 
 ## 当前状态
 
@@ -25,7 +26,7 @@
 | JSONL / manifest / summary | 完成；manifest 与 JSONL 的 count、bytes、SHA-256 一致 |
 | 链路追踪 | 完成；batch trace 传播、summary trace 覆盖、trace 链路树 |
 | 纯 eBPF CPython POC | 完成；合成 Python 3.12 和真实 V4 Worker 1452 均验证通过 |
-| 纯 eBPF vLLM batch POC | 完成；固定 CPython 3.12.13/vLLM 0.23.0rc1，真实 V4 读出 37 个 batch、6 个 request ID，类型确认为 `SchedulerOutput` |
+| 纯 eBPF vLLM batch 标准采集 | 完成；`attach --python-batch` 已并入 `spans.jsonl`/`summary`，真实 V4 验证 10 个 batch、6 个 request ID，类型确认为 `SchedulerOutput` |
 | Orinfer profile | 配置校验通过；服务未运行，尚无运行窗口验证 |
 | msPTI / 设备 kernel 时间线 | 未实现，属于 M3 |
 | 逐 request 执行时长 | 未实现；当前只做 batch 窗口归因 |
@@ -123,6 +124,27 @@ OUT="$OUT" sh scripts/context-smoke.sh
 最终 smoke 以 UID `982`、GID `979` 连接 socket，验证了容器同 UID 的
 `SO_PEERCRED` 路径，而不是只用 root 自测。
 
+### 纯 eBPF batch 采集（不装插件）
+
+```bash
+OUT="runs/ebpf-batch-$(date -u +%Y%m%dT%H%M%SZ)"
+./cann-ebpf-linux-arm64 attach \
+  --pid auto \
+  --profile vllm-ascend \
+  --profiles-dir profiles \
+  --duration 10s \
+  --python-batch \
+  --no-context \
+  --output "$OUT"
+```
+
+`--python-batch` 是可选的短时只读 uprobe。它不写目标进程、不安装 Python 包、不重启
+V4，只读取 `SchedulerOutput.num_scheduled_tokens` 的请求 ID 键和 dict 身份。
+`PyObject_GetAttr` 是高频 C API，默认不开启；`--no-context` 明确关闭插件 socket，
+只保留纯 eBPF span。开启后会为每个命中 Worker 写一份
+`python-batch-<pid>.json`，同时把 batch 窗口作为标准 `category=batch` span 写入
+同一份 `spans.jsonl`。
+
 ### 自动服务器采集
 
 ```bash
@@ -141,6 +163,7 @@ spans.jsonl      原始 host span，一行一个对象
 manifest.json    运行环境、目标 PID、库 inode/size/mtime、统计、warnings、SHA-256
 summary.json     派生 function/category/PID/context/batch 汇总
 summary.md       人类可读派生摘要
+python-batch-<pid>.json  纯 eBPF batch 的逐 Worker 统计、类型确认和 warnings
 ```
 
 Span 新增字段：
@@ -208,7 +231,7 @@ Span 新增字段：
 - 插件字段采用白名单解码，未知字段直接拒绝。
 - 失败时保留真实错误、warnings、dropped events 和 `status=error`，不伪造成功。
 
-## M5 链路追踪与纯 eBPF POC
+## M5 链路追踪与纯 eBPF 采集
 
 本轮新增 W3C 形状的 batch/CANN 链路追踪：
 
@@ -219,12 +242,12 @@ Span 新增字段：
 - 插件支持 `CANN_EBPF_TRACEPARENT` 做进程级上游继承；逐 HTTP request 传播尚未实现；
 - 子 span 的 `batch_parent_span_id` 保留 batch 的上游父 span，batch span 本身仍不写入 JSONL。
 
-`poc/cpython` 是隔离的纯 eBPF CPython 3.12 POC：只挂 `PyObject_GetAttr`
-entry/return，过滤 `num_scheduled_tokens`，读取返回 dict 的 request ID 键，不读
-value、prompt、响应或 tensor。合成 Python 3.12 和真实 V4 Worker `1452` 都已验证；
-6 秒窗口读到 8 个真实 `chatcmpl-*` request ID，`read_errors=0`、`ringbuf_lost=0`。
-POC 硬编码 CPython 3.12.13 布局，只支持 combined unicode dict，不是生产稳定接口，
-也不能推导逐 request 时长。
+`poc/cpython` 是纯 eBPF CPython 3.12 采集实现，现由 `attach --python-batch` 直接
+使用：只挂 `PyObject_GetAttr` entry/return，过滤 `num_scheduled_tokens`，读取返回
+dict 的 request ID 键，不读 value、prompt、响应或 tensor。支持 combined/split
+unicode dict，单次最多 64 个 key；batch span 写入标准 `spans.jsonl`，逐 Worker
+统计写入 `python-batch-<pid>.json` 并由 manifest 计算 SHA-256。合成 Python 3.12
+和真实 V4 Worker 都已验证；该路径不能推导逐 request 时长。
 
 详细 schema、证据和边界见 `docs/M5-TRACE-AND-CPY-POC.md` 与
 `poc/cpython/README.md`。
@@ -234,7 +257,7 @@ POC 硬编码 CPython 3.12.13 布局，只支持 combined unicode dict，不是�
 - `docs/M4-VALIDATION.md`：当前交付的实测数据、复现命令、证据和边界。
 - `docs/M4-CONTEXT-PROTOCOL.md`：batch 协议、权限模型、插件安装与激活步骤。
 - `docs/M5-TRACE-AND-CPY-POC.md`：链路追踪 schema、POC 设计、真实 V4 证据和边界。
-- `poc/cpython/README.md`：纯 eBPF CPython POC 的构建、运行和限制。
+- `poc/cpython/README.md`：纯 eBPF CPython 采集的构建、运行和限制。
 - `docs/M1-VALIDATION.md`：历史 M1 8 探针基线和 tracefs 记录。
 - `docs/M1-OUTPUT.md`：JSONL / manifest / summary 证据层契约。
 - `docs/M1-PROFILES.md`：profile 匹配和只读 smoke 说明。

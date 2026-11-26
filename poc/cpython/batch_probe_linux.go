@@ -29,7 +29,7 @@ func RunBatch(ctx context.Context, opts BatchOptions) (*BatchResult, error) {
 		return nil, fmt.Errorf("duration must be positive")
 	}
 	result := &BatchResult{PID: opts.PID}
-	libPath, err := findLibPython(opts.PID, opts.LibPath)
+	libPath, err := FindLibPython(opts.PID, opts.LibPath)
 	if err != nil {
 		return nil, err
 	}

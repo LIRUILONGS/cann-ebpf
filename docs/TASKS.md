@@ -65,13 +65,20 @@ M1 的 8 个核心函数和 2088 spans 是历史基线。当前 37 个 host 探�
 - [ ] offcpu_ns / futex_ns
 - [ ] host_lock_contention / launch_starvation
 
-## 附加 POC：纯 eBPF vLLM batch（不属于 M6 生产化）
+## 纯 eBPF vLLM batch 标准采集
+
+不依赖 vLLM 插件、不修改目标进程；`attach --python-batch` 可选启用。
 
 - [x] 固定 CPython 3.12.13 / vLLM 0.23.0rc1 的硬编码对象布局
 - [x] `SchedulerOutput.num_scheduled_tokens` dict 身份作为 batch key
 - [x] owner 类型名确认（`SchedulerOutput`）
 - [x] 合成目标和真实 V4 Worker 1452 实测；`read_errors=0`、`ringbuf_lost=0`
-- [ ] 生产接入；当前只是 POC，不是函数级 `execute_model` 边界
+- [x] batch span 并入标准 `spans.jsonl`，`category=batch`、`attribution.source=ebpf_scheduler_output_dict`
+- [x] 逐 Worker 生成 `python-batch-<pid>.json`，包含 stats、类型确认和 warnings
+- [x] split unicode dict 可读；单次最多 64 个 request ID；超出标记 `truncated`
+- [x] 真实 V4 标准输出验证：10 个 batch、6 个 request ID、10 条 batch span
+- [ ] 8 Worker 同时开启的持续开销基线和自动降级策略
+- [ ] 不是函数级 `execute_model` 边界；不能输出逐 request 执行时长
 
 ## M3 msPTI join
 

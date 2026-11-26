@@ -1,4 +1,4 @@
-# 纯 eBPF vLLM Batch POC
+# 纯 eBPF vLLM Batch 采集
 
 日期：2026-11-26
 
@@ -9,9 +9,10 @@
 > 针对当前这一台 V4 服务器上的固定运行时，纯 eBPF 能否在不重启、不装插件、不修改目标进程的前提下，
 > 从 `SchedulerOutput.num_scheduled_tokens` 直接读出 batch 的 request ID，并给出可关联的 batch 窗口？
 
-答案是可以，但边界必须说清楚：
+答案是可以。该路径已经作为 `cann-ebpf attach --python-batch` 的可选采集层接入标准
+证据链，同时边界必须说清楚：
 
-- 这是 **固定版本 POC**，不是通用 Python/vLLM 支持；
+- 这是 **固定运行时适配**，不是通用 Python/vLLM 支持；
 - batch 身份是 `num_scheduled_tokens` 这个 dict 的指针，不是 `execute_model` 函数入口/返回；
 - `begin_ns` / `end_ns` 是两次相邻 SchedulerOutput dict 身份之间的观测窗口；
 - 它不能推导 request 延迟、模型执行时间或设备 kernel 时间；
@@ -43,7 +44,7 @@ PyObject_GetAttr("num_scheduled_tokens")
   -> 输出去重后的 request ID
 ```
 
-它没有 batch 边界，不能把 request ID 和一段 CANN host span 关联起来。batch POC 增加：
+它没有 batch 边界，不能把 request ID 和一段 CANN host span 关联起来。batch 采集增加：
 
 1. 读取 owner object 的类型名，确认不是随便一个带同名属性的对象；
 2. 以返回 dict 指针作为 batch 身份；
@@ -67,7 +68,7 @@ CPython 3.12.13 aarch64：
 |---|---:|---|
 | `PyASCIIObject` sizeof | 40 | compact ASCII 字符串数据起点 |
 | `PyDictObject.ma_keys` | +32 | dict keys 指针 |
-| `PyDictObject.ma_values` | +40 | combined dict 要求为 NULL |
+| `PyDictObject.ma_values` | +40 | split dict 的 values 数组；键仍在 entries |
 | `PyDictKeysObject.dk_kind` | +10 | 必须为 1（unicode keys） |
 | `PyDictKeysObject.dk_nentries` | +24 | entries 数量 |
 | `PyDictKeysObject.dk_indices` | +32 | indices 起点；entries 紧随其后 |
@@ -112,8 +113,8 @@ inflight[pid_tgid] = {start_ns, owner_object}
 ```text
 x0 = returned dict
 读取 PyDictObject / PyDictKeysObject
-接受 combined unicode dict（ma_values == NULL, dk_kind == 1）
-读取前 8 个 compact ASCII unicode key
+接受 combined/split unicode dict（dk_kind == 1）
+读取前 64 个 compact ASCII unicode key
 ```
 
 批次判定：
@@ -139,6 +140,12 @@ x0 = returned dict
 - 这个边界是可解释的，但**不是函数级边界**。
 
 ## 5. 事件和报告 schema
+
+标准 span 写入同一个 `spans.jsonl`，使用 `schema=cann.span.v1`、
+`category=batch`、`function=vllm.scheduler.batch`，并带有
+`attribution.source=ebpf_scheduler_output_dict`。逐 Worker 的详细统计仍写入
+`python-batch-<pid>.json`；其 schema 保持 `cann.cpython.vllm_batch_poc.v1`，
+用于兼容已有消费方，不代表它仍是独立 Demo。
 
 BPF 固定事件 184 字节：
 
@@ -235,12 +242,25 @@ nsenter -t <enginecore-pid> -m -- \
   --output /tmp/cpy-batch-v4-1452-clean.json --json
 ```
 
+标准采集入口（推荐）：
+
+```bash
+./cann-ebpf-linux-arm64 attach \
+  --pid auto --profile vllm-ascend --profiles-dir profiles \
+  --duration 10s --python-batch --no-context \
+  --output "runs/ebpf-batch-$(date -u +%Y%m%dT%H%M%SZ)"
+```
+
+输出目录同时包含 `spans.jsonl`、`manifest.json`、`summary.json`、`summary.md`
+和每个命中 Worker 的 `python-batch-<pid>.json`。batch span 与 host span 共用
+manifest 的事件计数、SHA-256 和 warnings。
+
 参数：
 
 | 参数 | 说明 |
 |---|---|
 | `--pid` | 目标进程；必须是已存在的 Worker |
-| `--duration` | 短时只读采集窗口；POC 建议 3–10 秒 |
+| `--duration` | 短时只读采集窗口；建议 3–10 秒 |
 | `--lib` | 可选；默认从 `/proc/<pid>/maps` 找 `libpython3.12.so` |
 | `--max-events` | Go 侧保留事件上限；真实 V4 6 秒建议 >= 20000 |
 | `--offsets` | 可选；覆盖内置 offset bundle |
@@ -331,7 +351,7 @@ chatcmpl-b2761e3f4923751d-8b8c85f4
 - 真实 `chatcmpl-*` request ID 可以被读出；
 - 同一 dict 的多次属性访问可以被归到同一 batch；
 - 不同调度步的 dict 切换可以被识别为 batch 边界；
-- 整个路径没有 `read_errors`、`ringbuf_lost`、split dict 或 non-unicode dict 跳过；
+- 整个路径没有 `read_errors`、`ringbuf_lost`、non-unicode dict 跳过；split dict 也会读取键；
 - 不需要重启 V4、不需要安装 Python/vLLM 插件、不需要修改目标进程。
 
 ## 9. 不能证明什么
@@ -339,8 +359,8 @@ chatcmpl-b2761e3f4923751d-8b8c85f4
 - 不能证明这是 `execute_model` 的函数级开始/结束；
 - 不能把 `duration_ns` 当成 request 延迟或模型执行时间；
 - 不能推导设备 kernel 时间线；这仍需要 msPTI/CANN profiler；
-- 不能覆盖所有 dict 变体：当前只接受 combined unicode dict、compact ASCII key；
-- 单次属性读取最多 8 个 key；超过 8 个 request 的 batch 会标记 `truncated=true`；
+- 当前接受 combined/split unicode dict 和 compact ASCII key；non-unicode dict 仍跳过；
+- 单次属性读取最多 64 个 key；超过 64 个 request 的 batch 会标记 `truncated=true`；
 - `inflight` 以 `pid_tgid` 为 key；同一线程内若发生目标属性的重入读取，开始时间可能被覆盖；
 - 不能保证 Python 版本、vLLM 版本或容器镜像变化后仍然可用；
 - 不是生产稳定接口，不能直接替代 `contextfeed`；
@@ -349,9 +369,21 @@ chatcmpl-b2761e3f4923751d-8b8c85f4
 
 ## 10. 复现和证据边界
 
-- 本次 V4 没有重启；POC 只对现有 PID 1452 做短时只读 uprobe；
+- 本次 V4 没有重启；采集只对现有 Worker 做短时只读 uprobe；
 - 没有修改 V4 容器、模型文件、CANN 库或 Python 运行时；
 - 没有读取 prompt、响应、token tensor 或业务文本；
 - 证据文件保留原始 request ID，未脱敏；
 - `dist/` 被 `.gitignore` 忽略，证据是本地交付产物，不进入代码提交；
-- 代码提交只包含 POC 源码、offset 配置、测试和文档。
+- 代码提交包含采集源码、offset 配置、测试和文档；`dist/`、`runs/` 和证据文件不入库。
+
+标准采集的本地实测（2026-11-26，V4 Worker 1452，6 秒）：
+
+```text
+status=ok
+batch_count=10
+request_count=6
+type_names=["SchedulerOutput"]
+read_errors=0
+ringbuf_lost=0
+batch_spans_in_jsonl=10
+```

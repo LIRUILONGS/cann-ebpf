@@ -41,29 +41,40 @@ type SegmentRef struct {
 	SHA256 string `json:"sha256"`
 }
 
+// ArtifactRef seals a derived evidence file that is not a JSONL span segment,
+// such as a per-worker batch report. It is hashed exactly like a segment, but
+// it does not contribute to EventCount.
+type ArtifactRef struct {
+	Path   string `json:"path"`
+	Kind   string `json:"kind"`
+	Bytes  int64  `json:"bytes"`
+	SHA256 string `json:"sha256"`
+}
+
 // Manifest is the run-level evidence index. EventCount is advanced only after
 // bytes have been flushed and fsynced, so a crash cannot make the manifest
 // claim data that is not durable. DroppedEvents is reported separately.
 type Manifest struct {
-	Schema        string       `json:"schema"`
-	RunID         string       `json:"run_id"`
-	ToolVersion   string       `json:"tool_version"`
-	Status        string       `json:"status"`
-	Profile       string       `json:"profile"`
-	Host          string       `json:"host,omitempty"`
-	Kernel        string       `json:"kernel,omitempty"`
-	CannVersion   string       `json:"cann_version,omitempty"`
-	TargetPIDs    []int        `json:"target_pids"`
-	Libraries     []LibraryRef `json:"libraries"`
-	StartedAt     time.Time    `json:"started_at"`
-	EndedAt       *time.Time   `json:"ended_at,omitempty"`
-	EventCount    uint64       `json:"event_count"`
-	DroppedEvents uint64       `json:"dropped_events"`
-	Warnings      []string     `json:"warnings"`
-	Operator      string       `json:"operator,omitempty"`
-	Command       string       `json:"command,omitempty"`
-	Segments      []SegmentRef `json:"segments"`
-	Error         string       `json:"error,omitempty"`
+	Schema        string        `json:"schema"`
+	RunID         string        `json:"run_id"`
+	ToolVersion   string        `json:"tool_version"`
+	Status        string        `json:"status"`
+	Profile       string        `json:"profile"`
+	Host          string        `json:"host,omitempty"`
+	Kernel        string        `json:"kernel,omitempty"`
+	CannVersion   string        `json:"cann_version,omitempty"`
+	TargetPIDs    []int         `json:"target_pids"`
+	Libraries     []LibraryRef  `json:"libraries"`
+	StartedAt     time.Time     `json:"started_at"`
+	EndedAt       *time.Time    `json:"ended_at,omitempty"`
+	EventCount    uint64        `json:"event_count"`
+	DroppedEvents uint64        `json:"dropped_events"`
+	Warnings      []string      `json:"warnings"`
+	Operator      string        `json:"operator,omitempty"`
+	Command       string        `json:"command,omitempty"`
+	Segments      []SegmentRef  `json:"segments"`
+	Artifacts     []ArtifactRef `json:"artifacts"`
+	Error         string        `json:"error,omitempty"`
 }
 
 // ManifestStore serializes manifest updates and replaces the file atomically.
@@ -170,6 +181,9 @@ func normalizeManifest(manifest *Manifest) {
 	if manifest.Segments == nil {
 		manifest.Segments = []SegmentRef{}
 	}
+	if manifest.Artifacts == nil {
+		manifest.Artifacts = []ArtifactRef{}
+	}
 }
 
 func validateManifest(manifest Manifest) error {
@@ -216,6 +230,17 @@ func validateManifest(manifest Manifest) error {
 			return fmt.Errorf("manifest segments[%d].bytes is negative", i)
 		}
 	}
+	for i, artifact := range manifest.Artifacts {
+		if artifact.Path == "" {
+			return fmt.Errorf("manifest artifacts[%d].path is empty", i)
+		}
+		if artifact.Bytes < 0 {
+			return fmt.Errorf("manifest artifacts[%d].bytes is negative", i)
+		}
+		if artifact.SHA256 == "" {
+			return fmt.Errorf("manifest artifacts[%d].sha256 is empty", i)
+		}
+	}
 	return nil
 }
 
@@ -231,6 +256,7 @@ func cloneManifest(manifest Manifest) Manifest {
 	}
 	clone.Warnings = append([]string(nil), manifest.Warnings...)
 	clone.Segments = append([]SegmentRef(nil), manifest.Segments...)
+	clone.Artifacts = append([]ArtifactRef(nil), manifest.Artifacts...)
 	clone.EndedAt = copyTimePointer(manifest.EndedAt)
 	if clone.TargetPIDs == nil {
 		clone.TargetPIDs = []int{}
@@ -240,6 +266,9 @@ func cloneManifest(manifest Manifest) Manifest {
 	}
 	if clone.Segments == nil {
 		clone.Segments = []SegmentRef{}
+	}
+	if clone.Artifacts == nil {
+		clone.Artifacts = []ArtifactRef{}
 	}
 	return clone
 }

@@ -115,6 +115,9 @@ func Run(opts Options) (result *Result, retErr error) {
 		return result, fmt.Errorf("no uprobe could be attached")
 	}
 
+	batchLayer, batchWarnings := startPythonBatchLayer(opts.Context, opts)
+	result.Warnings = append(result.Warnings, batchWarnings...)
+
 	var spanMu sync.Mutex
 	var captured []runlog.Span
 	spanLimitReached := false
@@ -149,6 +152,33 @@ func Run(opts Options) (result *Result, retErr error) {
 
 	closeLinks()
 	_ = reader.Flush()
+	batchCaptures, batchWarnings := batchLayer.Collect(10 * time.Second)
+	result.Warnings = append(result.Warnings, batchWarnings...)
+	for _, capture := range batchCaptures {
+		if opts.OutputDir != "" && len(capture.ReportJSON) > 0 {
+			path := filepath.Join(opts.OutputDir, fmt.Sprintf("python-batch-%d.json", capture.PID))
+			if writeErr := os.WriteFile(path, capture.ReportJSON, 0o600); writeErr != nil {
+				result.Warnings = append(result.Warnings,
+					fmt.Sprintf("write python batch report %s: %v", path, writeErr))
+			} else if writer != nil {
+				if artifactErr := writer.AddArtifact(path, "python_batch_report"); artifactErr != nil {
+					result.Warnings = append(result.Warnings,
+						fmt.Sprintf("seal python batch report %s: %v", path, artifactErr))
+				}
+			}
+		}
+		for _, span := range capture.Spans {
+			if writer != nil {
+				if writeErr := writer.WriteSpan(span); writeErr != nil {
+					result.Warnings = append(result.Warnings,
+						fmt.Sprintf("write python batch span pid %d: %v", capture.PID, writeErr))
+					continue
+				}
+			}
+			sink(span)
+		}
+		result.PythonBatch = append(result.PythonBatch, capture)
+	}
 	select {
 	case <-consumeDone:
 	case <-time.After(3 * time.Second):

@@ -32,7 +32,7 @@ typedef long long __s64;
 #define BPF_MAP_TYPE_RINGBUF 27
 
 #define MAX_ID_LEN 48
-#define MAX_IDS 8
+#define MAX_IDS 64
 #define TARGET_NAME_LEN 20
 #define TYPE_NAME_LEN 64
 
@@ -358,10 +358,11 @@ int exit_pyobject_getattr(void *ctx)
 			st->read_errors++;
 		return 0;
 	}
+	/* A split dict keeps keys in dk_entries and values in ma_values.
+	 * The request ID is the key, so split dicts are readable here too. */
 	if (dict.ma_values) {
 		if (st)
 			st->split_dict++;
-		return 0;
 	}
 	if (!dict.ma_keys) {
 		if (st)

@@ -11,6 +11,7 @@ import (
 const (
 	BatchEventSize = 184
 	BatchSchema    = "cann.cpython.vllm_batch_poc.v1"
+	BatchMaxIDs    = 64
 
 	EventID         uint32 = 1
 	EventBatchBegin uint32 = 2
@@ -287,7 +288,7 @@ func BuildBatchReport(in BatchReportInput) BatchReport {
 		Stats:       in.Stats,
 		Warnings:    append([]string(nil), in.Warnings...),
 		RequireType: in.RequireType,
-		Note: "POC only: pure eBPF, CPython 3.12.13 hardcoded layout, combined unicode dict, compact ASCII keys, max 8 IDs per access. " +
+		Note: "Pure eBPF: CPython 3.12.13 pinned object layout, combined or split unicode dict, compact ASCII keys, max 64 IDs per access. " +
 			"Batch identity is the SchedulerOutput.num_scheduled_tokens dict pointer; the final open batch is closed at the last observed event or live map last_seen. " +
 			"This is not a function-level execute_model boundary. No prompt, output, or token tensor is read.",
 	}

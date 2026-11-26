@@ -24,6 +24,17 @@ type Options struct {
 	MaxSpans      int
 	MinDuration   time.Duration
 	ContextSocket string
+	PythonBatch   PythonBatchOptions
+}
+
+// PythonBatchOptions enables the read-only CPython/vLLM SchedulerOutput
+// probe. It is opt-in because PyObject_GetAttr is a very hot Python C API.
+type PythonBatchOptions struct {
+	Enabled     bool
+	LibPath     string
+	OffsetsPath string
+	MaxEvents   int
+	RequireType string
 }
 
 type Attachment struct {
@@ -49,6 +60,18 @@ type Result struct {
 	Warnings     []string
 	Stats        probeStats
 	Context      contextfeed.Snapshot
+	PythonBatch  []PythonBatchCapture
+}
+
+type PythonBatchCapture struct {
+	PID        int           `json:"pid"`
+	Lib        string        `json:"lib"`
+	Batches    int           `json:"batches"`
+	Requests   int           `json:"requests"`
+	Status     string        `json:"status"`
+	ReportJSON []byte        `json:"-"`
+	Spans      []runlog.Span `json:"-"`
+	Warnings   []string      `json:"warnings,omitempty"`
 }
 
 func (o *Options) normalize() error {

@@ -283,6 +283,45 @@ func (w *Writer) AddWarning(warning string) error {
 	return nil
 }
 
+// AddArtifact hashes an existing derived evidence file and records it in the
+// manifest. It is intended for reports that accompany spans.jsonl, not for
+// replacement span segments.
+func (w *Writer) AddArtifact(path, kind string) error {
+	if path == "" {
+		return fmt.Errorf("artifact path is empty")
+	}
+	if kind == "" {
+		return fmt.Errorf("artifact kind is empty")
+	}
+	size, digest, err := fileSHA256(path)
+	if err != nil {
+		return fmt.Errorf("hash artifact %s: %w", path, err)
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.closed {
+		return ErrWriterClosed
+	}
+	if w.failed != nil {
+		return fmt.Errorf("%w: %v", ErrWriterFailure, w.failed)
+	}
+	if err := w.manifest.Update(func(manifest *Manifest) {
+		for index := range manifest.Artifacts {
+			if manifest.Artifacts[index].Path == path {
+				manifest.Artifacts[index] = ArtifactRef{Path: path, Kind: kind, Bytes: size, SHA256: digest}
+				return
+			}
+		}
+		manifest.Artifacts = append(manifest.Artifacts, ArtifactRef{
+			Path: path, Kind: kind, Bytes: size, SHA256: digest,
+		})
+	}); err != nil {
+		w.failLocked(err)
+		return err
+	}
+	return nil
+}
+
 func (w *Writer) Close() error {
 	return w.CloseWithError(nil)
 }

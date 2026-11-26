@@ -28,6 +28,12 @@ func cmdAttach(args []string) int {
 	outputDir := fs.String("output", "", "output directory")
 	minDuration := fs.Duration("min-duration", 0, "minimum span duration")
 	contextSocket := fs.String("context-socket", "", "override Unix socket for vLLM batch/request context")
+	noContext := fs.Bool("no-context", false, "disable contextfeed/plugin socket; use pure-eBPF spans only")
+	pythonBatch := fs.Bool("python-batch", false, "enable read-only pure-eBPF vLLM SchedulerOutput batch probe")
+	pythonBatchLib := fs.String("python-batch-lib", "", "explicit libpython3.12.so path for --python-batch")
+	pythonBatchOffsets := fs.String("python-batch-offsets", "", "CPython/vLLM offset bundle JSON (default: embedded pinned profile)")
+	pythonBatchMaxEvents := fs.Int("python-batch-max-events", 20000, "maximum batch ring-buffer events retained per worker")
+	pythonBatchRequireType := fs.String("python-batch-require-type", "SchedulerOutput", "required batch owner type substring")
 	jsonOut := fs.Bool("json", false, "json summary")
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -81,7 +87,9 @@ func cmdAttach(args []string) int {
 	}
 
 	contextSocketPath := strings.TrimSpace(*contextSocket)
-	if contextSocketPath == "" && profile.Doc.Spec.Context.Plugin != nil {
+	if *noContext {
+		contextSocketPath = ""
+	} else if contextSocketPath == "" && profile.Doc.Spec.Context.Plugin != nil {
 		contextSocketPath = profile.Doc.Spec.Context.Plugin.Socket
 	}
 	if *outputDir == "" {
@@ -93,6 +101,13 @@ func cmdAttach(args []string) int {
 		Context: ctx, PIDs: pids, ProcRoot: *procRoot, Profile: profile.Doc,
 		ProfileName: profile.Name, Duration: *duration, OutputDir: *outputDir,
 		MinDuration: *minDuration, ContextSocket: contextSocketPath,
+		PythonBatch: probes.PythonBatchOptions{
+			Enabled:     *pythonBatch,
+			LibPath:     *pythonBatchLib,
+			OffsetsPath: *pythonBatchOffsets,
+			MaxEvents:   *pythonBatchMaxEvents,
+			RequireType: *pythonBatchRequireType,
+		},
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "attach: %v\n", err)
@@ -102,11 +117,16 @@ func cmdAttach(args []string) int {
 		writeJSON(map[string]any{
 			"backend": "ebpf", "profile": profile.Name, "pids": pids,
 			"spans": len(result.Spans), "events": result.EventCount, "attachments": result.Attachments,
-			"warnings": result.Warnings, "context": result.Context, "output": *outputDir,
+			"warnings": result.Warnings, "context": result.Context, "python_batch": result.PythonBatch,
+			"output": *outputDir,
 		})
 	} else {
 		fmt.Printf("ebpf profile=%s pids=%v spans_buffered=%d events=%d output=%s\n", profile.Name, pids, len(result.Spans), result.EventCount, *outputDir)
 		fmt.Printf("context batches=%d active=%d requests=%d pids=%v\n", result.Context.TotalBatches, result.Context.ActiveBatches, result.Context.RequestIDs, result.Context.PIDs)
+		for _, batch := range result.PythonBatch {
+			fmt.Printf("python_batch pid=%d status=%s batches=%d requests=%d lib=%s\n",
+				batch.PID, batch.Status, batch.Batches, batch.Requests, batch.Lib)
+		}
 		for _, warning := range result.Warnings {
 			fmt.Printf("WARN %s\n", warning)
 		}

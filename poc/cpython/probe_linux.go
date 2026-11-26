@@ -94,7 +94,7 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 		return nil, fmt.Errorf("duration must be positive")
 	}
 	result := &Result{PID: opts.PID}
-	libPath, err := findLibPython(opts.PID, opts.LibPath)
+	libPath, err := FindLibPython(opts.PID, opts.LibPath)
 	if err != nil {
 		return nil, err
 	}
@@ -211,7 +211,10 @@ func readEvents(ctx context.Context, reader *ringbuf.Reader, result *Result, max
 	}
 }
 
-func findLibPython(pid int, override string) (string, error) {
+// FindLibPython resolves the libpython mapped by pid. The returned path is
+// suitable for link.OpenExecutable and may point through /proc/<pid>/root when
+// the target runs in a container.
+func FindLibPython(pid int, override string) (string, error) {
 	if strings.TrimSpace(override) != "" {
 		return override, nil
 	}

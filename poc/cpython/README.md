@@ -1,6 +1,7 @@
-# 纯 eBPF CPython 3.12 POC
+# 纯 eBPF CPython 3.12 / vLLM batch
 
-这不是生产采集器。它验证一个有限问题：
+这段代码不再是独立 Demo：`cann-ebpf attach --python-batch` 直接使用它作为可选采集层。
+独立 CLI 仅保留为排障入口。它回答一个有限问题：
 
 > 在不装 vLLM 插件、不重启进程、没有 Python USDT 的情况下，能否用 eBPF uprobe 读取 `scheduler_output.num_scheduled_tokens` 的 request ID 键？
 
@@ -33,18 +34,18 @@ CGO_ENABLED=0 GOOS=linux GOARCH=arm64   go build -buildvcs=false -trimpath -o di
 ## 支持范围
 
 - CPython 3.12.13，aarch64；
-- combined unicode dict（`ma_values == NULL`，`dk_kind == 1`）；
+- combined/split unicode dict（`dk_kind == 1`）；
 - compact ASCII unicode key；
-- 每次属性读取最多输出 8 个 key；
+- 每次属性读取最多输出 64 个 key；
 - 只读 request ID 键，不读 value、prompt、响应或 tensor。
 
 ## 已知限制
 
 - 硬编码 CPython 3.12 对象布局，换 Python 版本必须重新核对头文件和偏移；
-- 不处理 split dict、non-unicode dict、非 compact 字符串；
+- 不处理 non-unicode dict、非 compact 字符串；
 - 只过滤属性名，不能证明对象一定是 `SchedulerOutput`；
 - `PyObject_GetAttr` 调用次数很高，POC 未做生产级开销优化；
-- 没有 batch_begin/batch_end 边界，不能直接替代 `contextfeed`；
+- batch 边界是 `SchedulerOutput.num_scheduled_tokens` 的 dict 身份，不是 `execute_model` 函数边界；
 - 不能从 POC 结果推导逐 request 时长。
 
 ## 已验证
@@ -54,9 +55,9 @@ CGO_ENABLED=0 GOOS=linux GOARCH=arm64   go build -buildvcs=false -trimpath -o di
 
 详细数据和边界见 `docs/M5-TRACE-AND-CPY-POC.md`。
 
-## vLLM batch POC
+## vLLM batch 标准接入
 
-在 M5 的 dict 读取基础上增加 batch 身份和类型确认：
+在 M5 的 dict 读取基础上增加 batch 身份和类型确认，并输出标准 `cann.span.v1`：
 
 ```text
 poc/cpython/bpf/batch_probe.bpf.c
@@ -70,7 +71,7 @@ poc/cpython/synthetic_batch_target.py
 cmd/cpy-batch-poc/main_linux.go
 ```
 
-batch 身份是 `SchedulerOutput.num_scheduled_tokens` 的 dict 指针。新 dict 关闭旧 batch、打开新 batch；owner 类型名通过 `PyObject.ob_type -> PyTypeObject.tp_name` 读取并确认。这个边界不是 `execute_model` 函数级边界，`duration_ns` 也不是请求执行时长。
+batch 身份是 `SchedulerOutput.num_scheduled_tokens` 的 dict 指针。新 dict 关闭旧 batch、打开新 batch；owner 类型名通过 `PyObject.ob_type -> PyTypeObject.tp_name` 读取并确认。标准采集时，batch span 以 `category=batch`、`attribution.source=ebpf_scheduler_output_dict` 写入同一份 `spans.jsonl`；逐 Worker 统计写入 `python-batch-<pid>.json`，并由 manifest 记录 SHA-256。这个边界不是 `execute_model` 函数级边界，`duration_ns` 也不是请求执行时长。
 
 构建和运行：
 
@@ -86,5 +87,14 @@ CGO_ENABLED=0 GOOS=linux GOARCH=arm64   go build -buildvcs=false -trimpath -o di
 
 - 合成 `SchedulerOutput`：120 个 batch、360 个 request ID、`read_errors=0`、`ringbuf_lost=0`；
 - 真实 V4 Worker 1452：37 个 batch（36 完整、1 个捕获结束时仍打开）、6 个真实 `chatcmpl-*` request ID、`read_errors=0`、`ringbuf_lost=0`、`type_confirmed=true`。
+
+标准命令：
+
+```bash
+./cann-ebpf-linux-arm64 attach \
+  --pid auto --profile vllm-ascend --profiles-dir profiles \
+  --duration 10s --python-batch --no-context \
+  --output "runs/ebpf-batch-$(date -u +%Y%m%dT%H%M%SZ)"
+```
 
 详细说明见 `docs/VLLM-BATCH-POC.md`。

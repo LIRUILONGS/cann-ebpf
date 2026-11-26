@@ -191,6 +191,43 @@ func TestWriterFlushMakesRecordDurable(t *testing.T) {
 	}
 }
 
+func TestWriterSealsArtifactInManifest(t *testing.T) {
+	dir := t.TempDir()
+	artifactPath := filepath.Join(dir, "python-batch-1452.json")
+	artifact := []byte("{\"status\":\"ok\"}\n")
+	if err := os.WriteFile(artifactPath, artifact, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	writer, err := NewWriter(WriterOptions{
+		Dir:         dir,
+		RunID:       "run-artifact",
+		Profile:     "vllm-ascend",
+		ToolVersion: "cann-ebpf/test",
+		TargetPIDs:  []int{1452},
+		StartedAt:   time.Now(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.AddArtifact(artifactPath, "python_batch_report"); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	manifest := readManifestAt(t, filepath.Join(dir, "manifest.json"))
+	if len(manifest.Artifacts) != 1 {
+		t.Fatalf("artifacts = %+v", manifest.Artifacts)
+	}
+	artifactRef := manifest.Artifacts[0]
+	digest := sha256.Sum256(artifact)
+	wantHash := hex.EncodeToString(digest[:])
+	if artifactRef.Path != artifactPath || artifactRef.Kind != "python_batch_report" ||
+		artifactRef.Bytes != int64(len(artifact)) || artifactRef.SHA256 != wantHash {
+		t.Fatalf("artifact = %+v", artifactRef)
+	}
+}
+
 func TestWriterCloseWithErrorPreservesCountsAndIntegrity(t *testing.T) {
 	dir := t.TempDir()
 	writer, err := NewWriter(WriterOptions{
