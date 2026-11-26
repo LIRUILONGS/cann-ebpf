@@ -99,7 +99,7 @@ M1 的 8 个核心函数和 2088 spans 是历史基线。当前 37 个 host 探�
 - [x] 只读检查 root/BTF/tracefs/uprobe_events/4 个 tracepoint/perf_paranoid/lockdown/memlock/nofile/npu-smi/cgroup
 - [x] JSON + human 输出、退出码 4
 - [x] V4 实测 pass=15 warn=0 fail=0
-- [ ] 把 preflight 接入 `attach` 启动前自动执行（当前需手动）
+- [x] 接入 `attach --preflight enforce|warn|off`（默认 enforce）
 
 ## 采集时序与 detach
 
@@ -135,7 +135,8 @@ M1 的 8 个核心函数和 2088 spans 是历史基线。当前 37 个 host 探�
 - [x] 时钟偏移估计、时间窗回退、reason 分类、每设备 busy
 - [x] `diagnose` 读取 device.jsonl，输出 device 证据与四类 verdict
 - [x] 真实 V4 host span + 合成 device.jsonl：7,794/7,794 匹配
-- [ ] 容器内 in-process msPTI collector（C/Python），产出真实 device.jsonl（维护窗口）
+- [x] host 侧接入：`attach --device-jsonl` 导入 device/meta、抓 `pidmap.json`、封存 artifact
+- [ ] 容器内 in-process msPTI collector（C/Python），产出真实 device.jsonl（维护窗口；并行任务）
 - [ ] 已知 kernel 上验证 correlationId；95% 慢 Sync 匹配、偏差 <100µs
 - [ ] `docs/M3-VALIDATION.md`
 

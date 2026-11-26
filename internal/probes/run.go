@@ -272,6 +272,27 @@ func Run(opts Options) (result *Result, retErr error) {
 		}
 	}
 
+	if opts.DeviceJSONL != "" {
+		result.DeviceEvidence = importDeviceEvidence(opts.OutputDir, opts.DeviceJSONL, opts.PIDs)
+		result.Warnings = append(result.Warnings, result.DeviceEvidence.Warnings...)
+		if writer != nil {
+			artifacts := []struct{ kind, path string }{
+				{"device_jsonl", result.DeviceEvidence.DevicePath},
+				{"device_meta", result.DeviceEvidence.MetaPath},
+				{"pidmap", result.DeviceEvidence.PIDMapPath},
+			}
+			for _, artifact := range artifacts {
+				if artifact.path == "" {
+					continue
+				}
+				if err := writer.AddArtifact(artifact.path, artifact.kind); err != nil {
+					result.Warnings = append(result.Warnings,
+						fmt.Sprintf("seal %s %s: %v", artifact.kind, artifact.path, err))
+				}
+			}
+		}
+	}
+
 	closeLinksStart := time.Now()
 	closeLinks()
 	result.CloseLinksDuration = time.Since(closeLinksStart)

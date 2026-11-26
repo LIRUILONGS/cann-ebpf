@@ -31,6 +31,7 @@ type Options struct {
 	HardwareInterval time.Duration
 	OnCaptureStart   func()
 	OnCaptureStop    func()
+	DeviceJSONL      string
 }
 
 // PythonBatchOptions enables the read-only CPython/vLLM SchedulerOutput
@@ -69,6 +70,7 @@ type Result struct {
 	PythonBatch          []PythonBatchCapture
 	Blocking             BlockingResult
 	Hardware             hardware.Result
+	DeviceEvidence       DeviceEvidence
 	SetupDuration        time.Duration
 	CaptureDuration      time.Duration
 	TeardownDuration     time.Duration

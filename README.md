@@ -212,11 +212,18 @@ OUT="runs/ebpf-m2-$(date -u +%Y%m%dT%H%M%SZ)"
 
 ### device 时间线 join（M3，生产端待维护窗口）
 
+外部 collector 产出 `device.jsonl` 后，用 attach 导入并抓 pidmap：
+
+```bash
+./cann-ebpf-linux-arm64-m2 attach --pid auto --profile vllm-ascend --profiles-dir profiles \
+  --duration 30s --device-jsonl /host/path/device.jsonl --output runs/ebpf-m3
+```
+
 `diagnose` 会自动读取 run 目录的 `device.jsonl`（schema `cann.device.v1`），按
 `(pid,tid,start±100µs)` 匹配 API record，再用 `correlationId` 关联 KERNEL/MEMCPY/HCCL；
 有设备证据才输出 `device_bound` / `launch_starvation` / `copy_bound` / `communication_bound`。
 `msprof --pid` 动态采集已确认段错误，真实 device 数据需要容器内 in-process collector + 维护窗口。
-详见 `docs/M3-DEVICE-JOIN.md`、`docs/M3-FEASIBILITY.md`。
+详见 `docs/M3-DEVICE-JOIN.md`、`docs/M3-FEASIBILITY.md`、`docs/WORK-SPLIT.md`。
 
 ### 自动服务器采集
 
@@ -353,6 +360,7 @@ unicode dict，单次最多 64 个 key；batch span 写入标准 `spans.jsonl`�
 - `docs/M3-DEVICE-JOIN.md`：device 时间线 schema、join 算法与合成验证。
 - `docs/M3-FEASIBILITY.md`：msprof/msPTI 动态采集可行性结论。
 - `docs/NEXT-PLAN.md`：M2 之后的分阶段方案（M3 可行性、E 层指标、开销基线、生产化）。
+- `docs/WORK-SPLIT.md`：两个并行任务的文件所有权、接口约定与评审备注。
 - `docs/M4-VALIDATION.md`：当前交付的实测数据、复现命令、证据和边界。
 - `docs/M4-CONTEXT-PROTOCOL.md`：batch 协议、权限模型、插件安装与激活步骤。
 - `docs/M5-TRACE-AND-CPY-POC.md`：链路追踪 schema、POC 设计、真实 V4 证据和边界。

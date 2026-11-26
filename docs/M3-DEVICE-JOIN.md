@@ -78,7 +78,28 @@ busy 用区间并集，避免同一 host 调用内多个重叠 kernel 被重复�
 
 CLI 新增 `--device-tolerance`（默认 100µs）。
 
-## 5. 已验证内容（2026-11-26）
+## 5. host 侧证据接入
+
+外部 collector 在容器内写 `device.jsonl` / `device.jsonl.meta.json` 后，用 attach 导入：
+
+```bash
+./cann-ebpf-linux-arm64-m2 attach --pid auto --profile vllm-ascend --profiles-dir profiles \
+  --duration 30s --device-jsonl /host/path/to/device.jsonl --output runs/ebpf-m3
+```
+
+行为：
+
+- 把 `device.jsonl` 复制到 run 目录，同名 `.meta.json` 复制为 `device.jsonl.meta.json`；
+- 在目标进程仍存活时抓 `pidmap.json`（容器 local → host pid/tid），用于 diagnose 翻译；
+- 三个文件分别封存为 manifest artifact：`device_jsonl`、`device_meta`、`pidmap`；
+- 已存在同名文件时不覆盖，只告警；源文件缺失不阻断 host span 采集；
+- 之后 `diagnose --input runs/ebpf-m3` 会自动读取三者并做 join；无 `pidmap.json` 时可用
+  `diagnose --device-container-id <id>` 在线解析。
+
+注意：`--device-jsonl` 必须是 host 可见路径（容器内路径请先 `docker cp`）；msPTI collector 需要
+重启服务或入口注入，不能对正在运行的 V4 动态 attach。
+
+## 5.1 已验证内容（2026-11-26）
 
 | 测试 | 结果 |
 |---|---|

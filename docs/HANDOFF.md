@@ -186,11 +186,21 @@ span_id, seq
 - `cann-ebpf preflight [--json]`：只读检查 root、BTF、tracefs、uprobe_events、四个 tracepoint、
   perf_event_paranoid、lockdown、memlock、nofile、npu-smi、cgroup；有 fail 退出码 4。
   V4 实测 15 pass / 0 warn / 0 fail。详见 `docs/PREFLIGHT.md`。
+- `attach --preflight enforce|warn|off`（默认 enforce）在启动前自动跑同一套检查，fatal 时退出 4；
+  非 Linux 主机跳过（attach 本身不可用）。
 - attach 现在输出 `capture_start` / `capture_stop` / `capture_end` 时间戳，以及
   `timings setup/capture/teardown/close_links/batch/consume/writer/summary`，便于区分采集窗口和清理。
 - V4 上 740 个 uprobe 的内核串行 detach 约 40 秒；现在 `closeLinks` 有界等待 1 秒，
   剩余 fd 由进程退出清理（残留最终为 0），`capture_stop` 之后不再计入采集窗口。
 - 硬件采样在 `capture_stop` 时停止，避免把清理阶段算进硬件窗口。
+
+### 3.12 M3 host 侧证据接入（本任务）
+
+- `attach --device-jsonl <host-path>`：把容器内 msPTI collector 的 `device.jsonl` 与
+  `device.jsonl.meta.json` 复制进 run 目录，并在目标存活时抓 `pidmap.json`；
+- 三个文件分别封存为 manifest artifact：`device_jsonl`、`device_meta`、`pidmap`；
+- 已存在同名文件不覆盖；源缺失只告警，不影响 host span；
+- `diagnose` 自动读取这三者做 join；生产端 collector 由并行任务负责（见 `docs/WORK-SPLIT.md`）。
 
 ## 4. 当前能回答和不能回答的问题
 
@@ -228,6 +238,7 @@ span_id, seq
 | `internal/probes/bpf/cann.bpf.o` | 已编译并嵌入的 BPF 对象，目标机不需要现编 |
 | `internal/probes/blocking_common.go` | blocking 模式、测量 flag、span 赋值 |
 | `internal/probes/blocking_linux.go` | sched_switch/futex attach、blocking map 配置 |
+| `internal/probes/device_evidence.go` | `--device-jsonl` 导入、pidmap 抓取、artifact 封存 |
 | `internal/probes/loader.go` | 主 collection 与 blocking collection 分离加载 |
 | `internal/diagnose/` | 已读证据的过滤、聚合、判定、JSON/Markdown |
 | `internal/hardware/` | E 层 npu-smi 采样、解析、JSONL |
@@ -250,6 +261,7 @@ span_id, seq
 | `docs/M3-FEASIBILITY.md` | msprof/msPTI 动态采集可行性结论 |
 | `docs/PREFLIGHT.md` | preflight 检查项、退出码与 V4 结果 |
 | `docs/M2-OVERHEAD.md` | M2 agent 开销基线与吞吐不可测说明 |
+| `docs/WORK-SPLIT.md` | 两个并行任务的文件所有权、接口约定与评审备注 |
 | `docs/M4-VALIDATION.md` | V4 实测记录 |
 | `docs/VLLM-BATCH-POC.md` | 纯 eBPF batch POC 记录 |
 
@@ -333,11 +345,14 @@ span_id, seq
   时钟偏移、时间窗退化、reason 分类、四类 device verdict；
 - `diagnose` 自动读取 `device.jsonl`，有证据才输出设备结论；
 - 用真实 V4 host span（7,794 条）+ 合成 device.jsonl 验证 100% 匹配；
-- M3.0 可行性结论：`msprof --pid` 三变体段错误，动态 attach 路线不可用。
+- M3.0 可行性结论：`msprof --pid` 三变体段错误，动态 attach 路线不可用；
+- host 侧接入：`attach --device-jsonl` 导入 device/meta、抓 `pidmap.json` 并封存 artifact；
+- 并行任务负责容器内 in-process msPTI collector（`m3/mspti_collector`），所有权见
+  `docs/WORK-SPLIT.md`。
 
 待做（需要维护窗口）：
 
-- 容器内 in-process msPTI collector（C/Python）产出 `cann.device.v1`；
+- collector 在 CANN 9.0.1 容器内构建并用 `synthetic_acl` 验证 API/KERNEL/MEMCPY/HCCL 与 correlationId；
 - 用已知 kernel 验证 correlationId 真能关联；95% 慢 Sync 匹配、偏差 <100µs；
 - 生产端接通后写 `docs/M3-VALIDATION.md`；join 失败时降级为时间窗，不伪造精确关联。
 

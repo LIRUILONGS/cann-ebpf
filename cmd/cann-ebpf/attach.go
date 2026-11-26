@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"cann-ebpf/internal/device"
 	"cann-ebpf/internal/discovery"
 	"cann-ebpf/internal/probes"
 )
@@ -37,9 +38,14 @@ func cmdAttach(args []string) int {
 	blockingMode := fs.String("blocking", "auto", "host blocking probes: auto|on|off (sched_switch off-CPU and futex_wait)")
 	hardwareMode := fs.String("hardware", "auto", "coarse npu-smi hardware sampling: auto|on|off")
 	hardwareInterval := fs.Duration("hardware-interval", 0, "hardware sampling interval override (default: profile hardware.interval_s)")
+	deviceJSONL := fs.String("device-jsonl", "", "external msPTI collector device.jsonl to import into the run directory")
+	preflightMode := fs.String("preflight", "enforce", "environment preflight before attach: enforce|warn|off")
 	jsonOut := fs.Bool("json", false, "json summary")
 	if err := fs.Parse(args); err != nil {
 		return 2
+	}
+	if code := runPreflightGate(*preflightMode); code != 0 {
+		return code
 	}
 
 	profile, _, err := discovery.LoadProfileByName(*profilesDir, *profileName)
@@ -98,6 +104,12 @@ func cmdAttach(args []string) int {
 	if *outputDir == "" {
 		*outputDir = filepath.Join("runs", fmt.Sprintf("ebpf-%d", time.Now().Unix()))
 	}
+	var pidMapArtifact *device.PIDMapArtifact
+	if artifact, mapErr := device.CapturePIDMaps(pids); mapErr != nil {
+		fmt.Fprintf(os.Stderr, "attach: pidmap warning: %v\n", mapErr)
+	} else {
+		pidMapArtifact = artifact
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), *duration+10*time.Second)
 	defer cancel()
 	result, err := probes.Run(probes.Options{
@@ -107,6 +119,7 @@ func cmdAttach(args []string) int {
 		Blocking:         probes.BlockingMode(*blockingMode),
 		HardwareMode:     *hardwareMode,
 		HardwareInterval: *hardwareInterval,
+		DeviceJSONL:      *deviceJSONL,
 		OnCaptureStart: func() {
 			fmt.Fprintf(os.Stderr, "capture_start=%s\n", time.Now().UTC().Format(time.RFC3339Nano))
 		},
@@ -125,6 +138,11 @@ func cmdAttach(args []string) int {
 		fmt.Fprintf(os.Stderr, "attach: %v\n", err)
 		return 5
 	}
+	if pidMapArtifact != nil {
+		if mapErr := device.WritePIDMap(filepath.Join(*outputDir, "pidmap.json"), pidMapArtifact); mapErr != nil {
+			fmt.Fprintf(os.Stderr, "attach: write pidmap: %v\n", mapErr)
+		}
+	}
 	fmt.Fprintf(os.Stderr, "capture_end=%s\n", time.Now().UTC().Format(time.RFC3339Nano))
 	if *jsonOut {
 		writeJSON(map[string]any{
@@ -132,6 +150,7 @@ func cmdAttach(args []string) int {
 			"spans": len(result.Spans), "events": result.EventCount, "attachments": result.Attachments,
 			"warnings": result.Warnings, "context": result.Context, "python_batch": result.PythonBatch,
 			"blocking": result.Blocking, "hardware": result.Hardware, "output": *outputDir,
+			"device": result.DeviceEvidence,
 		})
 	} else {
 		fmt.Printf("ebpf profile=%s pids=%v spans_buffered=%d events=%d output=%s\n", profile.Name, pids, len(result.Spans), result.EventCount, *outputDir)
@@ -145,6 +164,9 @@ func cmdAttach(args []string) int {
 			result.TeardownDuration.Round(time.Millisecond), result.CloseLinksDuration.Round(time.Millisecond),
 			result.BatchCollectDuration.Round(time.Millisecond), result.ConsumeWaitDuration.Round(time.Millisecond),
 			result.WriterCloseDuration.Round(time.Millisecond), result.SummaryDuration.Round(time.Millisecond))
+		fmt.Printf("device_evidence imported=%v device=%s meta=%s pidmap=%s\n",
+			result.DeviceEvidence.Imported, result.DeviceEvidence.DevicePath,
+			result.DeviceEvidence.MetaPath, result.DeviceEvidence.PIDMapPath)
 		for _, batch := range result.PythonBatch {
 			fmt.Printf("python_batch pid=%d status=%s batches=%d requests=%d lib=%s\n",
 				batch.PID, batch.Status, batch.Batches, batch.Requests, batch.Lib)
