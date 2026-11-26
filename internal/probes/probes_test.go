@@ -6,6 +6,9 @@ import (
 	"testing"
 
 	"cann-ebpf/internal/config"
+	"cann-ebpf/internal/runlog"
+
+	"github.com/cilium/ebpf"
 )
 
 func TestEmbeddedBPFObject(t *testing.T) {
@@ -13,7 +16,7 @@ func TestEmbeddedBPFObject(t *testing.T) {
 	if err != nil {
 		t.Fatalf("loadCollectionSpec: %v", err)
 	}
-	for _, name := range []string{"events", "inflight", "probe_cfg", "probe_stats"} {
+	for _, name := range []string{"events", "inflight", "probe_cfg", "probe_stats", "blocking_cfg", "tid_state"} {
 		if spec.Maps[name] == nil {
 			t.Errorf("map %q missing", name)
 		}
@@ -21,7 +24,7 @@ func TestEmbeddedBPFObject(t *testing.T) {
 	if spec.Maps["probe_stats"] != nil && spec.Maps["probe_stats"].MaxEntries != bpfFunctionSlots {
 		t.Fatalf("probe_stats max_entries = %d, want %d", spec.Maps["probe_stats"].MaxEntries, bpfFunctionSlots)
 	}
-	if got, want := len(spec.Programs), 2*len(supportedFunctions); got != want {
+	if got, want := len(spec.Programs), 2*len(supportedFunctions)+len(blockingPrograms); got != want {
 		t.Fatalf("programs = %d, want %d", got, want)
 	}
 	for _, fn := range supportedFunctions {
@@ -33,15 +36,33 @@ func TestEmbeddedBPFObject(t *testing.T) {
 			t.Errorf("exit program %q missing", exit)
 		}
 	}
+	for _, bp := range blockingPrograms {
+		program := spec.Programs[bp.name]
+		if program == nil {
+			t.Errorf("blocking program %q missing", bp.name)
+			continue
+		}
+		wantType := ebpf.TracePoint
+		if bp.kind != "tracepoint" {
+			wantType = ebpf.Kprobe
+		}
+		if program.Type != wantType {
+			t.Errorf("blocking program %q type = %v, want %v", bp.name, program.Type, wantType)
+		}
+	}
 }
 
 func TestDecodeSpanEvent(t *testing.T) {
 	want := rawSpanEvent{
-		StartNS: 100, DurNS: 25, PID: 42, TID: 43, Function: 7, Flags: 0,
+		StartNS: 100, DurNS: 25, PID: 42, TID: 43, Function: 7, Flags: blockingFlagOffCPU,
+		OffCPUNS: 10, FutexNS: 4,
 	}
 	var buf bytes.Buffer
 	if err := binary.Write(&buf, binary.LittleEndian, want); err != nil {
 		t.Fatal(err)
+	}
+	if buf.Len() != 48 {
+		t.Fatalf("encoded span event = %d bytes, want 48", buf.Len())
 	}
 	got, err := decodeSpanEvent(buf.Bytes())
 	if err != nil {
@@ -52,6 +73,58 @@ func TestDecodeSpanEvent(t *testing.T) {
 	}
 	if _, err := decodeSpanEvent(buf.Bytes()[:8]); err == nil {
 		t.Fatal("expected short event error")
+	}
+}
+
+func TestApplyBlockingSample(t *testing.T) {
+	var span runlog.Span
+	applyBlockingSample(&span, rawSpanEvent{Flags: blockingFlagOffCPU | blockingFlagFutex, OffCPUNS: 7, FutexNS: 3})
+	if span.OffCPUNS == nil || *span.OffCPUNS != 7 {
+		t.Fatalf("offcpu = %v", span.OffCPUNS)
+	}
+	if span.FutexNS == nil || *span.FutexNS != 3 {
+		t.Fatalf("futex = %v", span.FutexNS)
+	}
+
+	var notMeasured runlog.Span
+	applyBlockingSample(&notMeasured, rawSpanEvent{Flags: 0, OffCPUNS: 9, FutexNS: 9})
+	if notMeasured.OffCPUNS != nil || notMeasured.FutexNS != nil {
+		t.Fatal("values without a measurement flag must stay absent")
+	}
+
+	var zero runlog.Span
+	applyBlockingSample(&zero, rawSpanEvent{Flags: blockingFlagOffCPU})
+	if zero.OffCPUNS == nil || *zero.OffCPUNS != 0 {
+		t.Fatal("a measured zero must stay present")
+	}
+}
+
+func TestResolveBlocking(t *testing.T) {
+	off := &config.Document{Spec: config.Spec{Probes: config.Probes{
+		Sched: config.Probe{Enabled: false},
+		Futex: config.Probe{Enabled: false},
+	}}}
+	on := &config.Document{Spec: config.Spec{Probes: config.Probes{
+		Sched: config.Probe{Enabled: true},
+		Futex: config.Probe{Enabled: "auto"},
+	}}}
+	if o, f, err := resolveBlocking(nil, BlockingAuto); err != nil || o || f {
+		t.Fatalf("nil profile auto = %v,%v,%v", o, f, err)
+	}
+	if o, f, err := resolveBlocking(off, BlockingAuto); err != nil || o || f {
+		t.Fatalf("off profile auto = %v,%v,%v", o, f, err)
+	}
+	if o, f, err := resolveBlocking(off, BlockingOn); err != nil || !o || !f {
+		t.Fatalf("off profile on = %v,%v,%v", o, f, err)
+	}
+	if o, f, err := resolveBlocking(on, BlockingOff); err != nil || o || f {
+		t.Fatalf("on profile off = %v,%v,%v", o, f, err)
+	}
+	if o, f, err := resolveBlocking(on, BlockingAuto); err != nil || !o || !f {
+		t.Fatalf("on profile auto = %v,%v,%v", o, f, err)
+	}
+	if _, _, err := resolveBlocking(on, BlockingMode("sometimes")); err == nil {
+		t.Fatal("expected unknown mode error")
 	}
 }
 

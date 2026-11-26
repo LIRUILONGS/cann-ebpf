@@ -31,6 +31,8 @@ var spanKnownFields = map[string]struct{}{
 	"library":        {},
 	"category":       {},
 	"duration_ns":    {},
+	"offcpu_ns":      {},
+	"futex_ns":       {},
 	"ret":            {},
 	"phase":          {},
 	"dev_id":         {},
@@ -66,22 +68,29 @@ type Attribution struct {
 // TGID repeats the process ID explicitly so consumers do not have to guess
 // the Linux naming convention. TsNS is the event/start timestamp.
 type Span struct {
-	Schema        string            `json:"schema"`
-	RunID         string            `json:"run_id"`
-	Profile       string            `json:"profile"`
-	TsNS          int64             `json:"ts_ns"`
-	StartNS       int64             `json:"start_ns,omitempty"`
-	EndNS         int64             `json:"end_ns,omitempty"`
-	PID           int               `json:"pid"`
-	TID           int               `json:"tid"`
-	TGID          int               `json:"tgid"`
-	Comm          string            `json:"comm,omitempty"`
-	ThreadName    string            `json:"thread_name,omitempty"`
-	Function      string            `json:"function"`
-	APIName       string            `json:"api,omitempty"`
-	Library       string            `json:"library"`
-	Category      string            `json:"category"`
-	DurationNS    int64             `json:"duration_ns"`
+	Schema     string `json:"schema"`
+	RunID      string `json:"run_id"`
+	Profile    string `json:"profile"`
+	TsNS       int64  `json:"ts_ns"`
+	StartNS    int64  `json:"start_ns,omitempty"`
+	EndNS      int64  `json:"end_ns,omitempty"`
+	PID        int    `json:"pid"`
+	TID        int    `json:"tid"`
+	TGID       int    `json:"tgid"`
+	Comm       string `json:"comm,omitempty"`
+	ThreadName string `json:"thread_name,omitempty"`
+	Function   string `json:"function"`
+	APIName    string `json:"api,omitempty"`
+	Library    string `json:"library"`
+	Category   string `json:"category"`
+	DurationNS int64  `json:"duration_ns"`
+	// OffCPUNS and FutexNS are optional host-side blocking samples collected by
+	// the sched_switch and futex_wait probes. A nil pointer means the value was
+	// not measured for that span; a non-nil zero means it was measured as zero.
+	// They are evidence about the calling thread only and must not be read as
+	// device execution time.
+	OffCPUNS      *int64            `json:"offcpu_ns,omitempty"`
+	FutexNS       *int64            `json:"futex_ns,omitempty"`
 	Ret           *int64            `json:"ret,omitempty"`
 	Phase         string            `json:"phase,omitempty"`
 	DevID         int               `json:"dev_id,omitempty"`
@@ -140,6 +149,12 @@ func (s Span) Validate() error {
 	}
 	if s.DurationNS < 0 {
 		return fmt.Errorf("duration_ns must not be negative")
+	}
+	if s.OffCPUNS != nil && *s.OffCPUNS < 0 {
+		return fmt.Errorf("offcpu_ns must not be negative")
+	}
+	if s.FutexNS != nil && *s.FutexNS < 0 {
+		return fmt.Errorf("futex_ns must not be negative")
 	}
 	if s.StartNS < 0 || s.EndNS < 0 {
 		return fmt.Errorf("start_ns and end_ns must not be negative")

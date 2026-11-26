@@ -34,6 +34,7 @@ func cmdAttach(args []string) int {
 	pythonBatchOffsets := fs.String("python-batch-offsets", "", "CPython/vLLM offset bundle JSON (default: embedded pinned profile)")
 	pythonBatchMaxEvents := fs.Int("python-batch-max-events", 20000, "maximum batch ring-buffer events retained per worker")
 	pythonBatchRequireType := fs.String("python-batch-require-type", "SchedulerOutput", "required batch owner type substring")
+	blockingMode := fs.String("blocking", "auto", "host blocking probes: auto|on|off (sched_switch off-CPU and futex_wait)")
 	jsonOut := fs.Bool("json", false, "json summary")
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -101,6 +102,7 @@ func cmdAttach(args []string) int {
 		Context: ctx, PIDs: pids, ProcRoot: *procRoot, Profile: profile.Doc,
 		ProfileName: profile.Name, Duration: *duration, OutputDir: *outputDir,
 		MinDuration: *minDuration, ContextSocket: contextSocketPath,
+		Blocking: probes.BlockingMode(*blockingMode),
 		PythonBatch: probes.PythonBatchOptions{
 			Enabled:     *pythonBatch,
 			LibPath:     *pythonBatchLib,
@@ -118,11 +120,13 @@ func cmdAttach(args []string) int {
 			"backend": "ebpf", "profile": profile.Name, "pids": pids,
 			"spans": len(result.Spans), "events": result.EventCount, "attachments": result.Attachments,
 			"warnings": result.Warnings, "context": result.Context, "python_batch": result.PythonBatch,
-			"output": *outputDir,
+			"blocking": result.Blocking, "output": *outputDir,
 		})
 	} else {
 		fmt.Printf("ebpf profile=%s pids=%v spans_buffered=%d events=%d output=%s\n", profile.Name, pids, len(result.Spans), result.EventCount, *outputDir)
 		fmt.Printf("context batches=%d active=%d requests=%d pids=%v\n", result.Context.TotalBatches, result.Context.ActiveBatches, result.Context.RequestIDs, result.Context.PIDs)
+		fmt.Printf("blocking mode=%s offcpu=%v futex=%v attached=%d failed=%d\n",
+			result.Blocking.Mode, result.Blocking.OffCPU, result.Blocking.Futex, result.Blocking.Attached, result.Blocking.Failed)
 		for _, batch := range result.PythonBatch {
 			fmt.Printf("python_batch pid=%d status=%s batches=%d requests=%d lib=%s\n",
 				batch.PID, batch.Status, batch.Batches, batch.Requests, batch.Lib)

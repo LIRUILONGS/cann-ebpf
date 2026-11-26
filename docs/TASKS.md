@@ -1,7 +1,20 @@
 # cann-ebpf 开发任务
 
-状态（2026-11-26）：M0 完成；M1 host core 完成；M4 的 vLLM-Ascend host profile 与上下文协议完成，
-vLLM 插件代码完成但未激活；M2、M3、M5、M6 未完成；Orinfer 未运行验证。
+状态（2026-11-26，`0.6.0-m2`）：M0 完成；M1 host core 完成（`diagnose` 覆盖原 `top`/`why` 初版的只读定位）；
+M4 的 vLLM-Ascend host profile 与上下文协议完成，vLLM 插件代码完成但未激活；M2 代码+单测完成、未上机；
+M3、M6 未完成；Orinfer 未运行验证；`execute_model` 函数级耗时本轮不做。
+
+## P0 低层定位命令（已完成）
+
+- [x] `cann-ebpf diagnose`：只读读取 `spans.jsonl` + `manifest.json`
+- [x] 时间窗（单调 ns / `--last`）、PID、TID、batch_id、request_id、trace_id 过滤
+- [x] 输出命中 PID/TID/batch/request、top slow function/category、类别分布
+- [x] host off-CPU/futex 迹象与 `host_lock_contention` 判定
+- [x] 证据 span（span_id + start/end/duration + offcpu/futex）
+- [x] 明确输出“无法判定”原因（缺 off-CPU、缺 msPTI、batch 非 request、插件未激活）
+- [x] JSON（`cann.diagnose.report.v1`）与中文 Markdown
+- [x] 单测：时间窗、PID/TID/batch/request/trace、空结果、判定分支、CLI 退出码
+- [ ] 服务器真实 `runs/` 上跑一遍（不需要授权窗口）
 
 ## M0 骨架与发现
 
@@ -21,9 +34,9 @@ vLLM 插件代码完成但未激活；M2、M3、M5、M6 未完成；Orinfer 未�
 - [x] H1 `sync` 与 event/submit/HCCL 核心探针（memory 探针已由 M4 的 37 函数集合覆盖）
 - [x] ringbuf / entry-exit 配对
 - [x] JSONL + manifest
-- [ ] `top` / `why` 初版
 - [x] 30 秒试跑（V4，不重启服务）
 - [x] V4 eBPF 历史基线：单 PID 2s 70 spans；8 worker 2s 487 spans；8 worker 30s 2088 spans（回归批次 2665 spans）；health 前后 200；uprobe 无残留
+- [x] 只读定位由 `diagnose` 覆盖（原 `top`/`why` 初版不再单列）
 
 M1 的 8 个核心函数和 2088 spans 是历史基线。当前 37 个 host 探针、10 秒 6,991 spans 的实测见 M4。
 
@@ -59,11 +72,23 @@ M1 的 8 个核心函数和 2088 spans 是历史基线。当前 37 个 host 探�
 - `protocol_smoke` 只能证明协议、UID 权限和窗口标注链路；不能冒充 `vllm_general_plugin` 流量。
 - 37 个函数已 attach 不等于同一个窗口内 37 个函数都触发；最终窗口只观察到 6 类函数。
 
-## M2 off-CPU 与锁归因
+## M2 off-CPU 与锁归因（代码完成，未上机）
 
-- [ ] sched_switch / futex / 可选 pthread_mutex_lock
-- [ ] offcpu_ns / futex_ns
-- [ ] host_lock_contention / launch_starvation
+- [x] `sched_switch` tracepoint 累计线程 off-CPU
+- [x] `futex_wait` / `futex_wait_requeue_pi` kprobe 累计 futex 等待
+- [x] `offcpu_ns` / `futex_ns` 写入标准 span；区分“未测量”与“测得 0”
+- [x] 嵌套调用快照（8 层）与漏配对复位（64 层）
+- [x] 主 uprobe collection 与 blocking collection 分离加载，blocking 失败不影响 host span
+- [x] `attach --blocking auto|on|off`；按 profile `probes.sched/futex` 默认值
+- [x] `diagnose` 输出 `host_lock_contention` / `host_blocked_non_futex` / `host_cpu_running`
+- [x] 单测：48 字节事件解码、测量 flag、模式解析、BPF 程序类型
+- [ ] 真实内核 verifier/attach（预期 `offcpu=true futex=true failed=0`）
+- [ ] 合成 pthread mutex 竞争对照
+- [ ] V4 10 秒短窗口 + `/health`/service/残留检查
+- [ ] 10 秒窗口开销基线（sched_switch 为全系统 tracepoint）
+- [ ] 暂不实现 `pthread_mutex_lock` uprobe（由 futex 等待覆盖主要锁场景）
+
+验证步骤见 `docs/M2-OFFCPU.md`；在完成上机验证前，不得把 M2 数字写成已验证事实。
 
 ## 纯 eBPF vLLM batch 标准采集
 

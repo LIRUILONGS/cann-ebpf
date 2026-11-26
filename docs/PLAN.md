@@ -56,6 +56,8 @@
   msPTI 设备侧关联仍未实现。
 - 不开 msPTI 时，eBPF 只能看 host 入队/阻塞，看不到 kernel/memcpy/HCCL 的设备执行时间。
 - `aclrtRecordEvent` 的设备侧完成时间 `t_d` 不在 eBPF 中；只能用 msPTI 或 event 查询补。
+- M2 的 `sched_switch`/`futex` 代码已完成并有单测，但未在真实内核 attach 验证；`offcpu_ns`/`futex_ns`
+  目前是代码能力，不是已验证结论。
 - DCMI 字段、HCCL activity 是否可用，需在目标机实测；不可用时按 7.1 的降级路径处理。
 - 当前每卡 HBM 余量约 4.6GB，不能为验证 vLLM 硬起一个抢 HBM 的实例。
 
@@ -563,6 +565,7 @@ cann-ebpf top --profile orinfer
 cann-ebpf why --profile orinfer --since 5m
 cann-ebpf trace --pid 1691816 --tid 12345 --last 30s
 cann-ebpf report --run runs/20261125-orinfer-01
+cann-ebpf diagnose --input runs/20261125-orinfer-01 --last 5m
 cann-ebpf detach --all
 cann-ebpf validate --config /etc/cann-ebpf/config.yaml
 ```
@@ -682,11 +685,19 @@ cann-ebpf/
 - `top` / `why` 初版。
 - 30 秒试跑，确认不重启 Orinfer。
 
+状态（2026-11-26）：`top`/`why` 初版由只读 `diagnose` 命令覆盖（`docs/DIAGNOSE.md`）。
+
 ### M2：off-CPU 与锁归因（2–3 天）
 
 - `sched_switch`、`futex`、可选 `pthread_mutex_lock`。
 - 计算 `offcpu_ns`、`futex_ns`。
 - 输出 `host_lock_contention` / `launch_starvation` 初版。
+
+状态（2026-11-26）：`sched_switch` + `futex_wait` kprobe、`offcpu_ns`/`futex_ns` span 字段、
+`--blocking auto|on|off`、主/blocking collection 分离加载、`diagnose` 的 host 判定均已实现并有单测；
+**尚未在真实内核 attach 验证**，因此 `host_lock_contention` 目前是代码能力，不是已验证结论。
+`pthread_mutex_lock` uprobe 暂不实现。`launch_starvation` 仍需设备侧证据，M2 本身不下该结论。
+详见 `docs/M2-OFFCPU.md`。
 
 ### M3：msPTI join（3–5 天）
 

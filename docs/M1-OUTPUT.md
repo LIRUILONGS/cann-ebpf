@@ -29,6 +29,8 @@
 | `library` | string | 是（可为空串） | 共享库路径；无法解析时保留空串，不编造 |
 | `category` | string | 是 | `sync` / `event` / `submit` / `memory` / `hccl` / `sched` 等 |
 | `duration_ns` | int64 | 是 | 观测耗时，单位 ns，必须 `>= 0` |
+| `offcpu_ns` | int64 | 否 | M2：调用线程在本次调用内被切出 CPU 的累计时间；缺失=未测量，0=测得 0 |
+| `futex_ns` | int64 | 否 | M2：调用线程在本次调用内 futex 等待的累计时间；缺失=未测量，0=测得 0 |
 | `ret` | int64 | 否 | 原始返回值；缺失则省略，真实 `0` 保留 |
 | `phase` | string | 否 | 如 `enter` / `exit`，不由输出层补造 |
 | `dev_id` | int | 否 | 设备 ID；未知时省略，不能填占位值 |
@@ -312,3 +314,5 @@ API，不改变上述字段语义。
   `span_id`，`batch_parent_span_id` 只在插件提供了上游 parent 时存在，不能补造完整 HTTP 链路。
 - 当前没有 msPTI 设备侧字段，也没有逐 request 的 `duration_ns` 拆分。summary 的 batch 聚合是
   “时间窗内 host span 的合计”，不是设备 kernel 时长。
+- `offcpu_ns` / `futex_ns` 是调用线程的 host 侧采样，不是 request 延迟、不是设备执行时间；
+  嵌套 CANN span 的累计会重叠，不能跨嵌套函数直接求和。

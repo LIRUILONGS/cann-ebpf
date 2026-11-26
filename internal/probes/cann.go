@@ -36,6 +36,8 @@ type rawSpanEvent struct {
 	TID      uint32
 	Function uint32
 	Flags    uint32
+	OffCPUNS uint64
+	FutexNS  uint64
 }
 
 func decodeSpanEvent(sample []byte) (rawSpanEvent, error) {

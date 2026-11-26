@@ -115,6 +115,44 @@ func Run(opts Options) (result *Result, retErr error) {
 		return result, fmt.Errorf("no uprobe could be attached")
 	}
 
+	blockingOffCPU, blockingFutex, blockingErr := resolveBlocking(opts.Profile, opts.Blocking)
+	if blockingErr != nil {
+		return result, blockingErr
+	}
+	var blockingResult BlockingResult
+	var blockingCollection *ebpf.Collection
+	if blockingOffCPU || blockingFutex {
+		loaded, loadErr := loadBlockingCollection(collection)
+		if loadErr != nil {
+			result.Warnings = append(result.Warnings, loadErr.Error())
+			blockingResult = BlockingResult{
+				Mode: string(opts.Blocking), OffCPU: false, Futex: false,
+				Warnings: []string{loadErr.Error()},
+			}
+		} else {
+			blockingCollection = loaded
+			defer func() {
+				if blockingCollection != nil {
+					blockingCollection.Close()
+				}
+			}()
+			blockingAttachments, blockingWarnings, blocking := attachBlocking(blockingCollection, blockingOffCPU, blockingFutex, &links, &linkMu)
+			blocking.Mode = string(opts.Blocking)
+			result.Attachments = append(result.Attachments, blockingAttachments...)
+			result.Warnings = append(result.Warnings, blockingWarnings...)
+			blockingResult = blocking
+			if err := configureBlockingMap(collection, blocking.OffCPU, blocking.Futex); err != nil {
+				result.Warnings = append(result.Warnings, "configure blocking map: "+err.Error())
+				blockingResult.OffCPU = false
+				blockingResult.Futex = false
+			}
+		}
+	} else {
+		blockingResult = BlockingResult{Mode: string(opts.Blocking)}
+		_ = configureBlockingMap(collection, false, false)
+	}
+	result.Blocking = blockingResult
+
 	batchLayer, batchWarnings := startPythonBatchLayer(opts.Context, opts)
 	result.Warnings = append(result.Warnings, batchWarnings...)
 
@@ -151,6 +189,10 @@ func Run(opts Options) (result *Result, retErr error) {
 	}
 
 	closeLinks()
+	if blockingCollection != nil {
+		blockingCollection.Close()
+		blockingCollection = nil
+	}
 	_ = reader.Flush()
 	batchCaptures, batchWarnings := batchLayer.Collect(10 * time.Second)
 	result.Warnings = append(result.Warnings, batchWarnings...)
@@ -400,6 +442,7 @@ func consumeRing(reader *ringbuf.Reader, functionLibraries map[string]string, wr
 			DurationNS: int64(event.DurNS),
 			Phase:      "host",
 		}
+		applyBlockingSample(&span, event)
 		if contextFeed != nil {
 			span = contextFeed.Enrich(span)
 		} else {

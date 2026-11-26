@@ -1,8 +1,8 @@
 # cann-ebpf 项目交接文档
 
 文档日期：2026-11-26  
-适用版本：`0.5.0-m5`（含纯 eBPF batch warning 修复）  
-代码状态：`main` @ `b4c7b87512f4ace24ff299f60d7964c1f773d03e`  
+适用版本：`0.6.0-m2`（新增 `diagnose` 命令与 M2 host off-CPU/futex 代码）  
+代码状态：`main` @ 本次交接提交（`git log -1` 见提交号）  
 文档性质：工程交接。本文只写已验证事实；代码完成但未上机验证的内容会单独标注。
 
 ## 1. 项目地址
@@ -11,11 +11,12 @@
 |---|---|
 | 本地工作区 | `C:\Users\liruilong\pentagi\cann-ebpf` |
 | Git 分支 | `main` |
-| 最新提交 | `b4c7b87512f4ace24ff299f60d7964c1f773d03e` (`fix: surface batch probe data-loss warnings`) |
+| 最新提交 | 见 `git log -1`（本次新增 `diagnose` 与 M2 off-CPU/futex 代码） |
 | Git remote | 未配置；交接前建议先配置内部 Git 远程并推送 |
-| Linux/arm64 二进制 | `dist/cann-ebpf-linux-arm64-batch` |
-| 二进制大小 | `9,232,219` bytes |
-| 二进制 SHA-256 | `AE9F527AA8B0113F9166D9B2B0F2378E129CC26C04550F54F9CF37B9640F0E51` |
+| Linux/arm64 二进制（M2） | `dist/cann-ebpf-linux-arm64-m2` |
+| 二进制大小 | `9,388,363` bytes |
+| 二进制 SHA-256 | `85DC494BE3E95DFB375B757E7AA4DE1BA5D5AAE1518658A03926E7B4BF31AB88` |
+| 历史已验证二进制 | `dist/cann-ebpf-linux-arm64-batch`（`0.5.0-m5`，上表 SHA 已替换为 M2 构建，旧包仍保留在 dist/） |
 | 服务器验证副本（历史） | `/root/cann-ebpf`，V4 服务器 `bms-84865758` |
 | 服务器 profiles | `/root/cann-ebpf/profiles` |
 
@@ -47,13 +48,15 @@
 | M4 vLLM-Ascend host profile | 完成 | 37 个函数、74 个 entry/exit 程序、10 个目标自动发现、10 秒实采 |
 | M5 trace context + CPython POC | 完成 | trace 链路树、纯 eBPF CPython batch POC |
 | 纯 eBPF vLLM batch 标准采集 | 完成 | 已并入 `spans.jsonl`/summary，真实 V4 验证通过 |
-| vLLM general plugin | 代码和单测完成，未激活 | 未安装到运行中的 V4，也未重启验证 |
+| P0 `diagnose` 命令 | 完成 | 只读读取已有证据，JSON/Markdown，单测覆盖；不需要 NPU |
+| M2 off-CPU/futex 归因 | 代码和单测完成，未上机 | sched_switch + futex_wait 探针、`offcpu_ns`/`futex_ns`；需真实内核 verifier/attach 验证 |
+| vLLM general plugin | 代码和单测完成，未激活 | 未安装到运行中的 V4，也未重启验证；本阶段不做 |
 | Orinfer | 仅 profile validate | 服务未运行，没有真实采集窗口 |
-| M2 off-CPU/futex 归因 | 未实现 | 下一阶段重点 |
 | M3 msPTI 设备时间线 | 未实现 | 下一阶段重点 |
 | M6 生产化 | 未实现 | Prometheus/OTLP、Grafana、systemd 等未做 |
 
-注意：版本号 `0.5.0-m5` 不代表 M5 全部完成。M5 的 V4/Orinfer A/B 对比还没有做；当前 M5 交付的是 trace context 和 CPython POC。
+注意：版本号 `0.6.0-m2` 只表示本次新增了 `diagnose` 和 M2 的 host 阻塞代码，不代表 M2 已上机验证。
+M2 的 verifier/attach 验证、合成锁竞争验证和 V4 短窗口验证都还没做；M5 的 V4/Orinfer A/B 对比也还没有做。
 
 ### 3.2 M0：发现与符号解析
 
@@ -125,6 +128,27 @@ span_id, seq
 - `cann-ebpf trace --input <spans.jsonl>` 按 trace_id 聚合，输出链路树。
 - batch span 可以作为 host span 的父节点/关联节点，按 batch 查看请求与调用链。
 
+### 3.7 `diagnose` 低层定位命令（P0，已完成）
+
+- 只读读取已有 run 的 `spans.jsonl` / `manifest.json`，不 attach、不重启、不改原始证据。
+- 支持时间窗（单调时钟 ns、`--last`）、PID、TID、batch_id、request_id、trace_id 过滤。
+- 输出 JSON（`cann.diagnose.report.v1`）与中文 Markdown：命中 PID/TID/batch/request、top slow
+  function/category、host off-CPU/futex 比例、证据 span、判定与 confidence、无法判定原因。
+- 判定只在有 off-CPU/futex 采样时给出；没有 msPTI 时永远不输出 `device_bound` 之类的结论。
+- 单测覆盖所有过滤维度、时间窗、空结果、判定分支和 CLI 退出码。
+- 详见 `docs/DIAGNOSE.md`。
+
+### 3.8 M2 host off-CPU / futex 归因（代码完成，未上机）
+
+- `sched_switch` tracepoint 累计线程在 CANN 调用期间被切出 CPU 的时间；`futex_wait` /
+  `futex_wait_requeue_pi` kprobe 累计 futex 等待。
+- span 新增可选字段 `offcpu_ns` / `futex_ns`；字段缺失=未测量，字段为 0=测得 0。
+- 主 uprobe collection 与 blocking collection 分离加载；blocking 被 verifier 拒绝时只降级为无
+  off-CPU 数据，不会拖垮 host span 采集。
+- `attach --blocking auto|on|off`；默认按 profile（`vllm-ascend`/`orinfer` 当前为 true）。
+- 未做：真实内核 attach/verifier、合成锁竞争、V4 短窗口、开销基线。
+- 详见 `docs/M2-OFFCPU.md`。
+
 ## 4. 当前能回答和不能回答的问题
 
 ### 能回答
@@ -134,11 +158,13 @@ span_id, seq
 - 某次采集窗口内有哪些 batch、每个 batch 有哪些 request ID（限固定运行时和纯 eBPF 路径）。
 - 哪些 span 属于同一个 `trace_id`，链路上下游是什么。
 - 按函数、类别、PID、batch 的分布统计，以及原始证据的哈希和完整性。
+- 把已有证据按时间窗/PID/batch/request 转成低层定位报告（`diagnose`）。
+- 在 M2 探针成功采集时，给出每个 sync span 的 host off-CPU/futex 采样和 `host_lock_contention` 判定。
 
 ### 不能回答
 
-- 不能回答“为什么卡住”：缺少 `sched_switch`、`futex`、off-CPU 归因。
-- 不能可靠区分 `host_lock_contention`、`device_bound`、`launch_starvation`。
+- 不能回答“为什么卡住”的完整因果：M2 代码未上机，当前没有真实 off-CPU/futex 证据。
+- 不能可靠区分 `device_bound`、`launch_starvation`、`copy_bound`、`communication_bound`。
 - 不能回答 NPU kernel / memcpy / HCCL 的设备执行时间：msPTI 未接入。
 - 不能回答单 request 延迟；batch 窗口不能拆成逐 request 时长。
 - 不能回答 `execute_model` 的 Python 函数级耗时；插件未激活，纯 eBPF 的 `PyObject_GetAttr` 不是函数边界。
@@ -148,12 +174,17 @@ span_id, seq
 
 | 路径 | 作用 |
 |---|---|
-| `cmd/cann-ebpf/main.go` | CLI 入口、`validate/discover/attach/attach-tracefs/trace/version` |
-| `cmd/cann-ebpf/attach.go` | eBPF attach 参数、自动发现、输出 |
+| `cmd/cann-ebpf/main.go` | CLI 入口、`validate/discover/attach/attach-tracefs/trace/diagnose/version` |
+| `cmd/cann-ebpf/attach.go` | eBPF attach 参数、自动发现、输出、`--blocking` |
 | `cmd/cann-ebpf/trace.go` | `trace` 报告和链路树 |
+| `cmd/cann-ebpf/diagnose.go` | `diagnose` 只读定位报告 CLI |
 | `internal/probes/functions.go` | 37 个 CANN/ACL/HCCL 函数声明 |
-| `internal/probes/bpf/cann.bpf.c` | BPF C 源码 |
+| `internal/probes/bpf/cann.bpf.c` | BPF C 源码（37 组 uprobe + sched_switch/futex kprobe） |
 | `internal/probes/bpf/cann.bpf.o` | 已编译并嵌入的 BPF 对象，目标机不需要现编 |
+| `internal/probes/blocking_common.go` | blocking 模式、测量 flag、span 赋值 |
+| `internal/probes/blocking_linux.go` | sched_switch/futex attach、blocking map 配置 |
+| `internal/probes/loader.go` | 主 collection 与 blocking collection 分离加载 |
+| `internal/diagnose/` | 已读证据的过滤、聚合、判定、JSON/Markdown |
 | `internal/probes/pythonbatch_linux_arm64.go` | 纯 eBPF CPython/vLLM batch 采集 |
 | `internal/runlog/` | JSONL、manifest、summary、span 读取 |
 | `profiles/vllm-ascend.yaml` | V4/vLLM-Ascend profile |
@@ -162,6 +193,8 @@ span_id, seq
 | `adapters/vllm_ascend/` | vLLM general plugin 适配器（未激活） |
 | `docs/PLAN.md` | 总体方案和判定规则 |
 | `docs/TASKS.md` | 任务清单和未完成项 |
+| `docs/DIAGNOSE.md` | `diagnose` 命令、时间窗语义、判定规则与边界 |
+| `docs/M2-OFFCPU.md` | M2 设计、未验证标注、服务器验证步骤 |
 | `docs/M4-VALIDATION.md` | V4 实测记录 |
 | `docs/VLLM-BATCH-POC.md` | 纯 eBPF batch POC 记录 |
 
@@ -183,55 +216,49 @@ span_id, seq
 | 10 秒 host 采集 | 6,991 spans，dropped 0，8 Worker 均有 span |
 | 采集影响 | `/health` 200/200，service active/active，uprobe 残留 0 |
 | 纯 eBPF batch | 10 个 batch、6 个 request ID（单 Worker）；双 Worker 各 4 个 batch |
-| 构建验证 | `go test ./...`、`go vet ./...`、Linux/arm64 交叉编译通过 |
+| 构建验证 | `go test ./...`、`go vet ./...`、Linux/arm64 交叉编译通过（含 `diagnose` 与 M2 代码） |
+| `diagnose` 验证 | Windows 本机单测 + 合成 run 目录的 Markdown/JSON 输出通过；未在服务器真数据上跑 |
+| M2 验证 | 仅交叉编译与 BPF 对象解析/程序类型单测通过；**未在真实内核 attach** |
 
 ## 7. 下一步工作方向
 
-建议按以下顺序推进，先让现有数据可用，再补低层归因，最后做设备侧和生产化。
+建议按以下顺序推进：先上机验证 M2，再补设备侧，最后做生产化。插件/`execute_model` 函数级耗时
+本轮明确不做，见 P2 说明。
 
-### P0：实现 `diagnose` 命令
+### P0：`diagnose` 命令（已完成）
 
-目标：不新增采集，先读取已有 `spans.jsonl`，把网关告警转成低层定位报告。
-
-输入：
-
-- `spans.jsonl` / `manifest.json`
-- 时间窗、PID/TID、batch_id、request_id、trace_id（至少支持时间窗和 PID）
-
-输出：
-
-- 命中的 Worker、PID、TID
-- 命中的 batch 和 request_ids
-- top slow function/category
-- sync/event/submit/memory/HCCL 分布
-- 是否存在 host 阻塞迹象
-- 证据 span_id、start_ns/end_ns
-- 当前无法判定的原因（例如缺少 off-CPU 或 msPTI）
-
-验收：
+已实现 `cann-ebpf diagnose`，验收项全部满足：
 
 - 只读，不 attach，不修改原始 evidence；
-- JSON 和 Markdown 两种输出；
-- 结果可复现，空数据/缺字段明确报 unknown，不补造；
-- 有单元测试覆盖时间窗、PID、batch_id、request_id 过滤。
+- JSON（`cann.diagnose.report.v1`）和 Markdown 两种输出；
+- 空数据/缺字段明确报 `unknown`，不补造；
+- 单测覆盖时间窗、PID、TID、batch_id、request_id、trace_id 过滤；
+- 输出命中 PID/TID/batch/request、top slow function/category、类别分布、off-CPU/futex 迹象、
+  证据 span、判定与无法判定原因。
 
-### P1：M2 off-CPU 与锁归因
+用法见 `docs/DIAGNOSE.md`。服务器上可以先拿已有 `runs/` 直接验证，不需要授权窗口。
 
-目标：回答“host 是不是被卡住了，卡在锁、调度还是驱动等待”。
+### P1：M2 off-CPU 与锁归因（代码完成，等待上机）
 
-实现：
+已实现（未上机）：
 
-- `sched_switch`：统计线程 off-CPU 时间；
-- `futex`：统计 futex 等待；
-- 可选 `pthread_mutex_lock`：补充用户态锁竞争；
-- 输出 `offcpu_ns`、`futex_ns`，增加 `host_lock_contention` 判定。
+- `sched_switch` tracepoint 统计线程 off-CPU 时间；
+- `futex_wait` / `futex_wait_requeue_pi` kprobe 统计 futex 等待；
+- `offcpu_ns` / `futex_ns` 写入标准 span，区分“未测量”与“测得 0”；
+- `diagnose` 输出 `host_lock_contention` / `host_blocked_non_futex` / `host_cpu_running` 判定；
+- 主 uprobe collection 与 blocking collection 分离加载，blocking 失败不影响 host span。
 
-验收：
+待做（验收项）：
 
 - 合成锁竞争目标可稳定复现；
+- 真实内核 verifier/attach 通过（`blocking offcpu=true futex=true failed=0`）；
 - V4 短窗口采集不改变服务状态；
-- 给出 host wall time、off-CPU 占比、futex 占比和证据 span；
+- 给出 host wall time、off-CPU 占比、futex 占比和证据 span 的真实数据；
+- 10 秒窗口开销相对基线无明显回归；
 - 与设备时间线结合前，不轻易下 `device_bound` 结论。
+
+验证步骤见 `docs/M2-OFFCPU.md` 第 6 节。注意 `vllm-ascend` profile 默认 `sched/futex=true`，
+长跑或怀疑开销时用 `--blocking off`。
 
 ### P1：M3 msPTI / CANN profiler join
 
@@ -250,7 +277,7 @@ span_id, seq
 - `device_bound`、`launch_starvation`、`copy_bound`、`communication_bound` 只有在有设备侧证据时才输出；
 - join 失败时明确降级为时间窗，不伪造精确关联。
 
-### P2：`execute_model` 边界（可选）
+### P2：`execute_model` 边界（本轮明确不做）
 
 纯 eBPF 无法直接挂 Python 方法。若要精确拿到 `execute_model` 的 Python 入口/返回：
 
@@ -258,6 +285,9 @@ span_id, seq
 - 需要安装 Python 包并重启 V4，必须走维护窗口；
 - 默认不启用，仍然以纯 eBPF 为主；
 - 插件也只能解决 Python batch 边界，不能解决单 request 和设备时间。
+
+本轮按交接要求**不安装、不重启、不激活插件**，因此执行 `execute_model` 函数级耗时仍然不可得；
+纯 eBPF 的 `PyObject_GetAttr` batch 窗口不能当作函数边界。插件代码保留，等明确维护窗口再动。
 
 ### P2：生产化
 
@@ -282,6 +312,7 @@ span_id, seq
 - 不覆盖旧证据目录；采集前后必须检查 health、service 状态和 uprobe 残留。
 - 不把 batch 窗口说成 `execute_model` 函数级耗时，不把 `duration_ns` 说成 request 延迟或 NPU 执行时间。
 - 不把 37 个已 attach 函数说成同一窗口全部触发；必须区分“可解析/可 attach”和“实际观测到”。
+- M2 未上机前，不把 `offcpu_ns`/`futex_ns` 或 `host_lock_contention` 当成已验证事实；只写“代码完成，未上机”。
 - 插件默认不启用；插件路径和纯 eBPF 路径必须分开描述。
 - `dist/`、`runs/`、`__pycache__` 不提交；代码修改需要 Git 提交。
 
@@ -295,8 +326,14 @@ go test ./...
 go vet ./...
 $env:GOOS = "linux"
 $env:GOARCH = "arm64"
-go build -buildvcs=false -trimpath -o dist/cann-ebpf-linux-arm64-batch ./cmd/cann-ebpf
+go build -buildvcs=false -trimpath -o dist/cann-ebpf-linux-arm64-m2 ./cmd/cann-ebpf
 Remove-Item Env:GOOS, Env:GOARCH, Env:CGO_ENABLED
+```
+
+修改 `internal/probes/bpf/cann.bpf.c` 后必须重新生成嵌入对象（Windows 本机即可，不依赖目标机）：
+
+```powershell
+clang --target=bpfel -mcpu=v1 -O2 -g -c internal/probes/bpf/cann.bpf.c -o internal/probes/bpf/cann.bpf.o
 ```
 
 服务器只读发现：
@@ -340,23 +377,51 @@ OUT="runs/ebpf-batch-$(date -u +%Y%m%dT%H%M%SZ)"
 ./cann-ebpf-linux-arm64 trace --input "$OUT/spans.jsonl" --limit 20
 ```
 
+只读定位报告（不需要 attach）：
+
+```bash
+./cann-ebpf-linux-arm64-m2 diagnose --input "$OUT"
+./cann-ebpf-linux-arm64-m2 diagnose --input "$OUT" --pid 1452 --last 2s --json --out "$OUT/diagnose.json"
+```
+
+M2 off-CPU/futex 采集（先短窗口，显式开探针）：
+
+```bash
+OUT="runs/ebpf-m2-$(date -u +%Y%m%dT%H%M%SZ)"
+./cann-ebpf-linux-arm64-m2 attach \
+  --pid auto \
+  --profile vllm-ascend \
+  --profiles-dir profiles \
+  --duration 10s \
+  --blocking on \
+  --no-context \
+  --output "$OUT"
+```
+
+关闭 blocking（长跑或怀疑开销时）：
+
+```bash
+./cann-ebpf-linux-arm64-m2 attach ... --blocking off ...
+```
+
 ## 10. 交接检查清单
 
-- [ ] 确认本地 Git 仓库提交和 `dist/cann-ebpf-linux-arm64-batch` SHA-256。
+- [ ] 确认本地 Git 仓库提交和 `dist/cann-ebpf-linux-arm64-m2` SHA-256。
 - [ ] 确认服务器 SSH/密钥可用；最近一次曾出现 `Permission denied (publickey,password)`，不要假设一定可连。
 - [ ] 确认 V4 服务当前状态和 `/health`，不要在未授权窗口 attach 或重启。
 - [ ] 确认 `profiles/vllm-ascend.yaml` 的目标发现规则仍匹配当前容器。
 - [ ] 确认 `runs/` 和旧证据目录不被覆盖。
 - [ ] 先跑 `go test ./...` 和 `go vet ./...`。
-- [ ] 按 P0 → M2 → M3 的顺序推进，不要先做网关指标重复功能。
+- [ ] 用已有 `runs/` 跑一次 `diagnose`，确认只读、JSON/Markdown 都能出。
+- [ ] 上机验证 M2：`--blocking on` 的 10 秒窗口，确认 `offcpu=true futex=true failed=0`、无残留、
+      `/health` 和服务状态不变，并用合成锁竞争对照一次。
+- [ ] 按 M2 → M3 → 生产化的顺序推进，不要先做网关指标重复功能。
+- [ ] 插件/`execute_model` 函数级耗时未经明确维护窗口不要动。
 
 ---
 
-维护说明：本文与 `docs/TASKS.md`、`docs/PLAN.md`、`docs/M4-VALIDATION.md` 有交叉引用；如果实现状态变化，先更新本文件的“已完成/未完成”和“下一步”，再同步 TASKS。
-
-- Orinfer 运行后进行真实 discovery/attach 验证；
-- V4/Orinfer 同 workload、同并发、同时长 A/B 对比；
-- 插件真实请求路径验证和容器/宿主 monotonic clock 校准。
+维护说明：本文与 `docs/TASKS.md`、`docs/PLAN.md`、`docs/M4-VALIDATION.md`、`docs/DIAGNOSE.md`、
+`docs/M2-OFFCPU.md` 有交叉引用；如果实现状态变化，先更新本文件的“已完成/未完成”和“下一步”，再同步 TASKS。
 
 
 

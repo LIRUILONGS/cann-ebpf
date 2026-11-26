@@ -10,7 +10,7 @@ import (
 	"cann-ebpf/internal/runlog"
 )
 
-const DefaultToolVersion = "0.5.0-m5"
+const DefaultToolVersion = "0.6.0-m2"
 
 type Options struct {
 	Context       context.Context
@@ -25,6 +25,7 @@ type Options struct {
 	MinDuration   time.Duration
 	ContextSocket string
 	PythonBatch   PythonBatchOptions
+	Blocking      BlockingMode
 }
 
 // PythonBatchOptions enables the read-only CPython/vLLM SchedulerOutput
@@ -61,6 +62,7 @@ type Result struct {
 	Stats        probeStats
 	Context      contextfeed.Snapshot
 	PythonBatch  []PythonBatchCapture
+	Blocking     BlockingResult
 }
 
 type PythonBatchCapture struct {
