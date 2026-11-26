@@ -109,11 +109,22 @@ func (c *Collector) loop(ctx context.Context) {
 	}
 }
 
+func (c *Collector) isStopping() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.stopped
+}
+
 func (c *Collector) sampleOnce(ctx context.Context) {
 	sampleCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	raw, err := c.opts.runner(sampleCtx, "npu-smi", "info")
 	if err != nil {
+		// Stop() cancels the context and kills the child; that is not a sampling
+		// failure and must not become a warning in the manifest.
+		if ctx.Err() != nil || c.isStopping() {
+			return
+		}
 		c.mu.Lock()
 		if c.lastErr != err.Error() {
 			c.lastErr = err.Error()

@@ -53,6 +53,9 @@
 | M2 off-CPU/futex 归因 | 完成并上机验证 | sched_switch + syscalls futex tracepoint、`offcpu_ns`/`futex_ns`；V4 10 秒与合成锁竞争均通过 |
 | E 层 npu-smi 硬件指标 | 完成并上机验证 | `hardware.jsonl`、manifest artifact、`hbm_pressure`；8 设备/HBM/AICore/功耗/温度 |
 | `preflight` 环境检查 | 完成并上机验证 | 15 项检查；V4 pass=15 warn=0 fail=0 |
+| A3 uprobe attach 规模优化 | 完成并上机验证 | 系统级 attach + BPF `target_pids` 过滤；37 函数/74 links；V4 墙钟 ~110s→~18s，退出 ~4.5s，残留 0 |
+| A4 固定负载开销脚本 | 脚本 + dry-run 完成 | `scripts/overhead_fixed_load.py`；真实负载门禁待维护窗口 |
+| A5 M6 交付骨架 | 脚本 + dry-run 完成 | systemd timer、install/uninstall/upgrade、make-release；均支持 dry-run |
 | M2 开销基线 | 部分完成 | agent +0.28pp 单核 CPU、+1.3MB RSS、0 丢；业务吞吐因生产负载不可控未下 ≤3% 结论 |
 | M3 device join 管线 | 完成 | `cann.device.v1` schema、join、device verdict、diagnose 集成；`attach` 生成 `pidmap.json` |
 | M3.0 msprof 动态 attach | 已验证不可用 | `msprof --pid` 三变体段错误；改为容器内 in-process collector |
@@ -203,6 +206,17 @@ span_id, seq
 - 已存在同名文件不覆盖；源缺失只告警，不影响 host span；
 - `diagnose` 自动读取这三者做 join；`pidmap.json` 让目标进程退出后仍可复现 join。
 
+### 3.13 A3/A4/A5（本任务）
+
+- **A3 attach 规模优化**：对库去重后每个 `(library,function)` 只挂一对 system-wide uprobe，
+  BPF `target_pids` 过滤目标 tgid；V4 上 37 函数 = 74 links，10 秒采集墙钟 ~110s→~18s，
+  退出 ~4.5s，uprobe/kprobe 残留 0，8 个 Worker 覆盖不变。详见 `docs/A3-ATTACH-SCALING.md`。
+- **A4 固定负载开销**：`scripts/overhead_fixed_load.py`（dry-run 已验证），固定 prompt/并发/
+  max_tokens，on/off 多轮，读 `/metrics`+agent CPU/RSS；真实负载门禁待维护窗口。
+- **A5 交付骨架**：`deploy/` systemd service/timer、capture-once、install/uninstall/upgrade；
+  `scripts/make-release.sh` 生成发布包与 SHA256SUMS；全部默认 dry-run，已在服务器验证计划输出。
+  用法见 `docs/OPERATIONS.md`。
+
 ## 4. 当前能回答和不能回答的问题
 
 ### 能回答
@@ -247,6 +261,9 @@ span_id, seq
 | `internal/hardware/` | E 层 npu-smi 采样、解析、JSONL |
 | `internal/device/` | `cann.device.v1` schema 与 host/device join |
 | `internal/preflight/` | 环境预检的纯判定表与 Linux 采集 |
+| `deploy/` | systemd service/timer、capture-once、install/uninstall/upgrade |
+| `scripts/overhead_fixed_load.py` | 固定负载开销门禁脚本（A4） |
+| `scripts/make-release.sh` | 发布包与 SHA256SUMS（A5） |
 | `internal/probes/pythonbatch_linux_arm64.go` | 纯 eBPF CPython/vLLM batch 采集 |
 | `internal/runlog/` | JSONL、manifest、summary、span 读取 |
 | `profiles/vllm-ascend.yaml` | V4/vLLM-Ascend profile |
@@ -266,6 +283,8 @@ span_id, seq
 | `docs/M2-OVERHEAD.md` | M2 agent 开销基线与吞吐不可测说明 |
 | `docs/WORK-SPLIT.md` | 两个并行任务的文件所有权、接口约定与评审备注 |
 | `docs/NEXT-WORK.md` | M3 合成验证之后的下一阶段工作与分工 |
+| `docs/A3-ATTACH-SCALING.md` | 系统级 uprobe + BPF PID 过滤的规模/退出优化 |
+| `docs/OPERATIONS.md` | 安装/卸载/升级/systemd/固定负载/发布包运维说明 |
 | `docs/M4-VALIDATION.md` | V4 实测记录 |
 | `docs/VLLM-BATCH-POC.md` | 纯 eBPF batch POC 记录 |
 
@@ -298,6 +317,8 @@ span_id, seq
 | preflight | V4 pass=15 warn=0 fail=0；tracepoint id、lockdown、memlock、npu-smi 均正常 |
 | M2 开销（60s×2+2） | agent CPU off 1.365% → on 1.64%（+0.28pp 单核），RSS +1.3MB，dropped 0 |
 | 采集时序 | setup ~1.2s，capture 60s，teardown ~1.5s；进程退出关闭剩余 perf fd 约 40s |
+| A3 系统级 attach | 37 函数/74 links；10 秒采集墙钟 ~18s（旧 ~110s），退出 ~4.5s，残留 0，8 Worker 覆盖不变 |
+| A4/A5 dry-run | 固定负载脚本、install/uninstall/upgrade、make-release 均通过服务器 dry-run |
 
 ## 7. 下一步工作方向
 

@@ -1,0 +1,13 @@
+[Unit]
+Description=Run cann-ebpf capture every 5 minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+AccuracySec=30s
+Unit=cann-ebpf.service
+# Captures are short and read-only; if a cycle is missed, do not burst.
+Persistent=false
+
+[Install]
+WantedBy=timers.target

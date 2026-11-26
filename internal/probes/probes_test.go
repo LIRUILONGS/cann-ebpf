@@ -16,7 +16,7 @@ func TestEmbeddedBPFObject(t *testing.T) {
 	if err != nil {
 		t.Fatalf("loadCollectionSpec: %v", err)
 	}
-	for _, name := range []string{"events", "inflight", "probe_cfg", "probe_stats", "blocking_cfg", "tid_state"} {
+	for _, name := range []string{"events", "inflight", "probe_cfg", "probe_stats", "blocking_cfg", "tid_state", "target_pids"} {
 		if spec.Maps[name] == nil {
 			t.Errorf("map %q missing", name)
 		}

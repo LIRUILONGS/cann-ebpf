@@ -85,6 +85,9 @@ func Run(opts Options) (result *Result, retErr error) {
 	if err := configureProbeMaps(collection, opts.Profile, uint64(opts.MinDuration)); err != nil {
 		return result, err
 	}
+	if err := configureTargetPids(collection, opts.PIDs); err != nil {
+		return result, err
+	}
 	eventsMap, ok := collection.Maps["events"]
 	if !ok {
 		return result, fmt.Errorf("BPF map events not found")
@@ -424,8 +427,6 @@ func attachTargets(opts Options, collection *ebpf.Collection, functions []Functi
 	var attachments []Attachment
 	var warnings []string
 	functionLibraries := map[string]string{}
-	attached := map[string]struct{}{}
-	pidAttached := map[int]int{}
 	type cachedLibrary struct {
 		executable *link.Executable
 		symbols    []elfutil.Symbol
@@ -438,6 +439,11 @@ func attachTargets(opts Options, collection *ebpf.Collection, functions []Functi
 		globs = opts.Profile.Spec.Cann.LibraryGlobs
 	}
 
+	// Collect unique libraries across all target processes. Uprobes are then
+	// attached once per library symbol (system-wide) and filtered in BPF by
+	// target_pids; this makes teardown cost independent of target count.
+	seenLibrary := map[string]struct{}{}
+	var libraryPaths []string
 	for _, pid := range opts.PIDs {
 		proc, err := discovery.ReadProcess(opts.ProcRoot, pid)
 		if err != nil {
@@ -445,95 +451,108 @@ func attachTargets(opts Options, collection *ebpf.Collection, functions []Functi
 			continue
 		}
 		libraries := discovery.FindLibraries(proc, globs)
+		if len(libraries) == 0 {
+			warnings = append(warnings, fmt.Sprintf("pid %d: no CANN library matched library_globs", pid))
+			continue
+		}
 		for _, library := range libraries {
 			if library.RealPath == "" || library.Note != "" && strings.Contains(library.Note, "no such file") {
 				warnings = append(warnings, fmt.Sprintf("pid %d library %s: %s", pid, library.Path, library.Note))
 				continue
 			}
-			cacheKey := fmt.Sprintf("%d:%d:%s", library.Inode, library.Size, filepath.Base(library.RealPath))
-			cached := libraryCache[cacheKey]
-			if cached == nil {
-				cached = &cachedLibrary{}
-				cached.symbols, cached.warnings, cached.err = elfutil.Resolve(library.RealPath, names)
-				if cached.err == nil {
-					cached.executable, cached.err = link.OpenExecutable(library.RealPath)
-				}
-				libraryCache[cacheKey] = cached
-			}
-			if len(cached.warnings) > 0 {
-				for _, warning := range cached.warnings {
-					if !strings.Contains(warning, "symbol not found") && !strings.Contains(warning, "not found") {
-						warnings = append(warnings, fmt.Sprintf("library %s: %s", library.RealPath, warning))
-					}
-				}
-				cached.warnings = nil
-			}
-			if cached.err != nil {
-				warnings = append(warnings, fmt.Sprintf("pid %d library %s: %v", pid, library.RealPath, cached.err))
+			if _, ok := seenLibrary[library.RealPath]; ok {
 				continue
 			}
-			symbols := cached.symbols
-			executable := cached.executable
-			for _, symbol := range symbols {
-				if !symbol.Found || symbol.Error != "" {
-					continue
-				}
-				fn, ok := byName[symbol.Wanted]
-				if !ok {
-					continue
-				}
-				key := fmt.Sprintf("%d\x00%s", pid, fn.Name)
-				if _, exists := attached[key]; exists {
-					continue
-				}
-				entryName, exitName := programNames(fn)
-				entryProgram := collection.Programs[entryName]
-				exitProgram := collection.Programs[exitName]
-				attachment := Attachment{
-					PID: pid, Library: library.RealPath, Function: fn.Name,
-					Category: fn.Category, Offset: symbol.Offset,
-				}
-				if entryProgram == nil || exitProgram == nil {
-					attachment.Error = "compiled probe program missing"
-					attachments = append(attachments, attachment)
-					continue
-				}
-				symbolName := strings.SplitN(symbol.Name, "@", 2)[0]
-				uprobeOpts := &link.UprobeOptions{Address: symbol.Offset, PID: pid}
-				entry, upErr := executable.Uprobe(symbolName, entryProgram, uprobeOpts)
-				if upErr != nil {
-					attachment.Error = upErr.Error()
-					attachments = append(attachments, attachment)
-					continue
-				}
-				exit, retErr := executable.Uretprobe(symbolName, exitProgram, uprobeOpts)
-				if retErr != nil {
-					_ = entry.Close()
-					attachment.Error = retErr.Error()
-					attachments = append(attachments, attachment)
-					continue
-				}
-				linkMu.Lock()
-				*links = append(*links, entry, exit)
-				linkMu.Unlock()
-				attachment.Entry, attachment.Exit = true, true
-				attached[key] = struct{}{}
-				pidAttached[pid]++
-				functionLibraries[fn.Name] = library.RealPath
-				attachments = append(attachments, attachment)
+			seenLibrary[library.RealPath] = struct{}{}
+			libraryPaths = append(libraryPaths, library.RealPath)
+		}
+	}
+	sort.Strings(libraryPaths)
+
+	attachedFunctions := map[string]struct{}{}
+	for _, path := range libraryPaths {
+		cached := libraryCache[path]
+		if cached == nil {
+			cached = &cachedLibrary{}
+			cached.symbols, cached.warnings, cached.err = elfutil.Resolve(path, names)
+			if cached.err == nil {
+				cached.executable, cached.err = link.OpenExecutable(path)
+			}
+			libraryCache[path] = cached
+		}
+		for _, warning := range cached.warnings {
+			if !strings.Contains(warning, "not found") {
+				warnings = append(warnings, fmt.Sprintf("library %s: %s", path, warning))
 			}
 		}
-	}
-	for _, pid := range opts.PIDs {
-		if count := pidAttached[pid]; count == 0 {
-			warnings = append(warnings, fmt.Sprintf("pid %d: no requested CANN symbol could be attached", pid))
-		} else if count < len(functions) {
-			warnings = append(warnings, fmt.Sprintf("pid %d: attached %d/%d requested CANN functions", pid, count, len(functions)))
+		cached.warnings = nil
+		if cached.err != nil {
+			warnings = append(warnings, fmt.Sprintf("library %s: %v", path, cached.err))
+			continue
+		}
+		for _, symbol := range cached.symbols {
+			if !symbol.Found || symbol.Error != "" {
+				continue
+			}
+			fn, ok := byName[symbol.Wanted]
+			if !ok {
+				continue
+			}
+			if _, done := attachedFunctions[fn.Name]; done {
+				continue
+			}
+			entryName, exitName := programNames(fn)
+			entryProgram := collection.Programs[entryName]
+			exitProgram := collection.Programs[exitName]
+			attachment := Attachment{
+				PID: 0, Scope: "system", Library: path, Function: fn.Name,
+				Category: fn.Category, Offset: symbol.Offset,
+			}
+			if entryProgram == nil || exitProgram == nil {
+				attachment.Error = "compiled probe program missing"
+				attachments = append(attachments, attachment)
+				continue
+			}
+			symbolName := strings.SplitN(symbol.Name, "@", 2)[0]
+			// PID 0 = system-wide; target_pids in BPF limits it to our workers.
+			uprobeOpts := &link.UprobeOptions{Address: symbol.Offset}
+			entry, upErr := cached.executable.Uprobe(symbolName, entryProgram, uprobeOpts)
+			if upErr != nil {
+				attachment.Error = upErr.Error()
+				attachments = append(attachments, attachment)
+				continue
+			}
+			exit, retErr := cached.executable.Uretprobe(symbolName, exitProgram, uprobeOpts)
+			if retErr != nil {
+				_ = entry.Close()
+				attachment.Error = retErr.Error()
+				attachments = append(attachments, attachment)
+				continue
+			}
+			linkMu.Lock()
+			*links = append(*links, entry, exit)
+			linkMu.Unlock()
+			attachment.Entry, attachment.Exit = true, true
+			attachedFunctions[fn.Name] = struct{}{}
+			functionLibraries[fn.Name] = path
+			attachments = append(attachments, attachment)
 		}
 	}
+	var missing []string
+	for _, fn := range functions {
+		if _, ok := attachedFunctions[fn.Name]; !ok {
+			missing = append(missing, fn.Name)
+		}
+	}
+	if len(missing) > 0 {
+		sort.Strings(missing)
+		warnings = append(warnings, fmt.Sprintf(
+			"attached %d/%d requested functions; no exported symbol for: %s",
+			len(attachedFunctions), len(functions), strings.Join(missing, ", ")))
+	}
 	sort.Slice(attachments, func(i, j int) bool {
-		if attachments[i].PID != attachments[j].PID {
-			return attachments[i].PID < attachments[j].PID
+		if attachments[i].Function == attachments[j].Function {
+			return attachments[i].Library < attachments[j].Library
 		}
 		return attachments[i].Function < attachments[j].Function
 	})

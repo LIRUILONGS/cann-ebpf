@@ -46,6 +46,7 @@ type PythonBatchOptions struct {
 
 type Attachment struct {
 	PID      int
+	Scope    string
 	Library  string
 	Function string
 	Category string

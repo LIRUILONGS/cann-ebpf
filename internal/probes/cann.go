@@ -51,6 +51,24 @@ func decodeSpanEvent(sample []byte) (rawSpanEvent, error) {
 	return event, nil
 }
 
+func configureTargetPids(collection *ebpf.Collection, pids []int) error {
+	pidMap, ok := collection.Maps["target_pids"]
+	if !ok {
+		return fmt.Errorf("BPF map target_pids not found")
+	}
+	value := uint8(1)
+	for _, pid := range pids {
+		if pid <= 0 {
+			continue
+		}
+		key := uint32(pid)
+		if err := pidMap.Update(key, value, ebpf.UpdateAny); err != nil {
+			return fmt.Errorf("update target_pids[%d]: %w", pid, err)
+		}
+	}
+	return nil
+}
+
 func configureProbeMaps(collection *ebpf.Collection, profile *config.Document, overrideMinNS uint64) error {
 	cfgMap, ok := collection.Maps["probe_cfg"]
 	if !ok {

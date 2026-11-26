@@ -176,6 +176,17 @@ struct bpf_map_def SEC("maps") tid_state = {
 	.max_entries = 8192,
 };
 
+/* Target thread-group ids. Uprobes are attached once system-wide per library
+ * symbol (instead of once per target pid) and filtered here; this keeps the
+ * number of perf events / teardown cost independent of the worker count.
+ */
+struct bpf_map_def SEC("maps") target_pids = {
+	.type = BPF_MAP_TYPE_HASH,
+	.key_size = sizeof(__u32),
+	.value_size = sizeof(__u8),
+	.max_entries = 4096,
+};
+
 static void *(*bpf_map_lookup_elem)(void *map, const void *key) = (void *)1;
 static long (*bpf_map_update_elem)(void *map, const void *key,
 				   const void *value, __u64 flags) = (void *)2;
@@ -195,6 +206,13 @@ static __always_inline struct probe_stats *stats_value(__u32 func_id)
 static __always_inline struct probe_cfg *cfg_value(__u32 func_id)
 {
 	return bpf_map_lookup_elem(&probe_cfg, &func_id);
+}
+
+static __always_inline int is_target_tgid(void)
+{
+	__u32 tgid = (__u32)(bpf_get_current_pid_tgid() >> 32);
+
+	return bpf_map_lookup_elem(&target_pids, &tgid) != 0;
 }
 
 /* blocking_enter: the outermost CANN call starts a clean window. A thread is
@@ -262,6 +280,8 @@ static __always_inline void blocking_exit(__u32 tid, __u64 *offcpu_ns,
 static __always_inline int on_entry(__u32 func_id)
 {
 	__u64 pid_tgid = bpf_get_current_pid_tgid();
+	if (!is_target_tgid())
+		return 0;
 	struct inflight_key key = {
 		.pid = (__u32)(pid_tgid >> 32),
 		.tid = (__u32)pid_tgid,
@@ -293,6 +313,8 @@ static __always_inline int on_entry(__u32 func_id)
 static __always_inline int on_exit(__u32 func_id)
 {
 	__u64 pid_tgid = bpf_get_current_pid_tgid();
+	if (!is_target_tgid())
+		return 0;
 	struct inflight_key key = {
 		.pid = (__u32)(pid_tgid >> 32),
 		.tid = (__u32)pid_tgid,

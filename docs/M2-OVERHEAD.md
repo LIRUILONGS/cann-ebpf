@@ -65,3 +65,16 @@ PID 过滤（37×库数 而不是 37×进程数）。
 - 进程退出清理约 40 秒，是运维体验问题，不是业务影响。
 
 证据：`/root/cann-ebpf/m2-test-20261126T151851Z/overhead-20261126T093729Z.csv` 及 `runs/overhead-*/`。
+
+## 6. 固定负载工具（A4）
+
+`scripts/overhead_fixed_load.py` 已提供，用于在维护窗口做正式 ≤3% 门禁：
+
+- 固定 prompt 集、并发、max_tokens；客户端并发压测；
+- 每轮同时启动 `attach --blocking off/on`，窗口严格取 `capture_start` → `capture_stop`；
+- 读取 vLLM `/metrics`（requests/tokens/e2e/TTFT）与 agent `/proc`（CPU/RSS）；
+- 输出 CSV 与 on/off 中位数对比，`--enforce` 在吞吐下降 >3% 或 p95 回归 >5% 时退出 2；
+- `--dry-run` 只校验参数、不发送请求。
+
+用法见 `docs/OPERATIONS.md` 第 4 节。真实负载需要授权窗口并显式 `--yes`。
+

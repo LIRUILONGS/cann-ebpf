@@ -85,10 +85,10 @@ pidmap.json                 容器 local→host pid/tid 快照，schema cann.pid
 
 ### 3.1 我的具体下一步
 
-1. A3：把 740 个 per-pid uprobe 改为系统级 attach + BPF `target_pids` 过滤（或只挂 Worker），目标退出清理 <10s、残留 0；
-2. A4：`scripts/overhead_fixed_load.py`（固定 prompt/并发/max_tokens，on/off 多轮，读 `/metrics`+agent CPU/RSS）；
-3. A5：systemd/install/uninstall/upgrade、release tar + `SHA256SUMS`、runbook；
-4. A6/A7/A8：exporter 设计、DCMI/短间隔评估、M5 采集对比脚本；
+1. A3 ✅ 系统级 attach + BPF `target_pids` 过滤：74 links，V4 退出 ~4.5s、残留 0、覆盖不变；
+2. A4 ✅ `scripts/overhead_fixed_load.py`（dry-run 通过；真实负载待窗口）；
+3. A5 ✅ systemd/install/uninstall/upgrade/release + SHA256SUMS（dry-run 通过）；
+4. 进行中：A6 exporter、A7 DCMI/短间隔、A8 M5 采集对比脚本；
 5. 等 B1 后更新 `M3-VALIDATION` 与二进制 SHA。
 
 ### 3.2 另一个任务的具体下一步

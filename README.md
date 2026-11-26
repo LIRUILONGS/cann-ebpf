@@ -125,6 +125,10 @@ OUT="runs/ebpf-$(date -u +%Y%m%dT%H%M%SZ)"
 `aclrtDestroyEvent` 淹没同步和事件 span。同步、event、memory、submit 和 HCCL
 使用各自 profile 参数；只有真实触发且通过阈值/采样的调用才写入 JSONL。
 
+uprobe 现在按库去重后 system-wide attach，BPF `target_pids` 过滤目标进程；
+V4 上 37 个函数只需 74 个 perf event，采集 10 秒的总墙钟从 ~110s 降到 ~18s，
+退出清理 ~4.5s。详见 `docs/A3-ATTACH-SCALING.md`。
+
 ### 上下文协议 smoke
 
 ```bash
@@ -315,8 +319,8 @@ Span 新增字段：
   `device_bound` / `launch_starvation`。
 - Orinfer 当前未运行；profile 只能声明配置校验通过，不能写成真实采集验证。
 - tracefs 仍是单 PID 后备路径，本轮没有用 tracefs 重新验证 37 函数。
-- 自动 attach 会先解析库、创建 uprobe，10 秒采集的整次进程墙钟时间明显长于采集
-  窗口；这是 setup 成本，不能把 wall time 当作采集时长。
+- 自动 attach 会先解析库、创建 uprobe；system-wide attach 后 10 秒采集的整次进程墙钟约
+  18 秒（旧 per-pid 实现约 110 秒）。这仍是 setup/teardown 成本，不能把 wall time 当作采集时长。
 
 ## 安全约束
 
@@ -366,6 +370,8 @@ unicode dict，单次最多 64 个 key；batch span 写入标准 `spans.jsonl`�
 - `docs/NEXT-PLAN.md`：M2 之后的分阶段方案（M3 可行性、E 层指标、开销基线、生产化）。
 - `docs/WORK-SPLIT.md`：两个并行任务的文件所有权、接口约定与评审备注。
 - `docs/NEXT-WORK.md`：M3 合成验证之后的下一阶段工作与分工。
+- `docs/A3-ATTACH-SCALING.md`：系统级 uprobe + BPF PID 过滤的规模/退出优化。
+- `docs/OPERATIONS.md`：安装/卸载/升级/systemd/固定负载/发布包运维说明。
 - `docs/M4-VALIDATION.md`：当前交付的实测数据、复现命令、证据和边界。
 - `docs/M4-CONTEXT-PROTOCOL.md`：batch 协议、权限模型、插件安装与激活步骤。
 - `docs/M5-TRACE-AND-CPY-POC.md`：链路追踪 schema、POC 设计、真实 V4 证据和边界。

@@ -1,0 +1,13 @@
+[Unit]
+Description=cann-ebpf periodic read-only CANN host capture
+After=network.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/cann-ebpf/capture-once.sh
+Nice=5
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+# The agent only reads /proc, tracefs and uprobes; it never writes the target.
+ProtectSystem=full
+PrivateTmp=true

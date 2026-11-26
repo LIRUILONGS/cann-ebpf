@@ -38,7 +38,7 @@ func attachBlocking(collection *ebpf.Collection, offcpu, futex bool, links *[]li
 			continue
 		}
 		prog := collection.Programs[bp.name]
-		attachment := Attachment{Function: bp.symbol, Category: "blocking"}
+		attachment := Attachment{Function: bp.symbol, Category: "blocking", Scope: "system"}
 		if prog == nil {
 			attachment.Error = "compiled blocking program missing"
 			attachments = append(attachments, attachment)
