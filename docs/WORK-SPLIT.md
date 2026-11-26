@@ -79,7 +79,7 @@ pidmap.json                 容器 local→host pid/tid 快照，schema cann.pid
 
 | 范围 | 另一个任务 | 我 |
 |---|---|---|
-| 无窗口 | A1 M3 join 质量（api_name_mismatch/可匹配率）、A2 collector 加固 | A3 teardown/规模优化、A4 固定负载脚本、A5 M6 交付骨架、A6 exporter、A7 DCMI、A8 M5 脚本 |
+| 无窗口 | A1 M3 join 质量 ✅、A2 collector 加固 ✅ | A3 teardown/规模优化、A4 固定负载脚本、A5 M6 交付骨架、A6 exporter、A7 DCMI、A8 M5 脚本 |
 | 维护窗口 | B1 V4 真实设备时间线（主导）、B4 真实 HCCL | B1 host 采集/health/残留/导入、B3 开销门禁、B2 M5 A/B |
 | 不做 | 插件/`execute_model`、逐 request 延迟 | — |
 
@@ -93,8 +93,8 @@ pidmap.json                 容器 local→host pid/tid 快照，schema cann.pid
 
 ### 3.2 另一个任务的具体下一步
 
-1. A1：修复 `api_name_mismatch`（final7 5,320 条），把全量分母改为“可匹配设备调用”分母，并在 diagnose/report 展示 reason 明细；
-2. A2：collector buffer 生命周期、stop 幂等/死锁、时钟偏移重估、线程 tid 映射刷新、JSON 转义；
+1. A1 ✅：同名 API 匹配、可匹配分母、reason 明细；final7 可匹配 305/305，`api_name_mismatch=0`；
+2. A2 ✅：buffer 生命周期、stop 幂等/并发、时钟重估、tid 热刷新、JSON 转义；自测 + 50ms flush 压力通过；
 3. 准备 B1 注入脚本与回滚；B4 真实 HCCL correlation。
 
 ## 4. 对 M3 collector 的评审备注（不改对方文件）

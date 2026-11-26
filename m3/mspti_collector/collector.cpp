@@ -12,10 +12,12 @@
 #include <atomic>
 #include <cerrno>
 #include <chrono>
+#include <condition_variable>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <ctime>
+#include <dirent.h>
 #include <fstream>
 #include <map>
 #include <mutex>
@@ -46,6 +48,14 @@ struct ActivityConfig {
 std::mutex g_write_mutex;
 std::mutex g_meta_mutex;
 std::mutex g_meta_file_mutex;
+std::mutex g_flush_mutex;
+std::mutex g_flush_wait_mutex;
+std::condition_variable g_flush_wait_cv;
+std::mutex g_lifecycle_mutex;
+std::mutex g_stop_mutex;
+std::condition_variable g_stop_cv;
+std::atomic<bool> g_stop_in_progress(false);
+std::atomic<bool> g_stop_complete(false);
 std::FILE *g_file = nullptr;
 std::string g_output_path;
 std::string g_run_id;
@@ -58,6 +68,7 @@ std::atomic<bool> g_running(false);
 std::atomic<bool> g_auto_started(false);
 std::atomic<bool> g_truncated(false);
 std::atomic<bool> g_flush_thread_stop(false);
+std::atomic<uint64_t> g_flush_generation(0);
 uint64_t g_max_bytes = kDefaultMaxBytes;
 uint64_t g_bytes_written = 0;
 uint64_t g_records_written = 0;
@@ -66,9 +77,25 @@ uint64_t g_records_skipped = 0;
 int g_pid_filter = 0;
 uint64_t g_start_unix_ns = 0;
 uint64_t g_stop_unix_ns = 0;
-int64_t g_realtime_minus_monotonic_ns = 0;
+std::atomic<int64_t> g_realtime_minus_monotonic_ns(0);
+std::atomic<int64_t> g_clock_offset_start_ns(0);
+std::atomic<int64_t> g_clock_offset_last_ns(0);
+std::atomic<int64_t> g_clock_drift_ns(0);
+std::atomic<uint64_t> g_clock_refresh_count(0);
+std::atomic<uint64_t> g_clock_last_refresh_unix_ns(0);
 std::mutex g_pid_cache_mutex;
 std::map<int, int> g_tid_to_host;
+std::mutex g_tid_refresh_mutex;
+std::atomic<uint64_t> g_tid_map_entries(0);
+std::atomic<uint64_t> g_tid_map_refresh_count(0);
+std::atomic<uint64_t> g_unmapped_tid_records(0);
+std::mutex g_callback_mutex;
+std::condition_variable g_callback_cv;
+std::atomic<uint64_t> g_callbacks_active(0);
+std::atomic<uint64_t> g_callback_buffers_processed(0);
+std::atomic<uint64_t> g_callback_records_processed(0);
+
+void AddWarning(const std::string &warning);
 
 uint64_t NowClockNS(clockid_t clock_id) {
     struct timespec ts {};
@@ -157,13 +184,81 @@ int HostTID(int local_tid) {
     std::snprintf(path, sizeof(path), "/proc/self/task/%d/status", local_tid);
     int host_tid = ReadNSpidFirst(path);
     if (host_tid == 0) {
-        host_tid = local_tid;
+        // Do not cache the fallback: a thread that has just been created may
+        // become visible in /proc slightly later, and the next record should
+        // retry the lookup instead of permanently reporting a stale local tid.
+        g_unmapped_tid_records.fetch_add(1, std::memory_order_relaxed);
+        return local_tid;
     }
     {
         std::lock_guard<std::mutex> lock(g_pid_cache_mutex);
         g_tid_to_host[local_tid] = host_tid;
+        g_tid_map_entries.store(g_tid_to_host.size(), std::memory_order_relaxed);
     }
     return host_tid;
+}
+
+// Refresh the local-thread -> host-thread map from /proc/self/task. msPTI
+// reports the container-local tid; eBPF host spans use the outermost tid.
+// Threads created after startup are only visible here, so callers run this
+// periodically as well as once at start.
+void RefreshTIDMap() {
+    std::lock_guard<std::mutex> refresh_lock(g_tid_refresh_mutex);
+    DIR *directory = opendir("/proc/self/task");
+    if (directory == nullptr) {
+        AddWarning("cannot open /proc/self/task for tid mapping");
+        return;
+    }
+    std::map<int, int> updates;
+    struct dirent *entry = nullptr;
+    while ((entry = readdir(directory)) != nullptr) {
+        const char *name = entry->d_name;
+        if (name[0] < '0' || name[0] > '9') {
+            continue;
+        }
+        char *end = nullptr;
+        const long parsed = std::strtol(name, &end, 10);
+        if (end == name || *end != '\0' || parsed <= 0 || parsed > 2147483647L) {
+            continue;
+        }
+        char path[128];
+        std::snprintf(path, sizeof(path), "/proc/self/task/%ld/status", parsed);
+        const int host_tid = ReadNSpidFirst(path);
+        if (host_tid > 0) {
+            updates[static_cast<int>(parsed)] = host_tid;
+        }
+    }
+    closedir(directory);
+    {
+        std::lock_guard<std::mutex> lock(g_pid_cache_mutex);
+        for (const auto &item : updates) {
+            g_tid_to_host[item.first] = item.second;
+        }
+        g_tid_map_entries.store(g_tid_to_host.size(), std::memory_order_relaxed);
+    }
+    g_tid_map_refresh_count.fetch_add(1, std::memory_order_relaxed);
+}
+
+// Re-read the CLOCK_REALTIME - CLOCK_MONOTONIC offset. The offset is not a
+// constant when NTP steps or a container time namespace adjusts the wall
+// clock; a periodic refresh keeps the normalization error bounded and makes
+// the drift visible in the sidecar.
+void RefreshClockOffset() {
+    const uint64_t realtime = NowClockNS(CLOCK_REALTIME);
+    const uint64_t monotonic = NowClockNS(CLOCK_MONOTONIC);
+    const int64_t offset = realtime > monotonic
+                               ? static_cast<int64_t>(realtime - monotonic)
+                               : 0;
+    const uint64_t prior = g_clock_refresh_count.fetch_add(1, std::memory_order_relaxed);
+    if (prior == 0) {
+        g_clock_offset_start_ns.store(offset, std::memory_order_relaxed);
+    }
+    g_clock_offset_last_ns.store(offset, std::memory_order_relaxed);
+    g_clock_drift_ns.store(
+        offset - g_clock_offset_start_ns.load(std::memory_order_relaxed),
+        std::memory_order_relaxed);
+    g_realtime_minus_monotonic_ns.store(offset, std::memory_order_relaxed);
+    g_clock_last_refresh_unix_ns.store(realtime, std::memory_order_relaxed);
 }
 
 void JsonEscape(std::string &out, const char *value) {
@@ -247,11 +342,13 @@ bool WriteRecord(const char *kind, const char *name, int pid, int tid,
         const uint64_t diff = start_ns > now ? start_ns - now : now - start_ns;
         looks_realtime = diff < 86400ULL * 1000000000ULL;
     }
-    if (looks_realtime && g_realtime_minus_monotonic_ns > 0 &&
-        start_ns > static_cast<uint64_t>(g_realtime_minus_monotonic_ns) &&
-        end_ns > static_cast<uint64_t>(g_realtime_minus_monotonic_ns)) {
-        normalized_start = start_ns - static_cast<uint64_t>(g_realtime_minus_monotonic_ns);
-        normalized_end = end_ns - static_cast<uint64_t>(g_realtime_minus_monotonic_ns);
+    const int64_t clock_offset_ns =
+        g_realtime_minus_monotonic_ns.load(std::memory_order_relaxed);
+    if (looks_realtime && clock_offset_ns > 0 &&
+        start_ns > static_cast<uint64_t>(clock_offset_ns) &&
+        end_ns > static_cast<uint64_t>(clock_offset_ns)) {
+        normalized_start = start_ns - static_cast<uint64_t>(clock_offset_ns);
+        normalized_end = end_ns - static_cast<uint64_t>(clock_offset_ns);
         converted = true;
     }
 
@@ -411,10 +508,35 @@ void UserBufferRequest(uint8_t **buffer, size_t *size, size_t *maxNumRecords) {
     *maxNumRecords = 0;
 }
 
+// Tracks callbacks that are still inside msPTI code. stop() waits for this to
+// reach zero before closing the output file; otherwise a late callback could
+// write through a FILE* that has already been closed.
+struct CallbackScope {
+    CallbackScope() { g_callbacks_active.fetch_add(1, std::memory_order_relaxed); }
+    ~CallbackScope() {
+        if (g_callbacks_active.fetch_sub(1, std::memory_order_acq_rel) == 1) {
+            g_callback_cv.notify_all();
+        }
+    }
+};
+
+// msPTI owns the buffer passed to UserBufferComplete. It must be released
+// exactly once after all records have been consumed; records themselves are
+// only valid while this callback is running, so every field is copied into a
+// std::string line before the next msptiActivityGetNextRecord call.
+struct BufferScope {
+    explicit BufferScope(uint8_t *buffer) : buffer_(buffer) {}
+    ~BufferScope() { std::free(buffer_); }
+    uint8_t *buffer_;
+};
+
 void UserBufferComplete(uint8_t *buffer, size_t /*size*/, size_t validSize) {
     if (buffer == nullptr) {
         return;
     }
+    CallbackScope callback_scope;
+    BufferScope buffer_scope(buffer);
+    g_callback_buffers_processed.fetch_add(1, std::memory_order_relaxed);
     if (validSize > 0) {
         msptiActivity *record = nullptr;
         while (true) {
@@ -426,6 +548,7 @@ void UserBufferComplete(uint8_t *buffer, size_t /*size*/, size_t validSize) {
                 AddWarning("msptiActivityGetNextRecord failed");
                 break;
             }
+            g_callback_records_processed.fetch_add(1, std::memory_order_relaxed);
             switch (record->kind) {
                 case MSPTI_ACTIVITY_KIND_API:
                 case MSPTI_ACTIVITY_KIND_ACL_API:
@@ -458,7 +581,6 @@ void UserBufferComplete(uint8_t *buffer, size_t /*size*/, size_t validSize) {
             std::fflush(g_file);
         }
     }
-    std::free(buffer);
 }
 
 ActivityConfig ParseActivities(const std::string &spec) {
@@ -585,7 +707,23 @@ void WriteMetaFile(bool final_write) {
     JsonEscape(escaped, g_clock_spec.c_str());
     std::fprintf(file, "%s\",\n", escaped.c_str());
     std::fprintf(file, "  \"realtime_minus_monotonic_ns\": %lld,\n",
-                 static_cast<long long>(g_realtime_minus_monotonic_ns));
+                 static_cast<long long>(
+                     g_realtime_minus_monotonic_ns.load(std::memory_order_relaxed)));
+    std::fprintf(file, "  \"clock_offset_start_ns\": %lld,\n",
+                 static_cast<long long>(
+                     g_clock_offset_start_ns.load(std::memory_order_relaxed)));
+    std::fprintf(file, "  \"clock_offset_last_ns\": %lld,\n",
+                 static_cast<long long>(
+                     g_clock_offset_last_ns.load(std::memory_order_relaxed)));
+    std::fprintf(file, "  \"clock_drift_ns\": %lld,\n",
+                 static_cast<long long>(
+                     g_clock_drift_ns.load(std::memory_order_relaxed)));
+    std::fprintf(file, "  \"clock_refresh_count\": %llu,\n",
+                 static_cast<unsigned long long>(
+                     g_clock_refresh_count.load(std::memory_order_relaxed)));
+    std::fprintf(file, "  \"clock_last_refresh_unix_ns\": %llu,\n",
+                 static_cast<unsigned long long>(
+                     g_clock_last_refresh_unix_ns.load(std::memory_order_relaxed)));
     std::fprintf(file, "  \"start_unix_ns\": %llu,\n",
                  static_cast<unsigned long long>(started));
     std::fprintf(file, "  \"stop_unix_ns\": %llu,\n",
@@ -601,6 +739,26 @@ void WriteMetaFile(bool final_write) {
     std::fprintf(file, "  \"max_bytes\": %llu,\n",
                  static_cast<unsigned long long>(g_max_bytes));
     std::fprintf(file, "  \"truncated\": %s,\n", g_truncated.load() ? "true" : "false");
+    std::fprintf(file, "  \"callback_buffers_processed\": %llu,\n",
+                 static_cast<unsigned long long>(
+                     g_callback_buffers_processed.load(std::memory_order_relaxed)));
+    std::fprintf(file, "  \"callback_records_processed\": %llu,\n",
+                 static_cast<unsigned long long>(
+                     g_callback_records_processed.load(std::memory_order_relaxed)));
+    std::fprintf(file, "  \"callbacks_active\": %llu,\n",
+                 static_cast<unsigned long long>(
+                     g_callbacks_active.load(std::memory_order_relaxed)));
+    std::fprintf(file, "  \"tid_map_entries\": %llu,\n",
+                 static_cast<unsigned long long>(
+                     g_tid_map_entries.load(std::memory_order_relaxed)));
+    std::fprintf(file, "  \"tid_map_refresh_count\": %llu,\n",
+                 static_cast<unsigned long long>(
+                     g_tid_map_refresh_count.load(std::memory_order_relaxed)));
+    std::fprintf(file, "  \"unmapped_tid_records\": %llu,\n",
+                 static_cast<unsigned long long>(
+                     g_unmapped_tid_records.load(std::memory_order_relaxed)));
+    std::fprintf(file, "  \"stop_complete\": %s,\n",
+                 g_stop_complete.load(std::memory_order_relaxed) ? "true" : "false");
     std::fprintf(file, "  \"warnings\": \"");
     escaped.clear();
     JsonEscape(escaped, warnings.c_str());
@@ -640,6 +798,7 @@ double EnvDouble(const char *name, double fallback) {
 extern "C" int cann_mspti_start(const char *output_path, const char *run_id,
                                 const char *activities, uint64_t max_bytes,
                                 int pid) {
+    std::lock_guard<std::mutex> lifecycle_lock(g_lifecycle_mutex);
     if (output_path == nullptr || *output_path == '\0') {
         std::fprintf(stderr, "cann-mspti: output path is required\n");
         return 2;
@@ -647,6 +806,18 @@ extern "C" int cann_mspti_start(const char *output_path, const char *run_id,
     if (g_running.load()) {
         std::fprintf(stderr, "cann-mspti: collector already running\n");
         return 3;
+    }
+    {
+        std::lock_guard<std::mutex> stop_lock(g_stop_mutex);
+        if (g_stop_in_progress.load()) {
+            std::fprintf(stderr, "cann-mspti: previous stop is still draining\n");
+            return 3;
+        }
+        if (g_callbacks_active.load(std::memory_order_acquire) != 0) {
+            std::fprintf(stderr, "cann-mspti: previous callbacks are still active\n");
+            return 3;
+        }
+        g_stop_complete.store(false);
     }
     if (pid != 0 && pid != static_cast<int>(getpid())) {
         std::fprintf(stderr, "cann-mspti: pid %d does not match current pid %d\n", pid,
@@ -667,12 +838,22 @@ extern "C" int cann_mspti_start(const char *output_path, const char *run_id,
         std::fprintf(stderr, "cann-mspti: invalid CANN_MSPTI_CLOCK=%s\n", g_clock_spec.c_str());
         return 2;
     }
-    const uint64_t realtime_now = NowClockNS(CLOCK_REALTIME);
-    const uint64_t monotonic_now = NowClockNS(CLOCK_MONOTONIC);
-    g_realtime_minus_monotonic_ns = realtime_now > monotonic_now
-                                         ? static_cast<int64_t>(realtime_now - monotonic_now)
-                                         : 0;
     g_container_id = ReadContainerID();
+    g_realtime_minus_monotonic_ns.store(0);
+    g_clock_offset_start_ns.store(0);
+    g_clock_offset_last_ns.store(0);
+    g_clock_drift_ns.store(0);
+    g_clock_refresh_count.store(0);
+    g_clock_last_refresh_unix_ns.store(0);
+    g_callback_buffers_processed.store(0);
+    g_callback_records_processed.store(0);
+    g_tid_map_entries.store(0);
+    g_tid_map_refresh_count.store(0);
+    g_unmapped_tid_records.store(0);
+    {
+        std::lock_guard<std::mutex> lock(g_pid_cache_mutex);
+        g_tid_to_host.clear();
+    }
     {
         std::lock_guard<std::mutex> lock(g_meta_mutex);
         g_warnings.clear();
@@ -683,11 +864,14 @@ extern "C" int cann_mspti_start(const char *output_path, const char *run_id,
         g_start_unix_ns = NowUnixNS();
         g_stop_unix_ns = 0;
     }
+    RefreshClockOffset();
+    RefreshTIDMap();
     // Publish identity and container mapping immediately; a stopped or crashed
     // process still leaves a usable sidecar, and diagnose can run while the
     // service is live. The file is rewritten at stop with final counters.
     WriteMetaFile(true);
     g_truncated.store(false);
+    g_flush_thread_stop.store(false);
 
     g_file = std::fopen(output_path, "w");
     if (g_file == nullptr) {
@@ -733,35 +917,57 @@ extern "C" int cann_mspti_start(const char *output_path, const char *run_id,
     msptiActivityFlushPeriod(1000);
     g_running.store(true);
     g_flush_thread_stop.store(false);
+    const uint64_t flush_generation = g_flush_generation.fetch_add(1) + 1;
+    g_flush_wait_cv.notify_all();
     const double flush_interval_ms = EnvDouble("CANN_MSPTI_FLUSH_INTERVAL_MS", 1000.0);
     if (flush_interval_ms > 0.0) {
-        std::thread([flush_interval_ms]() {
+        std::thread([flush_interval_ms, flush_generation]() {
             const auto interval = std::chrono::milliseconds(
                 static_cast<long long>(flush_interval_ms));
-            while (!g_flush_thread_stop.load()) {
-                std::this_thread::sleep_for(interval);
-                if (g_flush_thread_stop.load() || !g_running.load()) {
+            std::unique_lock<std::mutex> wait_lock(g_flush_wait_mutex);
+            while (!g_flush_thread_stop.load() &&
+                   g_flush_generation.load() == flush_generation) {
+                if (g_flush_wait_cv.wait_for(
+                        wait_lock, interval,
+                        [flush_generation] {
+                            return g_flush_thread_stop.load() ||
+                                   g_flush_generation.load() != flush_generation;
+                        })) {
                     break;
                 }
+                wait_lock.unlock();
                 cann_mspti_flush();
+                wait_lock.lock();
             }
         }).detach();
     }
 
     const double duration_seconds = EnvDouble("CANN_MSPTI_DURATION", 0.0);
     if (duration_seconds > 0.0) {
-        std::thread([duration_seconds]() {
+        std::thread([duration_seconds, flush_generation]() {
             std::this_thread::sleep_for(
                 std::chrono::milliseconds(static_cast<long long>(duration_seconds * 1000.0)));
-            cann_mspti_stop();
+            if (g_flush_generation.load() == flush_generation) {
+                cann_mspti_stop();
+            }
         }).detach();
     }
     return 0;
 }
 
 extern "C" int cann_mspti_flush(void) {
-    if (!g_running.load()) {
-        return 0;
+    {
+        std::lock_guard<std::mutex> stop_lock(g_stop_mutex);
+        if (g_stop_in_progress.load() || g_stop_complete.load() || !g_running.load()) {
+            return 0;
+        }
+    }
+    std::lock_guard<std::mutex> flush_lock(g_flush_mutex);
+    {
+        std::lock_guard<std::mutex> stop_lock(g_stop_mutex);
+        if (g_stop_in_progress.load() || g_stop_complete.load() || !g_running.load()) {
+            return 0;
+        }
     }
     const msptiResult result = msptiActivityFlushAll(1);
     {
@@ -770,6 +976,8 @@ extern "C" int cann_mspti_flush(void) {
             std::fflush(g_file);
         }
     }
+    RefreshClockOffset();
+    RefreshTIDMap();
     // Refresh the live sidecar so an operator copying it mid-run sees the
     // current record and byte counts, not only container identity.
     WriteMetaFile(false);
@@ -777,16 +985,46 @@ extern "C" int cann_mspti_flush(void) {
 }
 
 extern "C" int cann_mspti_stop(void) {
-    if (!g_running.exchange(false)) {
-        return 0;
-    }
-    g_flush_thread_stop.store(true);
-    msptiActivityFlushAll(1);
-    if (g_subscriber != nullptr) {
-        msptiUnsubscribe(g_subscriber);
-        g_subscriber = nullptr;
-    }
+    std::lock_guard<std::mutex> lifecycle_lock(g_lifecycle_mutex);
     {
+        std::unique_lock<std::mutex> stop_lock(g_stop_mutex);
+        if (g_stop_in_progress.load()) {
+            g_stop_cv.wait(stop_lock, [] { return !g_stop_in_progress.load(); });
+            return 0;
+        }
+        if (g_stop_complete.load()) {
+            return 0;
+        }
+        g_stop_in_progress.store(true);
+    }
+    const bool was_running = g_running.exchange(false);
+    g_flush_thread_stop.store(true);
+    g_flush_wait_cv.notify_all();
+
+    if (was_running) {
+        // Serialize with cann_mspti_flush(). Once stop_in_progress is set no
+        // new flush can enter, so FlushAll/unsubscribe cannot race a periodic
+        // flush from the helper thread.
+        std::lock_guard<std::mutex> flush_lock(g_flush_mutex);
+        msptiActivityFlushAll(1);
+        if (g_subscriber != nullptr) {
+            msptiUnsubscribe(g_subscriber);
+            g_subscriber = nullptr;
+        }
+    }
+
+    bool callbacks_drained = false;
+    {
+        std::unique_lock<std::mutex> callback_lock(g_callback_mutex);
+        callbacks_drained = g_callback_cv.wait_for(
+            callback_lock, std::chrono::seconds(5),
+            [] { return g_callbacks_active.load(std::memory_order_acquire) == 0; });
+    }
+    if (!callbacks_drained) {
+        // Never fclose() while a callback may still hold the FILE*. Leaking the
+        // descriptor until process exit is safer than a use-after-free.
+        AddWarning("mspti stop timed out waiting for active callbacks; output not closed");
+    } else {
         std::lock_guard<std::mutex> lock(g_write_mutex);
         if (g_file != nullptr) {
             std::fflush(g_file);
@@ -794,12 +1032,32 @@ extern "C" int cann_mspti_stop(void) {
             g_file = nullptr;
         }
     }
+
+    RefreshClockOffset();
+    const int64_t clock_drift_ns =
+        g_clock_drift_ns.load(std::memory_order_relaxed);
+    if (clock_drift_ns > 100000000LL || clock_drift_ns < -100000000LL) {
+        AddWarning("clock offset drift exceeded 100ms; timestamps may be skewed");
+    }
     {
         std::lock_guard<std::mutex> lock(g_meta_mutex);
         g_stop_unix_ns = NowUnixNS();
     }
+    {
+        // Mark the session complete before writing the final sidecar so the
+        // sidecar itself reports stop_complete=true. Keep stop_in_progress set
+        // until the sidecar is durable; a concurrent stop waits on that flag
+        // rather than returning while meta is still being written.
+        std::lock_guard<std::mutex> stop_lock(g_stop_mutex);
+        g_stop_complete.store(true);
+    }
     WriteMetaFile(true);
-    return 0;
+    {
+        std::lock_guard<std::mutex> stop_lock(g_stop_mutex);
+        g_stop_in_progress.store(false);
+    }
+    g_stop_cv.notify_all();
+    return callbacks_drained ? 0 : 10;
 }
 
 extern "C" int cann_mspti_is_active(void) { return g_running.load() ? 1 : 0; }

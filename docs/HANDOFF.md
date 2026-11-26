@@ -13,9 +13,11 @@
 | Git 分支 | `main` |
 | 最新提交 | 见 `git log -1`（`diagnose`、M2 off-CPU/futex 及上机验证记录） |
 | Git remote | 未配置；交接前建议先配置内部 Git 远程并推送 |
-| Linux/arm64 二进制（M3） | `dist/cann-ebpf-linux-arm64-m3` |
+| Linux/arm64 二进制（M3 + A1/A2） | `dist/cann-ebpf-linux-arm64-m3-a2` |
 | 二进制大小 | 见 `SHA256SUMS.txt` 与本次提交说明 |
 | 二进制 SHA-256 | 见 `dist/SHA256SUMS.txt` |
+| collector A2 产物 | `dist/cann-mspti-a2-20261126/`（`libcannmspti.so`、`cann-mspti-selftest`、`synthetic_acl`、`SHA256SUMS.txt`） |
+| collector A2 服务器副本 | `/root/cann-ebpf/cann-mspti-a2-20261126/` |
 | 历史已验证二进制 | `dist/cann-ebpf-linux-arm64-batch`（`0.5.0-m5`，上表 SHA 已替换为 M2 构建，旧包仍保留在 dist/） |
 | 服务器验证副本（历史） | `/root/cann-ebpf`，V4 服务器 `bms-84865758` |
 | 服务器 profiles | `/root/cann-ebpf/profiles` |
@@ -64,7 +66,7 @@
 | M3.0 msprof 动态 attach | 已验证不可用 | `msprof --pid` 三变体段错误；改为容器内 in-process collector |
 | vLLM general plugin | 代码和单测完成，未激活 | 未安装到运行中的 V4，也未重启验证；本阶段不做 |
 | Orinfer | 仅 profile validate | 服务未运行，没有真实采集窗口 |
-| M3 msPTI 设备时间线 | 代码 + 合成验证完成 | `m3/mspti_collector`；final7 慢 Sync 305/305（100%）；生产注入待维护窗口 |
+| M3 msPTI 设备时间线 | 代码 + 合成验证 + A1/A2 加固完成 | `m3/mspti_collector`；final7 可匹配 305/305、慢 Sync 305/305；collector 并发 stop + 50ms flush 压力通过；生产注入待维护窗口 |
 | M6 生产化 | 未实现 | Prometheus/OTLP、Grafana、systemd 等未做 |
 
 注意：版本号 `0.6.0-m2` 是功能基线；M3 in-process collector 已在合成 ACL 上验证，但还没有注入
@@ -180,10 +182,16 @@ span_id, seq
 
 - `internal/device` 定义 `cann.device.v1`（API/KERNEL/MEMCPY/HCCL）与 join：
   `(pid,tid,start±100µs)` 匹配 API record → `correlationId` → 设备区间；
-- 支持时钟偏移估计、reason 分类（ok/no_api_record/api_name_mismatch/duplicate/no_device_record/time_window）、
+- 支持时钟偏移估计、reason 分类（ok/not_applicable/no_api_record/api_name_mismatch/duplicate/no_device_record/time_window）、
   相邻区间容差（gap ≤100µs，字段 `gap_ns`/`adjacent`）、时间窗退化、每设备 busy 并集、四类 device verdict；
 - `diagnose` 自动读取 run 目录 `device.jsonl`，有设备证据才输出 `device_bound` 等结论；
 - final7 合成 ACL：11,859 host spans + 148,466 device spans，慢 Sync 305/305（100%），进程退出后仍可 join；
+- A1 join 质量：API 名称别名归一后只接受同名 record，`match_rate` 改为可匹配设备调用分母；final7 复跑
+  可匹配 305/305（100%）、慢 Sync 305/305、`api_name_mismatch=0`；旧的 5,320 条 mismatch / 44.9% 已确认是
+  最近时间选错 API record 的假失配；
+- A2 collector 加固：callback buffer RAII 生命周期、stop 状态机与 8 线程并发 stop、时钟偏移周期重估、
+  `/proc/self/task` tid 热刷新、JSON 转义审计；容器内 selftest 与 50ms flush 压力通过
+  （32,809 条记录 0 损坏、`records_skipped=0`、`callbacks_active=0`、`stop_complete=true`、tid 映射 26 条/0 未映射）；
 - `m3/mspti_collector` 的 `libcannmspti.so` / `cann-mspti-collector` / `synthetic_acl` 已在容器内编译并验证；
 - M3.0 `msprof --pid` 动态 attach 三变体均段错误，判定不可用；生产端只能通过重启或容器入口 wrapper 注入。
   详见 `docs/M3-DEVICE-JOIN.md`、`docs/M3-COLLECTOR.md`、`docs/M3-VALIDATION.md`、`docs/M3-FEASIBILITY.md`。
@@ -330,7 +338,7 @@ span_id, seq
 | M2 验证（合成） | 791 spans，off-CPU 99.7%、futex 99.9%，verdict `host_lock_contention`（confidence 1.00） |
 | `--blocking off` | 7,145 spans，无任何 offcpu/futex 字段，服务状态不变 |
 | E 层硬件验证 | 10 秒 7,794 spans + 2 采样×8 设备；HBM free 6.3%、AICore 峰值 46%；manifest artifact 4202 bytes |
-| M3 设备时间线验证（合成 ACL） | final7：11,859 host spans / 148,466 device spans，慢 Sync 305/305（100%），clock offset 761ns，pidmap 27 条 |
+| M3 设备时间线验证（合成 ACL） | final7（A1 复跑）：11,859 host spans / 148,466 device spans，可匹配 305/305（100%），慢 Sync 305/305（100%），`api_name_mismatch=0`，pidmap 27 条；A2 50ms flush：32,809 条 0 损坏、`stop_complete=true` |
 | M3.0 msprof 动态 attach | 三变体均 exit 139（Segmentation fault），V4 health/service/worker 全程正常 |
 | preflight | V4 pass=15 warn=0 fail=0；tracepoint id、lockdown、memlock、npu-smi 均正常 |
 | M2 开销（60s×2+2） | agent CPU off 1.365% → on 1.64%（+0.28pp 单核），RSS +1.3MB，dropped 0 |
@@ -341,7 +349,7 @@ span_id, seq
 ## 7. 下一步工作方向
 
 详细的分阶段方案、文件所有权与下一阶段分工见 `docs/NEXT-WORK.md` 和 `docs/WORK-SPLIT.md`。
-当前结论：M3 collector 合成验证已完成；无窗口阶段先做 join 质量、collector 加固、teardown/规模优化、
+当前结论：M3 collector 合成验证、A1 join 质量、A2 collector 加固已完成；无窗口阶段继续 teardown/规模优化、
 固定负载脚本和 M6 交付骨架；真实 V4/Orinfer 设备时间线与 M5 A/B 需要维护窗口。
 插件/`execute_model` 函数级耗时不做，见 P2 说明。
 

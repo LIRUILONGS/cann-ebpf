@@ -1,7 +1,7 @@
 # M3 设备时间线采集器（msPTI in-process）
 
 日期：2026-11-26  
-状态：**代码完成，容器内编译通过，合成 ACL 上机验证通过；V4/Orinfer 生产进程尚未注入，需要维护窗口。**
+状态：**A2 加固完成：容器内编译、生命周期自测、并发 stop、50ms flush 压力采集均通过；合成 ACL 上机验证通过。V4/Orinfer 生产进程尚未注入，需要维护窗口。**
 
 ## 1. 解决什么问题
 
@@ -18,8 +18,9 @@ host eBPF span 只能说明“哪个线程在哪个 CANN API 上等了多久”�
 |---|---|
 | `collector.h` / `collector.cpp` | `libcannmspti.so`，msPTI 订阅、记录归一化、JSONL 与 meta sidecar |
 | `cli.cpp` | `cann-mspti-collector` 独立启动器：fork/exec 目标命令并注入环境 |
+| `selftest.cpp` | `cann-mspti-selftest` 生命周期自测：stop 幂等、并发 stop、非法配置 |
 | `synthetic_acl.cpp` | `synthetic_acl` 独立 ACL 工作负载，用于验证 API/KERNEL/MEMCPY 和 correlationId |
-| `CMakeLists.txt` | 容器内构建，输出上述三个产物 |
+| `CMakeLists.txt` | 容器内构建，输出上述产物（默认构建 selftest） |
 
 ## 3. 输出的证据
 
@@ -38,9 +39,55 @@ host eBPF span 只能说明“哪个线程在哪个 CANN API 上等了多久”�
 
 ### 3.2 `device.jsonl.meta.json`
 
-记录 `schema`、版本、容器内 `pid`、`container_id`、`run_id`、活动类型、时钟模式、起止时间、`records_written`、`records_ignored`、`records_skipped`、`output_bytes`、`max_bytes`、`truncated`、`warnings`。
+记录 `schema`、版本、容器内 `pid`、`container_id`、`run_id`、活动类型、时钟模式、起止时间、
+`records_written`、`records_ignored`、`records_skipped`、`output_bytes`、`max_bytes`、`truncated`、`warnings`。
+
+A2 新增的可观测字段：
+
+| 字段 | 含义 |
+|---|---|
+| `clock_offset_start_ns` / `clock_offset_last_ns` | 启动时与最近一次重估的 `CLOCK_REALTIME - CLOCK_MONOTONIC` 偏移 |
+| `clock_drift_ns` | 最近偏移减启动偏移；超过 ±100ms 时停止阶段写入 warning |
+| `clock_refresh_count` / `clock_last_refresh_unix_ns` | 时钟重估次数与最近重估时间 |
+| `callback_buffers_processed` / `callback_records_processed` | 已处理的 msPTI 缓冲与记录数 |
+| `callbacks_active` | 停止写入 meta 时仍在执行的 callback 数；正常应为 0 |
+| `tid_map_entries` / `tid_map_refresh_count` | 容器 local tid → 宿主 tid 映射条目数及刷新次数 |
+| `unmapped_tid_records` | 查不到 `NSpid` 的记录数；正常应为 0，非 0 说明 tid 映射不完整 |
+| `stop_complete` | 最终 sidecar 是否已完成 stop；最终写入应为 `true` |
 
 运行期间每 1 秒 flush 时同步刷新 meta；复制运行中的 sidecar 可以看到当前记录数，而不是只有启动时的 0。停止时写最终值。
+
+### 3.2.1 生命周期与并发约束（A2）
+
+- **回调 buffer 生命周期**：`UserBufferComplete` 只在 callback 内解析 `msptiActivity*`；每条记录先复制到
+  `std::string` 再写文件，不跨 callback 保存 msPTI 指针。buffer 由 RAII guard 释放一次。
+- **stop 状态机**：`stop_in_progress` / `stop_complete` 两个状态配合条件变量；重复调用 stop 会等待同一个
+  停止流程结束，不会重复 `msptiUnsubscribe` 或二次 `fclose`。
+- **callback 排空**：stop 先 `FlushAll` + `unsubscribe`，再等待 `callbacks_active == 0`（最多 5 秒）。
+  超时只写 warning，不强行关闭 `FILE*`，避免 use-after-free。
+- **时钟重估**：启动时记录一次 offset，flush 线程每次 tick 重估；记录文件使用最新 offset，并在 meta 中
+  保留 drift。NTP 跳变或容器 time namespace 调整不会被当作固定常量。
+- **tid 热刷新**：启动时扫描一次 `/proc/self/task/*/status`，之后每个 flush 周期刷新；新线程不需要重启
+  collector 就能补映射。查不到映射时不缓存 fallback，下一条记录会重试。
+- **JSON 转义**：`run_id`、`kind`、`name`、`source`、`container_id`、`activities`、`clock`、`warnings`
+  全部走同一套转义；控制字符输出为 `\u00xx`，不写业务 payload。
+
+### 3.2.2 自测
+
+`cann-mspti-selftest` 覆盖未启动 flush/stop、stop 幂等、8 线程并发 stop、非法 clock、不可写 output。
+构建时默认生成（`-DBUILD_SELFTEST=OFF` 可关闭）：
+
+```bash
+cd build
+./cann-mspti-selftest
+```
+
+容器内实测：无 `LD_PRELOAD` 与带 `libmspti.so` 两种场景均通过；8 个并发 stop 全部返回 0，停止后
+`is_active=0`。
+
+本次 A2 构建产物已封存为 `dist/cann-mspti-a2-20261126/`，服务器副本在
+`/root/cann-ebpf/cann-mspti-a2-20261126/`；`SHA256SUMS.txt` 覆盖 `libcannmspti.so`、
+`cann-mspti-selftest` 和 `synthetic_acl`。
 
 ### 3.3 `pidmap.json`（宿主侧）
 

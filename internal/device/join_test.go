@@ -1,6 +1,8 @@
 package device
 
 import (
+	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -32,13 +34,16 @@ func TestJoinAPIRecordPath(t *testing.T) {
 	if report.Schema != JoinReportSchemaV1 {
 		t.Fatalf("schema = %s", report.Schema)
 	}
-	if report.MatchedHostSpans != 2 || report.HostSpans != 3 {
+	if report.MatchedHostSpans != 1 || report.HostSpans != 3 {
 		t.Fatalf("matched = %d/%d", report.MatchedHostSpans, report.HostSpans)
+	}
+	if report.MatchableHostSpans != 2 || report.MatchedMatchableHostSpans != 1 || report.MatchRate != 0.5 {
+		t.Fatalf("matchable = %+v", report)
 	}
 	if report.TimeWindowFallback {
 		t.Fatal("should not use time-window fallback")
 	}
-	if len(report.Devices) != 2 {
+	if len(report.Devices) != 1 {
 		t.Fatalf("devices = %+v", report.Devices)
 	}
 	// h1: 800ns kernel + 100ns memcpy overlap over 1000ns busy union 800ns = 0.8
@@ -49,10 +54,10 @@ func TestJoinAPIRecordPath(t *testing.T) {
 	if first.KernelNS != 800 || first.MemcpyNS != 100 {
 		t.Fatalf("h1 kinds = %+v", first)
 	}
-	if report.Hosts[1].Reason != ReasonAPINameMismatch || !report.Hosts[1].Matched {
+	if report.Hosts[1].Reason != ReasonAPINameMismatch || report.Hosts[1].Matched {
 		t.Fatalf("h2 = %+v", report.Hosts[1])
 	}
-	if report.Hosts[2].Reason != ReasonNoAPIRecord || report.Hosts[2].Matched {
+	if report.Hosts[2].Reason != ReasonNotApplicable || report.Hosts[2].Matched {
 		t.Fatalf("h3 = %+v", report.Hosts[2])
 	}
 	found := false
@@ -63,6 +68,69 @@ func TestJoinAPIRecordPath(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("verdicts = %+v", report.Verdicts)
+	}
+}
+
+func TestJoinFinal7MatchableDenominator(t *testing.T) {
+	host := make([]runlog.Span, 0, 11859)
+	dev := make([]Span, 0, 628)
+	next := int64(1_000_000)
+	for i := 0; i < 11536; i++ {
+		host = append(host, hostSpan(fmt.Sprintf("get-%d", i), 100, 11, next, next+4_000, "aclrtGetDevice", "handle"))
+		next += 10_000
+	}
+	for i := 0; i < 305; i++ {
+		corr := int64(1000 + i)
+		start := next
+		end := start + 2_000_000
+		host = append(host, hostSpan(fmt.Sprintf("sync-%d", i), 100, 11, start, end, "aclrtSynchronizeStream", "sync"))
+		dev = append(dev, Span{Schema: SchemaV1, Kind: KindAPI, Name: "aclrtSynchronizeStream", PID: 100, TID: 11, StartNS: start, EndNS: end, CorrelationID: corr})
+		dev = append(dev, Span{Schema: SchemaV1, Kind: KindKernel, Name: "ffn", DeviceID: 0, StartNS: start + 100, EndNS: end - 100, CorrelationID: corr})
+		next += 10_000_000
+	}
+	for i := 0; i < 18; i++ {
+		corr := int64(9000 + i)
+		start := next
+		end := start + 2_000_000
+		host = append(host, hostSpan(fmt.Sprintf("malloc-%d", i), 100, 11, start, end, "aclrtMalloc", "memory"))
+		dev = append(dev, Span{Schema: SchemaV1, Kind: KindAPI, Name: "aclrtMalloc", PID: 100, TID: 11, StartNS: start, EndNS: end, CorrelationID: corr})
+		next += 10_000_000
+	}
+
+	report := Join(host, dev, Options{})
+	if report.HostSpans != 11859 || report.MatchableHostSpans != 305 || report.UnmatchableHostSpans != 11554 {
+		t.Fatalf("host/matchable = %+v", report)
+	}
+	if report.MatchedHostSpans != 305 || report.MatchedMatchableHostSpans != 305 || report.MatchRate != 1 {
+		t.Fatalf("matched = %+v", report)
+	}
+	if report.SlowSyncSpans != 305 || report.MatchedSlowSync != 305 || report.SlowSyncMatchRate != 1 {
+		t.Fatalf("slow sync = %+v", report)
+	}
+	var notApplicable, ok, noDevice *ReasonCount
+	for i := range report.Reasons {
+		switch report.Reasons[i].Reason {
+		case ReasonNotApplicable:
+			notApplicable = &report.Reasons[i]
+		case ReasonOK:
+			ok = &report.Reasons[i]
+		case ReasonNoDeviceRecord:
+			noDevice = &report.Reasons[i]
+		case ReasonAPINameMismatch:
+			t.Fatalf("unexpected api_name_mismatch: %+v", report.Reasons[i])
+		}
+	}
+	if notApplicable == nil || notApplicable.Count != 11554 || len(notApplicable.Examples) == 0 || notApplicable.Examples[0] != "aclrtGetDevice=11536" {
+		t.Fatalf("not_applicable = %+v", notApplicable)
+	}
+	if ok == nil || ok.Count != 305 {
+		t.Fatalf("ok = %+v", ok)
+	}
+	if noDevice != nil {
+		t.Fatalf("malloc must not reach no_device_record: %+v", noDevice)
+	}
+	if report.Hosts[0].Reason != ReasonNotApplicable || report.Hosts[0].Matchable {
+		t.Fatalf("get device should be not_applicable: %+v", report.Hosts[0])
 	}
 }
 
@@ -206,5 +274,32 @@ func TestReadSpansLineError(t *testing.T) {
 	_, err := ReadSpans(strings.NewReader("{\"schema\":\"cann.device.v1\"}\nnot-json\n"))
 	if err == nil || !strings.Contains(err.Error(), "line 2") {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestCollectorMetaHardeningFields(t *testing.T) {
+	raw := `{
+		"schema":"cann.mspti.collector.v1",
+		"clock_offset_start_ns":10,
+		"clock_offset_last_ns":12,
+		"clock_drift_ns":2,
+		"clock_refresh_count":7,
+		"callback_buffers_processed":8,
+		"callback_records_processed":9,
+		"callbacks_active":0,
+		"tid_map_entries":26,
+		"tid_map_refresh_count":5,
+		"unmapped_tid_records":1,
+		"stop_complete":true
+	}`
+	var meta CollectorMeta
+	if err := json.Unmarshal([]byte(raw), &meta); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if meta.ClockDriftNS != 2 || meta.ClockRefreshCount != 7 ||
+		meta.CallbackBuffers != 8 || meta.CallbackRecords != 9 ||
+		meta.TIDMapEntries != 26 || meta.TIDMapRefreshes != 5 ||
+		meta.UnmappedTIDRecords != 1 || !meta.StopComplete {
+		t.Fatalf("meta = %+v", meta)
 	}
 }

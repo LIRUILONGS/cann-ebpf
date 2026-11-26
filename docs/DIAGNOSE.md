@@ -104,7 +104,7 @@ Schema 固定为 `cann.diagnose.report.v1`，主要字段：
 | `categories[]` | category 分布（count / span_pct / total_ns） |
 | `blocking` | off-CPU/futex 采样范围、wall、offcpu、futex、比例、证据 span、嵌套提示 |
 | `hardware` | 可选：npu-smi 的每设备 AICore/HBM/功耗/温度与最低 HBM free% |
-| `device` | 可选：M3 join 的匹配率、时钟偏移、reason、每设备 busy、device verdict 计数 |
+| `device` | 可选：M3 join 的可匹配设备调用匹配率（`match_rate`）、全量 host 匹配率（`all_host_match_rate`）、时钟偏移、reason 明细、每设备 busy、device verdict 计数 |
 | `verdicts[]` | verdict、reason、confidence、evidence |
 | `evidence[]` | 慢 span 的 span_id、function、pid/tid、start/end、duration、offcpu/futex |
 | `unknowns[]` | 当前无法判定的原因 |
@@ -130,7 +130,8 @@ Markdown 报告包含同样的信息，并固定声明：原始值以 `spans.jso
 
 设备侧：只有存在 `device.jsonl` 且 join 匹配成功时才输出
 `device_bound` / `launch_starvation` / `copy_bound` / `communication_bound`；
-具体阈值和 reason 见 `docs/M3-DEVICE-JOIN.md`。匹配率 <90% 或退化为时间窗时，结论会降置信度并写入 unknown。
+具体阈值和 reason 见 `docs/M3-DEVICE-JOIN.md`。可匹配设备调用匹配率 <95% 或退化为时间窗时，
+结论会降置信度并写入 unknown；`handle`/`memory`/`event` 类 host span 计入 `not_applicable`，不进入分母。
 
 没有 `device.jsonl` 或 join 未匹配时，下列结论**不会**输出，只写入 `unknowns`：
 

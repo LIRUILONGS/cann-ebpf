@@ -22,15 +22,27 @@ const CollectorMetaSchemaV1 = "cann.mspti.collector.v1"
 // used to translate the collector's namespace-local pid/tid to the host
 // pid/tid that eBPF spans record.
 type CollectorMeta struct {
-	Schema      string `json:"schema"`
-	Version     string `json:"version,omitempty"`
-	PID         int    `json:"pid,omitempty"`
-	RunID       string `json:"run_id,omitempty"`
-	ContainerID string `json:"container_id,omitempty"`
-	Activities  string `json:"activities,omitempty"`
-	Clock       string `json:"clock,omitempty"`
-	Records     int64  `json:"records_written,omitempty"`
-	Truncated   bool   `json:"truncated,omitempty"`
+	Schema                 string `json:"schema"`
+	Version                string `json:"version,omitempty"`
+	PID                    int    `json:"pid,omitempty"`
+	RunID                  string `json:"run_id,omitempty"`
+	ContainerID            string `json:"container_id,omitempty"`
+	Activities             string `json:"activities,omitempty"`
+	Clock                  string `json:"clock,omitempty"`
+	Records                int64  `json:"records_written,omitempty"`
+	Truncated              bool   `json:"truncated,omitempty"`
+	ClockOffsetStartNS     int64  `json:"clock_offset_start_ns,omitempty"`
+	ClockOffsetLastNS      int64  `json:"clock_offset_last_ns,omitempty"`
+	ClockDriftNS           int64  `json:"clock_drift_ns"`
+	ClockRefreshCount      uint64 `json:"clock_refresh_count,omitempty"`
+	ClockLastRefreshUnixNS uint64 `json:"clock_last_refresh_unix_ns,omitempty"`
+	CallbackBuffers        uint64 `json:"callback_buffers_processed,omitempty"`
+	CallbackRecords        uint64 `json:"callback_records_processed,omitempty"`
+	CallbacksActive        uint64 `json:"callbacks_active,omitempty"`
+	TIDMapEntries          uint64 `json:"tid_map_entries,omitempty"`
+	TIDMapRefreshes        uint64 `json:"tid_map_refresh_count,omitempty"`
+	UnmappedTIDRecords     uint64 `json:"unmapped_tid_records,omitempty"`
+	StopComplete           bool   `json:"stop_complete"`
 }
 
 // Activity kinds. API records are the bridge from a host span to a device

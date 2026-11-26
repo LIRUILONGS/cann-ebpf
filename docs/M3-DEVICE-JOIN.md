@@ -1,8 +1,8 @@
 # M3：device 时间线与 host/device join
 
 日期：2026-11-26
-状态：**schema、join 算法、诊断输出、单测、in-process msPTI collector 与合成 ACL 上机验证完成**。
-最新 final7：11,859 host spans + 148,466 device spans，慢 Sync 305/305（100%）。真实 V4/Orinfer
+状态：**schema、join 算法、诊断输出、单测、in-process msPTI collector 与合成 ACL 上机验证完成；A1 join 质量与 A2 collector 加固完成**。
+最新 final7：11,859 host spans + 148,466 device spans，可匹配设备调用 305/305（100%），慢 Sync 305/305（100%），`api_name_mismatch=0`。真实 V4/Orinfer
 生产注入仍需维护窗口；`msprof --pid` 动态采集在本环境不可用（见 `docs/M3-FEASIBILITY.md`）。
 
 ## 1. 设计
@@ -13,7 +13,8 @@ host span (pid, tid, api, start, end)
     → KERNEL / MEMCPY / HCCL (device_id, stream_id, start, end, correlationId)
 ```
 
-- 第一跳用 `(pid, tid) + start±tolerance` 一对一匹配 API record；
+- 第一跳用 `(pid, tid) + start±tolerance` 匹配 **同名** API record；API 名称先做别名归一
+  （如 `StreamSynchronize` / `StreamSyncTaskFinish` → `aclrtSynchronizeStream`），不同名记录不会被当作成功匹配；
 - 第二跳用 `(correlationId)` 找同一次调用的设备区间；`correlationId` 只在同一 device 内唯一，
   所以报告按 device 分别统计；
 - 没有 API record 时退化为“时间窗重叠”，报告 `time_window_fallback=true`，置信度下降；
@@ -47,11 +48,14 @@ Schema `cann.device.join.v1`：
 | 字段 | 内容 |
 |---|---|
 | `host_spans` / `device_spans` / `device_kinds` | 输入规模与类型计数 |
-| `matched_host_spans` / `match_rate` | 匹配数量与比例 |
+| `matchable_host_spans` / `unmatchable_host_spans` | 可关联设备执行的 host span 数；`memory`/`handle`/`event` 类别和没有同名 API 的函数不计入分母 |
+| `matched_host_spans` / `matched_matchable_host_spans` | 匹配总数 / 可匹配 host span 中的匹配数 |
+| `match_rate` | **可匹配设备调用**匹配率（验收口径） |
+| `all_host_match_rate` | 全量 host span 匹配率（保留用于观察 host 调用构成，不作为验收口径） |
 | `time_window_fallback` | 是否退化为时间窗 |
 | `clock_offset_ns` | 估计的 host/device 时钟偏移 |
 | `adjacent_matches` | 相邻区间容差匹配数量（不贡献 busy） |
-| `reasons[]` | `ok` / `no_api_record` / `api_name_mismatch` / `duplicate` / `no_device_record` / `time_window` |
+| `reasons[]` | `ok` / `not_applicable` / `no_api_record` / `api_name_mismatch` / `duplicate` / `no_device_record` / `time_window`；每项带 `description` 和 top function `examples` |
 | `devices[]` | 每设备 busy 并集、kernel/memcpy/HCCL 重叠时长 |
 | `verdicts[]` | `device_bound` / `launch_starvation` / `copy_bound` / `communication_bound` 的计数 |
 | `hosts[]` | 每个匹配 host span 的 busy%、三类设备时长、correlationId；`matches[]` 可带 `gap_ns` / `adjacent` |
@@ -71,7 +75,9 @@ busy 用区间并集，避免同一 host 调用内多个重叠 kernel 被重复�
 `diagnose` 会自动读取 run 目录下的 `device.jsonl`：
 
 ```json
-"device": { "matched_host_spans": 7794, "match_rate": 1.0, "clock_offset_ns": 0,
+"device": { "matchable_host_spans": 305, "matched_matchable_host_spans": 305,
+            "matched_host_spans": 305, "match_rate": 1.0, "all_host_match_rate": 0.0257,
+            "clock_offset_ns": -18359,
             "time_window_fallback": false, "verdicts": [{"verdict":"device_bound","count":5721}] }
 ```
 
@@ -109,7 +115,9 @@ CLI 新增 `--device-tolerance`（默认 100µs）。
 | 测试 | 结果 |
 |---|---|
 | 单测：API+correlationId、名称不匹配、duplicate、no_device_record、时钟偏移、时间窗 fallback | 通过 |
-| 服务器：in-process msPTI collector + 合成 ACL（final7） | 11,859 host spans / 148,466 device spans；慢 Sync 305/305（100%）；`pid_map_entries=27`，进程退出后仍可 join |
+| 服务器：in-process msPTI collector + 合成 ACL（final7，A1 修复前） | 11,859 host spans / 148,466 device spans；慢 Sync 305/305（100%）；但 `matched_host_spans=5,325`、`match_rate=44.9%`、`api_name_mismatch=5,320`，是 join 选错 API 记录导致的假失配 |
+| 服务器：final7 原始证据 A1 复跑 | 可匹配 305/305（100%），慢 Sync 305/305（100%），`api_name_mismatch=0`；reason=`not_applicable` 11,554（`aclrtGetDevice` 11,536 + `aclrtMalloc` 18）、`ok` 305；`all_host_match_rate=2.57%` 仅作观察 |
+| 服务器：A2 collector 加固 + 50ms flush 压力 | 10 秒合成 ACL：32,809 条 device 记录，JSONL 全部可解析，`records_skipped=0`，`callbacks_active=0`，`stop_complete=true`；`clock_refresh_count=229`、`tid_map_refresh_count=228`、`tid_map_entries=26`、`unmapped_tid_records=0`、`clock_drift_ns=-10` |
 | 服务器：修复前 final2 | 4,171 host spans / 65,375 device spans；慢 Sync 9/11（81.8%），两个 kernel 分别晚 1,677ns / 10,387ns |
 | 服务器：只给 KERNEL 不给 API，验证 fallback | 200 条 kernel 命中 215 host span，`time_window_fallback=true`，匹配率 2.8% 并写入 unknown |
 | 单测 + 服务器 | Markdown/JSON 均输出设备章节；没有 device.jsonl 时明确 unknown |

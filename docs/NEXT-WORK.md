@@ -11,8 +11,8 @@
 
 | ID | 工作 | 负责人 | 产出/验收 | 依赖 |
 |---|---|---|---|---|
-| A1 | **M3 join 质量**：修复 `api_name_mismatch`（final7 有 5,320 条）；区分“可匹配设备调用的 host span”与全量分母；把 reason 细分到报告 | 另一个任务 | final7 重跑：慢 Sync 保持 100%，可匹配函数的匹配率 ≥95%；diagnose 展示 reason 明细；golden 测试 | `docs/M3-VALIDATION.md` |
-| A2 | **M3 collector 加固**：回调 buffer 生命周期、stop 幂等/死锁、时钟偏移定期重估、线程新建后的 tid 映射刷新、JSON 转义 | 另一个任务 | 容器内 `synthetic_acl` 复跑通过；新增单测/压力测试；meta 记录 clock drift | m3 代码 |
+| A1 | ✅ **M3 join 质量（完成 2026-11-26）**：同名 API 匹配、可匹配分母、reason 明细 | 另一个任务 | final7 可匹配 305/305（100%），慢 Sync 305/305，`api_name_mismatch=0`；golden 测试通过 | `docs/M3-VALIDATION.md` |
+| A2 | ✅ **M3 collector 加固（完成 2026-11-26）**：buffer 生命周期、stop 幂等/并发、时钟重估、tid 热刷新、JSON 转义 | 另一个任务 | 容器内自测 + 50ms flush 压力通过；32,809 条 0 损坏；meta 记录 clock drift/tid/callback 指标 | m3 代码 |
 | A3 | **uprobe detach/规模优化**：740 个 uprobe 退出清理约 40s。改为系统级 attach + BPF `target_pids` 过滤（37×库数），或只挂 Worker 目标 | 我 | 退出去抖后 <10s；uprobe 残留 0；V4 span 数量/覆盖不下降 | `internal/probes/**` |
 | A4 | **固定负载开销脚本**：固定 prompt/并发/max_tokens，on/off 多轮，读 vLLM `/metrics` + agent CPU/RSS + dropped | 我 | `scripts/overhead_fixed_load.py` + runbook；维护窗口可直接跑；dry-run 校验参数 | 现有 `/metrics`、`attach` |
 | A5 | **M6 交付骨架**：systemd unit、install/uninstall/upgrade、preflight 前置、release tar + `SHA256SUMS`、runbook | 我 | 一次性安装/卸载/回滚脚本可 dry-run；包内二进制 SHA 与 HANDOFF 一致 | 当前 CLI |
@@ -20,7 +20,7 @@
 | A7 | **DCMI/短间隔硬件**：DCMI 后端或 npu-smi 1–2s 间隔开销评估 | 我（P2） | 与 npu-smi 数值对齐；开销可接受 | E 层代码 |
 | A8 | **M5 采集/对比脚本**：V4 稳态与 Orinfer 窗口的 capture/compare 模板 | 我 | `scripts/m5-ab.sh` + `compare.md` 自动填充；等待 Orinfer 窗口 | M5 窗口 |
 
-优先级：**A1/A3/A4 → A5 → A2 → A6/A7/A8**。
+优先级：**A3/A4 → A5 → A6/A7/A8**；A1/A2 已完成。
 
 ## 2. 需要维护窗口
 

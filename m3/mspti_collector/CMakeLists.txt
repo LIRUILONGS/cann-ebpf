@@ -34,6 +34,13 @@ add_executable(cann-mspti-collector cli.cpp)
 target_link_libraries(cann-mspti-collector PRIVATE cannmspti pthread)
 set_target_properties(cann-mspti-collector PROPERTIES BUILD_RPATH "$ORIGIN")
 
+option(BUILD_SELFTEST "Build the collector lifecycle selftest" ON)
+if(BUILD_SELFTEST)
+    add_executable(cann-mspti-selftest selftest.cpp)
+    target_link_libraries(cann-mspti-selftest PRIVATE cannmspti pthread)
+    set_target_properties(cann-mspti-selftest PROPERTIES BUILD_RPATH "$ORIGIN")
+endif()
+
 option(BUILD_SYNTHETIC_ACL "Build the synthetic ACL validation workload" ON)
 if(BUILD_SYNTHETIC_ACL)
     find_library(ASCENDCL_LIB NAMES ascendcl PATHS "${ASCEND_PATH}/lib64")

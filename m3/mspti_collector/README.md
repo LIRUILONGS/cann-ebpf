@@ -24,6 +24,7 @@ make -j
 ```text
 libcannmspti.so
 cann-mspti-collector
+cann-mspti-selftest
 synthetic_acl
 ```
 
@@ -46,9 +47,16 @@ export CANN_MSPTI_CLOCK=auto
 运行期间每 1 秒 flush 时同步刷新 `device.jsonl.meta.json`，记录 pid、container_id、run_id、
 活动类型、当前记录数、字节数、丢弃/截断计数和 warning；停止时写最终值。
 
+A2 加固后，meta 还会输出 `clock_offset_start_ns` / `clock_offset_last_ns` / `clock_drift_ns` /
+`clock_refresh_count`、`callback_buffers_processed` / `callback_records_processed` /
+`callbacks_active`、`tid_map_entries` / `tid_map_refresh_count` / `unmapped_tid_records` 和
+`stop_complete`。`stop_complete=true` 表示 stop 流程已完成，最终 sidecar 可安全归档。
+
 `CANN_MSPTI_CLOCK=auto|realtime|monotonic` 控制时间戳归一化。CANN 9.0.1 的 msPTI 使用
 `CLOCK_REALTIME` 纳秒，而 eBPF 的 `bpf_ktime_get_ns` 使用 `CLOCK_MONOTONIC`；collector
 默认 `auto` 将其转换为 monotonic，并保留 `raw_start_ns`/`raw_end_ns` 原始值。
+offset 不是常量：collector 启动时记录一次，之后每个 flush 周期重估，NTP 跳变和容器 time
+namespace 调整会体现在 `clock_drift_ns`。
 
 ## 独立启动器
 
@@ -76,6 +84,18 @@ mkdir -p /tmp/cann-mspti-synthetic
 
 注意：不要对正在运行的 V4 容器直接 `LD_PRELOAD` 注入（需要重启服务）；`synthetic_acl`
 是独立进程，不碰 V4 的 stream/内存。
+
+## 生命周期自测
+
+```bash
+cd build
+./cann-mspti-selftest
+```
+
+覆盖未启动 flush/stop、stop 幂等、8 线程并发 stop、非法 `CANN_MSPTI_CLOCK` 和不可写 output。
+并发 stop 的约束：一个线程执行 `FlushAll` + `unsubscribe` + 等待 callback 排空，其余线程等待同一个
+停止流程；不会重复关闭 `FILE*`。callback 内的 `msptiActivity*` 只在 callback 期间有效，collector
+只把字段复制到 `std::string` 后写文件。
 
 ## 宿主侧 pidmap
 
@@ -107,3 +127,5 @@ mkdir -p /tmp/cann-mspti-synthetic
 - 设备时间线不等于逐 request 延迟；batch 仍是窗口归因。
 - API 的 `correlationId` 只在同一 device 内唯一；跨卡不能直接合并。
 - `msptiActivityHccl` 无 correlationId，时间窗回退必须在报告中标注。
+- stop 等待 callback 超过 5 秒时只写 warning，不强行 `fclose`；此时 `callbacks_active` 会大于 0，
+  证据目录不能当作完整归档。

@@ -125,7 +125,7 @@ M1 的 8 个核心函数和 2088 spans 是历史基线。当前 37 个 host 探�
 
 ## M3 msPTI join
 
-状态（2026-11-26）：join 管线与 in-process collector 已完成；合成 ACL 上机验证通过；真实 V4/Orinfer 注入待维护窗口。
+状态（2026-11-26）：join 管线与 in-process collector 已完成；A1 join 质量与 A2 collector 加固完成；合成 ACL 上机验证通过；真实 V4/Orinfer 注入待维护窗口。
 容器内有 CANN 9.0.1 `tools/mspti` 和 `msprof`，宿主只有驱动；
 **`msprof --pid` 三变体均段错误，动态 attach 路线不可用**（`docs/M3-FEASIBILITY.md`）。
 
@@ -157,8 +157,8 @@ M1 的 8 个核心函数和 2088 spans 是历史基线。当前 37 个 host 探�
 
 无窗口：
 
-- [ ] A1 M3 join 质量：api_name_mismatch、可匹配分母、reason 明细（另一任务）
-- [ ] A2 collector 加固：buffer 生命周期/stop 幂等/时钟重估/tid 刷新/转义（另一任务）
+- [x] A1 M3 join 质量：同名 API 匹配、可匹配分母、reason 明细；final7 可匹配 305/305（100%），慢 Sync 305/305，`api_name_mismatch=0`
+- [x] A2 collector 加固：buffer 生命周期/stop 幂等与并发/tid 刷新/时钟重估/JSON 转义；自测 + 50ms flush 压力通过
 - [x] A3 uprobe detach 与规模优化（系统级 attach + BPF PID 过滤）：V4 退出 ~4.5s、残留 0、覆盖不变
 - [x] A4 `scripts/overhead_fixed_load.py` 固定负载开销（dry-run；真实门禁待窗口）
 - [x] A5 systemd/安装/回滚/release + SHA256SUMS（脚本 + dry-run）

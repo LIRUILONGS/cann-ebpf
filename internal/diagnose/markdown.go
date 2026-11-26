@@ -117,8 +117,12 @@ func (r Report) Markdown() string {
 			mode = "time_window（无 API record，置信度低）"
 		}
 		fmt.Fprintf(&b, "- host span：`%d`，device span：`%d`（%s）\n", dev.HostSpans, dev.DeviceSpans, dev.DeviceKinds)
-		fmt.Fprintf(&b, "- 匹配：`%d/%d`（%.1f%%），模式：%s，时钟偏移：`%d` ns\n",
-			dev.MatchedHostSpans, dev.HostSpans, dev.MatchRate*100, mode, dev.ClockOffsetNS)
+		fmt.Fprintf(&b, "- 可匹配设备调用：`%d/%d`（%.1f%%），全量 host 匹配：`%d/%d`（%.1f%%），模式：%s，时钟偏移：`%d` ns\n",
+			dev.MatchedMatchableHostSpans, dev.MatchableHostSpans, dev.MatchRate*100,
+			dev.MatchedHostSpans, dev.HostSpans, dev.AllHostMatchRate*100, mode, dev.ClockOffsetNS)
+		if dev.UnmatchableHostSpans > 0 {
+			fmt.Fprintf(&b, "- 不可匹配 host span：`%d` 条（多为 handle/memory/event 类，未纳入可匹配率）\n", dev.UnmatchableHostSpans)
+		}
 		if dev.SlowSyncSpans > 0 {
 			fmt.Fprintf(&b, "- 慢 Sync 匹配：`%d/%d`（%.1f%%）\n",
 				dev.MatchedSlowSync, dev.SlowSyncSpans, dev.SlowSyncMatchRate*100)
@@ -130,9 +134,11 @@ func (r Report) Markdown() string {
 			fmt.Fprintf(&b, "- 容器 pid/tid 映射：已应用 `%d` 条\n", dev.PIDMapEntries)
 		}
 		if len(dev.Reasons) > 0 {
-			b.WriteString("\n| reason | count |\n|---|---:|\n")
+			b.WriteString("\n| reason | count | description | examples |\n|---|---:|---|---|\n")
 			for _, reason := range dev.Reasons {
-				fmt.Fprintf(&b, "| `%s` | %d |\n", escape(reason.Reason), reason.Count)
+				fmt.Fprintf(&b, "| `%s` | %d | %s | %s |\n",
+					escape(reason.Reason), reason.Count, escape(reason.Description),
+					escape(strings.Join(reason.Examples, ", ")))
 			}
 		}
 		if len(dev.Devices) > 0 {
