@@ -1,0 +1,24 @@
+{
+  "schema": "cann.cpython.offsets.v1",
+  "python": "3.12.13",
+  "arch": "aarch64",
+  "source": "CPython 3.12.13 headers and live ctypes checks on the V4 container",
+  "py_ascii_object_size": 40,
+  "py_dict_ma_keys_offset": 32,
+  "py_dict_ma_values_offset": 40,
+  "py_dict_keys_dk_kind_offset": 10,
+  "py_dict_keys_dk_nentries_offset": 24,
+  "py_dict_keys_dk_indices_offset": 32,
+  "py_dict_unicode_entry_size": 16,
+  "py_type_tp_name_offset": 24,
+  "target_attr": "num_scheduled_tokens",
+  "target_attr_len": 20,
+  "notes": [
+    "PyASCIIObject has no wchar_t *wstr in 3.12.13; sizeof is 40 on 64-bit.",
+    "PyDictObject.ma_keys is at +32 and ma_values at +40.",
+    "PyDictKeysObject.dk_kind is at +10, dk_nentries at +24, dk_indices at +32.",
+    "PyDictUnicodeEntry is 16 bytes on aarch64.",
+    "PyTypeObject.tp_name is at +24 after PyVarObject (refcnt, type, size).",
+    "Changing Python build or version requires re-checking every value and rebuilding the BPF object."
+  ]
+}

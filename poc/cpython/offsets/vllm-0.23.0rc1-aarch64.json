@@ -1,0 +1,20 @@
+{
+  "schema": "cann.vllm.offsets.v1",
+  "vllm": "0.23.0+empty",
+  "vllm_ascend": "0.23.0rc1",
+  "arch": "aarch64",
+  "scheduler_output_class": "vllm.v1.core.sched.output.SchedulerOutput",
+  "scheduler_output_module": "vllm/v1/core/sched/output.py",
+  "target_attr": "num_scheduled_tokens",
+  "target_attr_len": 20,
+  "boundary": "scheduler_output_dict_identity",
+  "worker_entry": "vllm_ascend.worker.model_runner_v1.NPUModelRunner.execute_model",
+  "source": "read-only inspection of the running V4 container at /vllm-workspace",
+  "notes": [
+    "SchedulerOutput is a Python dataclass; there is no stable C struct offset for it.",
+    "The POC identifies a batch by the identity of the SchedulerOutput.num_scheduled_tokens dict.",
+    "The type name is read from the owner object to reject unrelated dict lookups.",
+    "A new dict pointer closes the previous batch and opens a new one; the final open batch is closed at the last observed event or the live map last_seen timestamp.",
+    "This is not a function-level execute_model boundary and must not be described as one."
+  ]
+}

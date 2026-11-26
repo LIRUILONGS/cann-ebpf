@@ -65,6 +65,14 @@ M1 的 8 个核心函数和 2088 spans 是历史基线。当前 37 个 host 探�
 - [ ] offcpu_ns / futex_ns
 - [ ] host_lock_contention / launch_starvation
 
+## 附加 POC：纯 eBPF vLLM batch（不属于 M6 生产化）
+
+- [x] 固定 CPython 3.12.13 / vLLM 0.23.0rc1 的硬编码对象布局
+- [x] `SchedulerOutput.num_scheduled_tokens` dict 身份作为 batch key
+- [x] owner 类型名确认（`SchedulerOutput`）
+- [x] 合成目标和真实 V4 Worker 1452 实测；`read_errors=0`、`ringbuf_lost=0`
+- [ ] 生产接入；当前只是 POC，不是函数级 `execute_model` 边界
+
 ## M3 msPTI join
 
 状态：未实现；M4 也没有初始化 msPTI。

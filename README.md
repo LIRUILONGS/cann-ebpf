@@ -25,6 +25,7 @@
 | JSONL / manifest / summary | 完成；manifest 与 JSONL 的 count、bytes、SHA-256 一致 |
 | 链路追踪 | 完成；batch trace 传播、summary trace 覆盖、trace 链路树 |
 | 纯 eBPF CPython POC | 完成；合成 Python 3.12 和真实 V4 Worker 1452 均验证通过 |
+| 纯 eBPF vLLM batch POC | 完成；固定 CPython 3.12.13/vLLM 0.23.0rc1，真实 V4 读出 37 个 batch、6 个 request ID，类型确认为 `SchedulerOutput` |
 | Orinfer profile | 配置校验通过；服务未运行，尚无运行窗口验证 |
 | msPTI / 设备 kernel 时间线 | 未实现，属于 M3 |
 | 逐 request 执行时长 | 未实现；当前只做 batch 窗口归因 |
@@ -42,6 +43,7 @@ $env:GOOS = "linux"
 $env:GOARCH = "arm64"
 go build -buildvcs=false -trimpath -o dist/cann-ebpf-linux-arm64-m5 ./cmd/cann-ebpf
 go build -buildvcs=false -trimpath -o dist/cpy-poc-linux-arm64 ./cmd/cpy-poc
+go build -buildvcs=false -trimpath -o dist/cpy-batch-poc-linux-arm64 ./cmd/cpy-batch-poc
 Remove-Item Env:GOOS, Env:GOARCH, Env:CGO_ENABLED
 ```
 
@@ -50,6 +52,7 @@ Remove-Item Env:GOOS, Env:GOARCH, Env:CGO_ENABLED
 ```text
 cann-ebpf-linux-arm64-m5  55b40f18f321496171c9b790433e3ca80a654e3f246aa75b1acef29490d06182
 cpy-poc-linux-arm64       08a5f05f92c15dd2d4b6475805ebbb3bfc3188b024c900745cb604a30826be53
+cpy-batch-poc-linux-arm64 见 batch POC 交付目录 SHA256SUMS
 ```
 
 仓库已包含 `internal/probes/bpf/cann.bpf.o`。修改 `cann.bpf.c` 后必须用 clang BPF

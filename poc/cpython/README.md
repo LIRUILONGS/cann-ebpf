@@ -53,3 +53,38 @@ CGO_ENABLED=0 GOOS=linux GOARCH=arm64   go build -buildvcs=false -trimpath -o di
 - 真实 V4 Worker PID 1452：6 秒、1116 次属性命中、8 个真实 `chatcmpl-*` request ID，`read_errors=0`、`ringbuf_lost=0`。
 
 详细数据和边界见 `docs/M5-TRACE-AND-CPY-POC.md`。
+
+## vLLM batch POC
+
+在 M5 的 dict 读取基础上增加 batch 身份和类型确认：
+
+```text
+poc/cpython/bpf/batch_probe.bpf.c
+poc/cpython/bpf/batch_probe.bpf.o
+poc/cpython/batch_probe_linux.go
+poc/cpython/batch_types.go
+poc/cpython/offsets.go
+poc/cpython/offsets/cpython-3.12.13-aarch64.json
+poc/cpython/offsets/vllm-0.23.0rc1-aarch64.json
+poc/cpython/synthetic_batch_target.py
+cmd/cpy-batch-poc/main_linux.go
+```
+
+batch 身份是 `SchedulerOutput.num_scheduled_tokens` 的 dict 指针。新 dict 关闭旧 batch、打开新 batch；owner 类型名通过 `PyObject.ob_type -> PyTypeObject.tp_name` 读取并确认。这个边界不是 `execute_model` 函数级边界，`duration_ns` 也不是请求执行时长。
+
+构建和运行：
+
+```bash
+clang --target=bpfel -mcpu=v1 -O2 -g -c   poc/cpython/bpf/batch_probe.bpf.c -o poc/cpython/bpf/batch_probe.bpf.o
+
+CGO_ENABLED=0 GOOS=linux GOARCH=arm64   go build -buildvcs=false -trimpath -o dist/cpy-batch-poc-linux-arm64 ./cmd/cpy-batch-poc
+
+./cpy-batch-poc-linux-arm64 --pid 1452 --duration 6s --max-events 20000   --output /tmp/cpy-batch-v4-1452.json --json
+```
+
+已验证：
+
+- 合成 `SchedulerOutput`：120 个 batch、360 个 request ID、`read_errors=0`、`ringbuf_lost=0`；
+- 真实 V4 Worker 1452：37 个 batch（36 完整、1 个捕获结束时仍打开）、6 个真实 `chatcmpl-*` request ID、`read_errors=0`、`ringbuf_lost=0`、`type_confirmed=true`。
+
+详细说明见 `docs/VLLM-BATCH-POC.md`。
