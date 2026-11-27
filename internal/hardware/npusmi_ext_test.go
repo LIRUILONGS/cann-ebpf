@@ -137,6 +137,36 @@ func TestParseNPUSmiECC(t *testing.T) {
 	mustInt(t, sample.ECCDoubleBitNextIsolatedPages, 6)
 }
 
+func TestParseNPUSmiECCRealHBMKeys(t *testing.T) {
+	// Real V4 `npu-smi info -t ecc -i 0` uses HBM-prefixed labels and
+	// "Err Cnt" abbreviations; the parser must accept that exact format.
+	raw := `        NPU ID                                   : 0
+        Chip Count                               : 1
+
+        HBM Single Bit Error Count               : 0
+        HBM Double Bit Error Count               : 0
+        HBM Single Bit Aggregate Total Err Cnt   : 0
+        HBM Double Bit Aggregate Total Err Cnt   : 0
+        HBM Single Bit Isolated Pages Count      : 0
+        HBM Double Bit Isolated Pages Count      : 0
+        HBM Single Bit Next-Isolated Pages Count : 0
+        HBM Double Bit Next-Isolated Pages Count : 0
+        Chip ID                                  : 0
+`
+	sample, err := ParseNPUSmiECC([]byte(raw))
+	if err != nil {
+		t.Fatalf("ParseNPUSmiECC real keys: %v", err)
+	}
+	mustInt(t, sample.ECCSingleBitErrors, 0)
+	mustInt(t, sample.ECCDoubleBitErrors, 0)
+	mustInt(t, sample.ECCSingleBitTotal, 0)
+	mustInt(t, sample.ECCDoubleBitTotal, 0)
+	mustInt(t, sample.ECCSingleBitIsolatedPages, 0)
+	mustInt(t, sample.ECCDoubleBitIsolatedPages, 0)
+	mustInt(t, sample.ECCSingleBitNextIsolatedPages, 0)
+	mustInt(t, sample.ECCDoubleBitNextIsolatedPages, 0)
+}
+
 func TestParseNPUSmiECCEnable(t *testing.T) {
 	sample, err := ParseNPUSmiECCEnable([]byte(npuSmiECCEnableFixture))
 	if err != nil {

@@ -374,14 +374,14 @@ func ParseNPUSmiECC(data []byte) (Sample, error) {
 		*dst = intPtr(value)
 		found = true
 	}
-	setInt(&sample.ECCSingleBitErrors, "singlebiterrorcount")
-	setInt(&sample.ECCDoubleBitErrors, "doublebiterrorcount")
-	setInt(&sample.ECCSingleBitTotal, "aggregatetotalsinglebiterrorcount")
-	setInt(&sample.ECCDoubleBitTotal, "aggregatetotaldoublebiterrorcount")
-	setInt(&sample.ECCSingleBitIsolatedPages, "singlebitisolatedpagescount", "aggregatetotalsinglebitisolatedpagescount")
-	setInt(&sample.ECCDoubleBitIsolatedPages, "doublebitisolatedpagescount", "aggregatetotaldoublebitisolatedpagescount")
-	setInt(&sample.ECCSingleBitNextIsolatedPages, "singlebitnextisolatedpagescount")
-	setInt(&sample.ECCDoubleBitNextIsolatedPages, "doublebitnextisolatedpagescount")
+	setInt(&sample.ECCSingleBitErrors, "singlebiterrorcount", "hbmsinglebiterrorcount")
+	setInt(&sample.ECCDoubleBitErrors, "doublebiterrorcount", "hbmdoublebiterrorcount")
+	setInt(&sample.ECCSingleBitTotal, "aggregatetotalsinglebiterrorcount", "hbmsinglebitaggregatetotalerrcnt")
+	setInt(&sample.ECCDoubleBitTotal, "aggregatetotaldoublebiterrorcount", "hbmdoublebitaggregatetotalerrcnt")
+	setInt(&sample.ECCSingleBitIsolatedPages, "singlebitisolatedpagescount", "hbmsinglebitisolatedpagescount", "aggregatetotalsinglebitisolatedpagescount")
+	setInt(&sample.ECCDoubleBitIsolatedPages, "doublebitisolatedpagescount", "hbmdoublebitisolatedpagescount", "aggregatetotaldoublebitisolatedpagescount")
+	setInt(&sample.ECCSingleBitNextIsolatedPages, "singlebitnextisolatedpagescount", "hbmsinglebitnextisolatedpagescount")
+	setInt(&sample.ECCDoubleBitNextIsolatedPages, "doublebitnextisolatedpagescount", "hbmdoublebitnextisolatedpagescount")
 	if !found {
 		return Sample{}, fmt.Errorf("npu-smi ecc: no ECC counter found")
 	}
