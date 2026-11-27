@@ -135,6 +135,47 @@ func TestBuildRooflineRequiresPeaks(t *testing.T) {
 	}
 }
 
+func TestRooflineRidgeIntensityUnit(t *testing.T) {
+	// TFLOPS (1e12 FLOPs/s) and GB/s (1e9 B/s) differ by 1e3, so the ridge
+	// must carry that factor instead of collapsing to 0.25.
+	if got := rooflineRidgeIntensity(400, 1600); !rooflineCloseEnough(got, 250) {
+		t.Fatalf("ridge(400 TFLOPS, 1600 GB/s) = %v, want 250 FLOPs/byte", got)
+	}
+	if got := rooflineRidgeIntensity(100, 1000); !rooflineCloseEnough(got, 100) {
+		t.Fatalf("ridge(100 TFLOPS, 1000 GB/s) = %v, want 100 FLOPs/byte", got)
+	}
+}
+
+func TestBuildRooflineBoundAtRidge(t *testing.T) {
+	// ridge for 400/1600 is 250 FLOPs/byte. Intensity at or above the ridge is
+	// compute bound; anything below it is memory bound.
+	ops := []RooflineOp{
+		{Op: "below", DurationNS: 1_000_000_000, Flops: 249.999, Bytes: 1, DType: "bf16"},
+		{Op: "at", DurationNS: 1_000_000_000, Flops: 250, Bytes: 1, DType: "bf16"},
+		{Op: "above", DurationNS: 1_000_000_000, Flops: 250.001, Bytes: 1, DType: "bf16"},
+	}
+	data := BuildRoofline(ops, RooflineOptions{PeakTFLOPS: 400, PeakGBPS: 1600, DType: "bf16"})
+	if !data.Status.Available {
+		t.Fatalf("roofline unavailable: %+v", data.Status)
+	}
+	if len(data.Points) != 3 {
+		t.Fatalf("points = %d, want 3", len(data.Points))
+	}
+	bound := make(map[string]string, len(data.Points))
+	for _, point := range data.Points {
+		bound[point.Op] = point.Bound
+	}
+	if bound["below"] != "memory" {
+		t.Fatalf("below-ridge bound = %q, want memory (intensity < ridge)", bound["below"])
+	}
+	if bound["at"] != "compute" {
+		t.Fatalf("at-ridge bound = %q, want compute (intensity >= ridge)", bound["at"])
+	}
+	if bound["above"] != "compute" {
+		t.Fatalf("above-ridge bound = %q, want compute (intensity > ridge)", bound["above"])
+	}
+}
+
 func rooflineCloseEnough(got, want float64) bool {
 	scale := math.Max(1, math.Abs(want))
 	return math.Abs(got-want) <= 1e-9*scale

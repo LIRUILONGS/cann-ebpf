@@ -102,7 +102,7 @@ func BuildRoofline(ops []RooflineOp, opts RooflineOptions) RooflineData {
 		return data
 	}
 
-	ridge := peakTFLOPS / peakGBPS
+	ridge := rooflineRidgeIntensity(peakTFLOPS, peakGBPS)
 	points := make([]RooflinePoint, 0, len(complete))
 	for _, op := range complete {
 		if opDType := strings.TrimSpace(op.DType); opDType != "" && !strings.EqualFold(opDType, dtype) {
@@ -150,6 +150,14 @@ func BuildRoofline(ops []RooflineOp, opts RooflineOptions) RooflineData {
 	data.Status = status
 	data.Points = points
 	return data
+}
+
+// rooflineRidgeIntensity returns the ridge point in FLOPs/byte. Peak throughput
+// is expressed in TFLOPS (1e12 FLOPs/s) while bandwidth is in GB/s (1e9 B/s), so
+// the ratio of the two carries a 1e3 factor: 400 TFLOPS / 1600 GB/s must yield
+// 250 FLOPs/byte, not 0.25.
+func rooflineRidgeIntensity(peakTFLOPS, peakGBPS float64) float64 {
+	return peakTFLOPS * 1000 / peakGBPS
 }
 
 func rooflineOpComplete(op RooflineOp) bool {
