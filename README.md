@@ -165,6 +165,32 @@ cann-ebpf report-once $PID_ARGS \
 
 `scripts/report_once.sh` 保留为兼容包装，功能等价；正式入口用 `cann-ebpf report-once`。
 
+### 多进程 PID 辅助：`pids`
+
+`pids` 只列目标 PID，不 attach、不采集：
+
+```bash
+cann-ebpf pids --profile vllm-ascend
+# 输出：--pid 123 --pid 456 --pid 789 ...
+
+cann-ebpf pids --profile orinfer
+# 输出：--pid 1571634
+```
+
+直接拼给 `report-once`：
+
+```bash
+PID_ARGS=$(cann-ebpf pids --profile vllm-ascend)
+
+cann-ebpf report-once $PID_ARGS \
+  --profile vllm-ascend \
+  --profiles-dir /opt/cann-ebpf/profiles \
+  --duration 10m \
+  --out "/var/log/cann-ebpf/runs/report-vllm-$(date -u +%Y%m%dT%H%M%SZ)"
+```
+
+需要 JSON：`cann-ebpf pids --profile vllm-ascend --json`。
+
 ## 报告里有什么
 
 | 视图 | 状态 | 前提 |
