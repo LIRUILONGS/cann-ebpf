@@ -52,5 +52,5 @@
 
 ## 5. 证据
 
-- CSV：`/root/cann-ebpf/m2-test-20261126T151851Z/runs/overhead-v4-gate2/overhead.csv`
+- CSV：`/opt/cann-ebpf/m2-test-20261126T151851Z/runs/overhead-v4-gate2/overhead.csv`
 - 每轮 run 目录：`.../overhead-v4-gate2/{off,on}-*`

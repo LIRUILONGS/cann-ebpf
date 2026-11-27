@@ -1,7 +1,7 @@
 # M2 上机验证记录
 
 日期：2026-11-26（CST 15:18–15:40）
-主机：`bms-84865758`（`36.137.90.82`）
+主机：`target-host`（`target-ip`）
 操作人：自动化验证，未停止/重启 V4，未修改目标进程、CANN 库、驱动或 sysctl。
 
 ## 1. 环境
@@ -13,13 +13,13 @@
 | 服务 | `vllm-ds4-8905.service` active，`/health` 200 |
 | Worker PID | 1452, 3962, 6568, 8890, 11340, 13505, 15629, 17758 |
 | frontend / EngineCore | 4188787 / 4192024 |
-| 测试目录 | `/root/cann-ebpf/m2-test-20261126T151851Z` |
+| 测试目录 | `/opt/cann-ebpf/m2-test-20261126T151851Z` |
 | 二进制 | `cann-ebpf-linux-arm64-m2` |
 | 二进制 SHA-256 | `8a515b96116ec19a28cbc73f7f629b99fa9f564d57fdcb3075380f37f7cc428e` |
 | 编译器（合成目标） | gcc 10.3.1 |
 | tracefs | `/sys/kernel/tracing` 可用 |
 | futex 符号 | `futex_wait` 存在；`futex_wait_requeue_pi` 不存在 |
-| 旧证据 | `/root/cann-ebpf/m4-20261126/...` 未修改（`spans.jsonl` SHA-256 仍为 `fb2625ba...`） |
+| 旧证据 | `/opt/cann-ebpf/m4-20261126/...` 未修改（`spans.jsonl` SHA-256 仍为 `fb2625ba...`） |
 
 ## 2. V4 真实服务 10 秒（blocking on）
 
@@ -151,7 +151,7 @@ uprobe 残留 0。说明关闭路径不加载 blocking 程序、不产生任何 
 ## 8. 证据位置
 
 ```text
-/root/cann-ebpf/m2-test-20261126T151851Z/
+/opt/cann-ebpf/m2-test-20261126T151851Z/
   cann-ebpf-linux-arm64-m2            # 二进制，SHA-256 见上
   profiles/                           # 校验过的 profile
   runs/m2-blocking-10s-20261126T073824Z/   # V4 10s，health/service/残留文件 + spans + diagnose
@@ -161,4 +161,4 @@ uprobe 残留 0。说明关闭路径不加载 blocking 程序、不产生任何 
   diagnose-context.json                    # batch 证据只读验证
 ```
 
-旧目录 `/root/cann-ebpf/m4-20261126`、`runs/` 等未被覆盖。
+旧目录 `/opt/cann-ebpf/m4-20261126`、`runs/` 等未被覆盖。

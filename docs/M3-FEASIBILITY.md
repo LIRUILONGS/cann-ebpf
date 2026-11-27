@@ -1,7 +1,7 @@
 # M3.0：msPTI / msprof 动态采集可行性
 
 日期：2026-11-26
-主机：`bms-84865758`（容器 `deepseek-v4-flash-8905`，CANN 9.0.1）
+主机：`target-host`（容器 `deepseek-v4-flash-8905`，CANN 9.0.1）
 结论：**`msprof --pid` 动态 profiling 在本环境不可用（三种变体均段错误）**；V4 未受影响。
 M3 生产端已改为容器内 in-process collector，并已在合成 ACL 上验证；注入真实 V4/Orinfer 仍需维护窗口。
 
@@ -75,8 +75,8 @@ docker exec [-u root] deepseek-v4-flash-8905 sh -c '
 ## 6. 证据位置
 
 ```text
-/root/cann-ebpf/m2-test-20261126T151851Z/runs/m3probe-20261126T083414Z/
-/root/cann-ebpf/m2-test-20261126T151851Z/runs/m3probe-variants-20261126T083431Z/
+/opt/cann-ebpf/m2-test-20261126T151851Z/runs/m3probe-20261126T083414Z/
+/opt/cann-ebpf/m2-test-20261126T151851Z/runs/m3probe-variants-20261126T083431Z/
 ```
 
 每个目录含 `msprof.log`、`msprof-exit.txt`、health/service/worker 前后快照。

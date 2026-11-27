@@ -29,7 +29,7 @@
 
 | 项 | 值 | 来源/说明 |
 |---|---|---|
-| 服务器 | `bms-84865758` | `docs/M0-VALIDATION.md` |
+| 服务器 | `target-host` | `docs/M0-VALIDATION.md` |
 | 架构 | `aarch64` | `docs/M0-VALIDATION.md` |
 | 内核 | `5.10.0-136.108.0.188.31.oe2203sp1.bclinux.aarch64` | 现场交接记录；仓库文档记录为 openEuler 5.10 |
 | 系统 | openEuler 5.10 | `docs/M1-PROFILES.md` |
@@ -44,7 +44,7 @@
 | 回归验证批次 | `2026-11-26b` | 修复失败路径 manifest 状态之前的成功路径回归 |
 | 运行包 | `dist/cann-ebpf-m1-runtime-linux-arm64.tar.gz`；SHA256 `b30b5b911057d601d1192c5936985da9c18bbe6e7ce31849ed20e3ad8394a265` | 最终二进制 + configs/profiles/schema/scripts |
 | 最终证据包 | `dist/m1-final-evidence-20261126.tar.gz`；SHA256 `5081a35218bae32b3ddb692c54d372010e1811eafe6dacfd240def1f0c341463` | 最终件 8 worker 30 秒原始输出 |
-| 最终证据目录 | `/root/cann-ebpf/m1-final-20261126/runs/ebpf-all-workers-30s` | 见第 4 节 |
+| 最终证据目录 | `/opt/cann-ebpf/m1-final-20261126/runs/ebpf-all-workers-30s` | 见第 4 节 |
 | 回归证据包 | `dist/m1-evidence-20261126.tar.gz`；SHA256 `1dc081db57ecacbbe3e7eada6afe1f605c81f20700db8df3f120da1f647a9d1a` | 单 PID、2 秒和 tracefs 回归 |
 
 PID 只用于本次基线复核。profile 不写死 PID，服务重启后必须重新按 `comm`、`cmdline`、`maps` 和容器特征发现目标。
@@ -168,8 +168,8 @@ PID 只用于本次基线复核。profile 不写死 PID，服务重启后必须�
 
 | 对象 | 值 |
 |---|---|
-| 最终服务器证据目录 | `/root/cann-ebpf/m1-final-20261126/runs/ebpf-all-workers-30s` |
-| 回归服务器证据目录 | `/root/cann-ebpf/m1-20261126b/runs/` |
+| 最终服务器证据目录 | `/opt/cann-ebpf/m1-final-20261126/runs/ebpf-all-workers-30s` |
+| 回归服务器证据目录 | `/opt/cann-ebpf/m1-20261126b/runs/` |
 | 回归运行目录 | `ebpf-1452-2s`、`ebpf-all-workers-2s`、`ebpf-all-workers-30s`、`tracefs-1452-sync-10s` |
 | 最终证据包 | `dist/m1-final-evidence-20261126.tar.gz` |
 | 最终证据包 SHA256 | `5081a35218bae32b3ddb692c54d372010e1811eafe6dacfd240def1f0c341463` |
@@ -184,7 +184,7 @@ PID 只用于本次基线复核。profile 不写死 PID，服务重启后必须�
 以下命令用于复现最终件结果；执行前必须确认 PID 仍匹配 profile，并保留原始证据目录，不得覆盖或改写已有运行。
 
 ```bash
-cd /root/cann-ebpf/m1-final-20261126
+cd /opt/cann-ebpf/m1-final-20261126
 
 ./cann-ebpf-linux-arm64 validate --config profiles/vllm-ascend.yaml
 ./cann-ebpf-linux-arm64 validate --config profiles/orinfer.yaml
@@ -196,7 +196,7 @@ PIDS=$(ps -eo pid=,comm= | awk '$2=="VLLM::Worker_TP"{print $1}' | paste -sd, -)
   --profile vllm-ascend \
   --profiles-dir profiles \
   --duration 30s \
-  --output /root/cann-ebpf/m1-final-20261126/runs/ebpf-all-workers-30s-replay
+  --output /opt/cann-ebpf/m1-final-20261126/runs/ebpf-all-workers-30s-replay
 
 # tracefs 后备路径（可选）
 ./cann-ebpf-linux-arm64 attach-tracefs \
@@ -205,7 +205,7 @@ PIDS=$(ps -eo pid=,comm= | awk '$2=="VLLM::Worker_TP"{print $1}' | paste -sd, -)
   --profiles-dir profiles \
   --only sync \
   --duration 10s \
-  --output /root/cann-ebpf/m1-final-20261126/runs/tracefs-sync-10s
+  --output /opt/cann-ebpf/m1-final-20261126/runs/tracefs-sync-10s
 ```
 
 采集前后检查 `/health`，具体地址使用现场端口；验收值必须是 HTTP 200。结束后检查清理：
@@ -266,8 +266,8 @@ Remove-Item Env:GOOS, Env:GOARCH, Env:CGO_ENABLED
 构建后应在目标机确认架构：
 
 ```bash
-file /root/cann-ebpf/cann-ebpf-linux-arm64
-/root/cann-ebpf/cann-ebpf-linux-arm64 version
+file /opt/cann-ebpf/cann-ebpf-linux-arm64
+/opt/cann-ebpf/cann-ebpf-linux-arm64 version
 ```
 
 ### 6.2 CLI 子命令
@@ -315,9 +315,9 @@ file /root/cann-ebpf/cann-ebpf-linux-arm64
 - tracefs 单 PID 1452 使用 `--only sync` 采集 10 秒得到 199 spans；
 - `vllm-ds4-8905.service` 全程 active，采集前后 `/health` 均为 HTTP 200；
 - 现场检查 `cann_` 在 `uprobe_events` 中无残留；
-- 最终件服务器证据目录为 `/root/cann-ebpf/m1-final-20261126/runs/ebpf-all-workers-30s`；
+- 最终件服务器证据目录为 `/opt/cann-ebpf/m1-final-20261126/runs/ebpf-all-workers-30s`；
 - 最终证据包为 `dist/m1-final-evidence-20261126.tar.gz`，SHA256 为 `5081a35218bae32b3ddb692c54d372010e1811eafe6dacfd240def1f0c341463`；
-- 回归证据目录为 `/root/cann-ebpf/m1-20261126b/runs/{ebpf-1452-2s,ebpf-all-workers-2s,ebpf-all-workers-30s,tracefs-1452-sync-10s}`，回归证据包 SHA256 为 `1dc081db57ecacbbe3e7eada6afe1f605c81f20700db8df3f120da1f647a9d1a`。
+- 回归证据目录为 `/opt/cann-ebpf/m1-20261126b/runs/{ebpf-1452-2s,ebpf-all-workers-2s,ebpf-all-workers-30s,tracefs-1452-sync-10s}`，回归证据包 SHA256 为 `1dc081db57ecacbbe3e7eada6afe1f605c81f20700db8df3f120da1f647a9d1a`。
 
 必须同时保留的边界：M1 只有 host 侧 8 个核心探针，缺少上述 HCCL 函数及 memory/submit/event 等完整程序；没有请求级归因；没有 msPTI/设备侧；Orinfer 未运行未验证。不能用 M1 的结果替代 M4，也不能把 host span 解释成设备 kernel 执行时间。
 

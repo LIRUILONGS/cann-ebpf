@@ -41,6 +41,6 @@
 
 ## 5. 证据
 
-- CSV：`/root/cann-ebpf/m2-test-20261126T151851Z/runs/overhead-v41-gate/overhead.csv`
+- CSV：`/opt/cann-ebpf/m2-test-20261126T151851Z/runs/overhead-v41-gate/overhead.csv`
 - 汇总：`.../overhead-v41-gate/client_gate_summary.md` / `.json`
 - 每轮目录：`.../overhead-v41-gate/{off-1,off-2,on-1,on-2}-*`

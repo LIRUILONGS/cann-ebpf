@@ -115,7 +115,7 @@ batch span 本身不是 CANN span，不会出现在 `spans.jsonl` 中；输出�
 2026-11-26 使用最终 `cann-ebpf 0.5.0-m5` 二进制重跑：
 
 ```text
-/root/cann-ebpf/trace-cpy-20261126-m5/runs/context-test-m5-final-20261126T021000Z
+/opt/cann-ebpf/trace-cpy-20261126-m5/runs/context-test-m5-final-20261126T021000Z
 ```
 
 结果：189 spans、17 batch spans、172 thread fallback、17 traced spans、1 个唯一 trace、

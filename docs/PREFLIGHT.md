@@ -1,7 +1,7 @@
 # `preflight` 环境检查
 
 日期：2026-11-26
-状态：代码 + 单测完成，已在 `bms-84865758` 验证（15 pass / 0 warn / 0 fail）。
+状态：代码 + 单测完成，已在 `target-host` 验证（15 pass / 0 warn / 0 fail）。
 
 ## 1. 用途
 
@@ -48,7 +48,7 @@ attach 前只读检查内核/权限/追踪点/npu-smi 是否满足条件，失�
 ## 5. 上机结果（V4）
 
 ```text
-preflight host=bms-84865758 kernel=5.10.0-136.108.0.188.31.oe2203sp1.bclinux.aarch64 arch=arm64 pass=15 warn=0 fail=0
+preflight host=target-host kernel=5.10.0-136.108.0.188.31.oe2203sp1.bclinux.aarch64 arch=arm64 pass=15 warn=0 fail=0
 PASS privilege / btf / tracefs / uprobe_events
 PASS tracepoint:sched/sched_switch id=266
 PASS tracepoint:sched/sched_process_exit id=263
@@ -59,7 +59,7 @@ PASS npu-smi=/usr/local/sbin/npu-smi, cgroup v1
 RC=0
 ```
 
-JSON 输出已保存到 `/root/cann-ebpf/m2-test-20261126T151851Z/preflight.json`。
+JSON 输出已保存到 `/opt/cann-ebpf/m2-test-20261126T151851Z/preflight.json`。
 
 ## 6. 边界
 

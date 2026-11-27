@@ -39,7 +39,7 @@ sh /tmp/cann-ebpf-src/deploy/b1/rollback-collector.sh --apply
 ```bash
 systemctl stop orinfer-v41.service
 docker start orinfer-cann920
-docker exec -u root orinfer-cann920 sh -c 'grep -q bms-84865758 /etc/hosts || echo "127.0.0.1 bms-84865758" >> /etc/hosts'
+docker exec -u root orinfer-cann920 sh -c 'grep -q target-host /etc/hosts || echo "127.0.0.1 target-host" >> /etc/hosts'
 docker cp /opt/cann-ebpf/collectors/9.2/libcannmspti.so \
   orinfer-cann920:/tmp/b4/libcannmspti92_fixed.so
 # 在容器内执行 hccl_allreduce.py（脚本已含 set_device）；env:

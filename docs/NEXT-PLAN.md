@@ -1,7 +1,7 @@
 # cann-ebpf 下一步方案（M2 之后）
 
 日期：2026-11-26
-基于：M2 已在 `bms-84865758` 完成 V4 与合成锁竞争验证（见 `docs/M2-VALIDATION.md`）。
+基于：M2 已在 `target-host` 完成 V4 与合成锁竞争验证（见 `docs/M2-VALIDATION.md`）。
 
 ## 0. 结论先行
 

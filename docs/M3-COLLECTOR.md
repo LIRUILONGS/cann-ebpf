@@ -86,7 +86,7 @@ cd build
 `is_active=0`。
 
 本次 A2 构建产物已封存为 `dist/cann-mspti-a2-20261126/`，服务器副本在
-`/root/cann-ebpf/cann-mspti-a2-20261126/`；`SHA256SUMS.txt` 覆盖 `libcannmspti.so`、
+`/opt/cann-ebpf/cann-mspti-a2-20261126/`；`SHA256SUMS.txt` 覆盖 `libcannmspti.so`、
 `cann-mspti-selftest` 和 `synthetic_acl`。
 
 ### 3.3 `pidmap.json`（宿主侧）

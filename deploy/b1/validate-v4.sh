@@ -6,9 +6,9 @@ set -eu
 PREFIX=${PREFIX:-/opt/cann-ebpf}
 COLLECTOR=${COLLECTOR:-$PREFIX/collectors/9.0.1/libcannmspti.so}
 ENV_FILE=${ENV_FILE:-/etc/vllm-ds4.env}
-PROFILES=${PROFILES:-/root/cann-ebpf/m2-test-20261126T151851Z/profiles}
-BIN=${BIN:-/root/cann-ebpf/m2-test-20261126T151851Z/cann-ebpf-m3-final}
-OUTROOT=${OUTROOT:-/root/cann-ebpf/m2-test-20261126T151851Z/runs/b1-real}
+PROFILES=${PROFILES:-/opt/cann-ebpf/profiles}
+BIN=${BIN:-/opt/cann-ebpf/bin/cann-ebpf}
+OUTROOT=${OUTROOT:-/var/log/cann-ebpf/runs/b1-real}
 MERGE=${MERGE:-/opt/cann-ebpf/b1_merge_device.py}
 DURATION=${DURATION:-30s}
 MODE=dry-run

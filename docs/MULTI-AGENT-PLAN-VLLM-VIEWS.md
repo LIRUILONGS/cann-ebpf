@@ -86,8 +86,8 @@ type ReportViewsV2 struct {
   "engine": "vllm-ascend",
   "model": "deepseek-v4.1",
   "runs": [
-    {"label": "c1", "dir": "/root/cann-ebpf/runs/vllm-c1", "concurrency": 1, "warmup_s": 10, "duration_s": 60},
-    {"label": "c4", "dir": "/root/cann-ebpf/runs/vllm-c4", "concurrency": 4, "warmup_s": 10, "duration_s": 60}
+    {"label": "c1", "dir": "/opt/cann-ebpf/runs/vllm-c1", "concurrency": 1, "warmup_s": 10, "duration_s": 60},
+    {"label": "c4", "dir": "/opt/cann-ebpf/runs/vllm-c4", "concurrency": 4, "warmup_s": 10, "duration_s": 60}
   ]
 }
 ```

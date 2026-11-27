@@ -10,7 +10,7 @@
 
 | 项 | 值 |
 |---|---|
-| 主机 | `bms-84865758` |
+| 主机 | `target-host` |
 | 架构 | `aarch64` |
 | 目标服务 | `vllm-ds4-8905.service` |
 | 服务状态 | `active`，`/health` 返回 HTTP 200 |
@@ -22,7 +22,7 @@
 ## 执行命令
 
 ```bash
-cd /root/cann-ebpf
+cd /opt/cann-ebpf
 ./dist/cann-ebpf-linux-arm64 validate --config profiles/vllm-ascend.yaml
 ./dist/cann-ebpf-linux-arm64 discover \
   --profile vllm-ascend \

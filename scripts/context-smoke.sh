@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-ROOT=${ROOT:-/root/cann-ebpf/m4-20261126}
+ROOT=${ROOT:-/opt/cann-ebpf/m4-20261126}
 SOCKET=${CONTEXT_SOCKET:-/tmp/cann-ebpf-smoke.sock}
 HEALTH=${VLLM_HEALTH:-http://127.0.0.1:8905/health}
 STAMP=$(date -u +%Y%m%dT%H%M%SZ)

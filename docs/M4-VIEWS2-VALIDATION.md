@@ -21,7 +21,7 @@
 服务器 run：
 
 ```text
-/root/cann-ebpf/runs/views2-attach-load-20261127T072157Z
+/opt/cann-ebpf/runs/views2-attach-load-20261127T072157Z
 ```
 
 本地只读副本：
@@ -71,7 +71,7 @@ attach PNG   18C003FA2B55769108FEE61E2397151DACE9D81E9257AC15FA7F10CEFC191825
 服务器目录：
 
 ```text
-/root/cann-ebpf/runs/views2-sweep-20261127/
+/opt/cann-ebpf/runs/views2-sweep-20261127/
   c1/ c2/ c4/ c8/ c16/ c32/
 ```
 

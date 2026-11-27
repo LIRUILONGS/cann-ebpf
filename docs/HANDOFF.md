@@ -20,12 +20,12 @@
 | 二进制大小 | `14,730,758` bytes |
 | 二进制 SHA-256 | `1150b2dbb955a936a681f1dd7fff24b9b8677f6faef506afe4a2b7580fbe882f` |
 | collector A2 产物 | `dist/cann-mspti-a2-20261126/`（`libcannmspti.so`、`cann-mspti-selftest`、`synthetic_acl`、`SHA256SUMS.txt`） |
-| collector A2 服务器副本 | `/root/cann-ebpf/cann-mspti-a2-20261126/` |
+| collector A2 服务器副本 | `/opt/cann-ebpf/cann-mspti-a2-20261126/` |
 | 历史已验证二进制 | `dist/cann-ebpf-linux-arm64-batch`（`0.5.0-m5`，上表 SHA 已替换为 M2 构建，旧包仍保留在 dist/） |
-| 服务器验证副本（历史） | `/root/cann-ebpf`，V4 服务器 `bms-84865758` |
-| 服务器 profiles | `/root/cann-ebpf/profiles` |
+| 服务器验证副本（历史） | `/opt/cann-ebpf`，V4 服务器 `target-host` |
+| 服务器 profiles | `/opt/cann-ebpf/profiles` |
 
-说明：服务器上的 `/root/cann-ebpf` 是历史验证副本，不一定是最终源码仓库；以本地 Git 仓库和对应提交为准。
+说明：服务器上的 `/opt/cann-ebpf` 是历史验证副本，不一定是最终源码仓库；以本地 Git 仓库和对应提交为准。
 
 ## 2. 项目定位
 
@@ -386,7 +386,7 @@ span_id, seq
 
 | 项 | 值 |
 |---|---|
-| 主机 | `bms-84865758` |
+| 主机 | `target-host` |
 | 架构 | `aarch64` |
 | 内核 | `5.10.0-136.108.0.188.31.oe2203sp1.bclinux.aarch64` |
 | 目标服务 | `vllm-ds4-8905.service` |
@@ -447,7 +447,7 @@ span_id, seq
 - 主 uprobe collection 与 blocking collection 分离加载，blocking 失败不影响 host span；
 - `sched_process_exit` 清理 tid 状态，entry 清陈旧 since，只测最外层 span。
 
-验收结果（2026-11-26，`bms-84865758`）：
+验收结果（2026-11-26，`target-host`）：
 
 - 合成锁竞争：off-CPU 99.7%、futex 99.9%，`host_lock_contention` confidence 1.00；
 - V4 10 秒：`attached=4 failed=0`、7,561 spans、无效样本 0、`/health` 200/200、service active/active、

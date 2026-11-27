@@ -1,7 +1,7 @@
 # E 层：npu-smi 硬件指标
 
 日期：2026-11-26
-状态：代码 + 单测完成，已在 `bms-84865758` V4 上批量验证。
+状态：代码 + 单测完成，已在 `target-host` V4 上批量验证。
 
 ## 1. 定位
 
@@ -88,7 +88,7 @@ Markdown 增加“硬件层（npu-smi，粗粒度）”表格，并明确写“�
 | health/service | 200→200 / active→active（全部窗口） |
 | diagnose | 显示 8 设备表：HBM free 6.3%、AICore 峰值 46%、功耗/温度；无 `hbm_pressure`（6.3% > 5%） |
 
-证据目录：`/root/cann-ebpf/m2-test-20261126T151851Z/runs/m3-hw-*/`。
+证据目录：`/opt/cann-ebpf/m2-test-20261126T151851Z/runs/m3-hw-*/`。
 
 ## 6. 边界
 

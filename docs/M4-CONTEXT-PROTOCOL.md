@@ -179,7 +179,7 @@ time namespace，但本版本没有在所有运行环境中证明这一点。真
 最终证据目录：
 
 ```text
-/root/cann-ebpf/m4-20261126/runs/context-test-final-20261126
+/opt/cann-ebpf/m4-20261126/runs/context-test-final-20261126
 ```
 
 结果：

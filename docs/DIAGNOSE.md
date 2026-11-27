@@ -173,8 +173,8 @@ go test ./internal/diagnose ./cmd/cann-ebpf
 服务器只读验证（不需要 attach）：
 
 ```bash
-./cann-ebpf-linux-arm64-m2 diagnose --input /root/cann-ebpf/runs/<已有 evidence> 
-./cann-ebpf-linux-arm64-m2 diagnose --input /root/cann-ebpf/runs/<...> --json --out /tmp/diagnose.json
+./cann-ebpf-linux-arm64-m2 diagnose --input /opt/cann-ebpf/runs/<已有 evidence> 
+./cann-ebpf-linux-arm64-m2 diagnose --input /opt/cann-ebpf/runs/<...> --json --out /tmp/diagnose.json
 ```
 
 本机已用 M4 交付包中的真实 evidence 验证过同样的命令：
@@ -184,11 +184,11 @@ go run ./cmd/cann-ebpf diagnose --input dist/cann-ebpf-m4-delivery-20261126/evid
 go run ./cmd/cann-ebpf diagnose --input dist/cann-ebpf-m4-delivery-20261126/evidence/runs/context-test-final-20261126 --json --out diag-ctx.json
 ```
 
-服务器（`bms-84865758`）上已用同一个二进制验证：
+服务器（`target-host`）上已用同一个二进制验证：
 
 ```bash
-./cann-ebpf-linux-arm64-m2 diagnose --input /root/cann-ebpf/m4-20261126/runs/ebpf-auto-10s-final-20261126 --out diag-m4.md
-./cann-ebpf-linux-arm64-m2 diagnose --input /root/cann-ebpf/m2-test-20261126T151851Z/runs/m2-blocking-10s-20261126T073824Z --pid 1452 --last 2s
+./cann-ebpf-linux-arm64-m2 diagnose --input /opt/cann-ebpf/m4-20261126/runs/ebpf-auto-10s-final-20261126 --out diag-m4.md
+./cann-ebpf-linux-arm64-m2 diagnose --input /opt/cann-ebpf/m2-test-20261126T151851Z/runs/m2-blocking-10s-20261126T073824Z --pid 1452 --last 2s
 ```
 
 结果：历史 6,991-span run 与 164-span batch run 都是 `status=ok`；最新 M2 run 上

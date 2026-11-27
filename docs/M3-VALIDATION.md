@@ -1,7 +1,7 @@
 # M3 设备时间线上机验证记录
 
 日期：2026-11-26  
-主机：`bms-84865758`（`36.137.90.82`）  
+主机：`target-host`（`target-ip`）  
 容器：`deepseek-v4-flash-8905`（CANN 9.0.1）  
 目标：验证 in-process msPTI collector、容器 pid/tid 映射、host span + device.jsonl join，以及慢 Sync 匹配率。
 
@@ -18,13 +18,13 @@
 
 | 项 | 值 |
 |---|---|
-| 宿主 | `bms-84865758` |
+| 宿主 | `target-host` |
 | 容器 | `deepseek-v4-flash-8905` |
 | CANN | `9.0.1` |
 | 宿主 eBPF profile | `cann-generic` |
 | 合成工作负载 | `synthetic_acl`，每轮 `aclnnAdd` + `aclrtSynchronizeStream` + D2H copy |
 | collector 路径（容器） | `/tmp/cann-mspti-src-a2/build`（A2 验证）；final7 原路径为 `/tmp/cann-mspti-src/m3/mspti_collector/build` |
-| 证据目录 | `/root/cann-ebpf/m3-test-20261126/synthetic-join-final7/ebpf` |
+| 证据目录 | `/opt/cann-ebpf/m3-test-20261126/synthetic-join-final7/ebpf` |
 
 ## 3. 关键结果
 

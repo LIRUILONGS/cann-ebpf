@@ -4,7 +4,7 @@
 
 ## 1. 方法
 
-- 主机 `bms-84865758`，V4 生产服务，`--hardware off`；
+- 主机 `target-host`，V4 生产服务，`--hardware off`；
 - 每轮 60 秒采集，`--blocking off` 与 `--blocking on` 各 2 轮；
 - 业务吞吐从 vLLM 自身 `/metrics` 读取（`request_success_total`、`prompt_tokens_total`、
   e2e/TTFT 的 count/sum），窗口严格取 `capture_start` → `capture_stop`；
@@ -64,7 +64,7 @@ PID 过滤（37×库数 而不是 37×进程数）。
 - 采集窗口、health、service、残留均正常；
 - 进程退出清理约 40 秒，是运维体验问题，不是业务影响。
 
-证据：`/root/cann-ebpf/m2-test-20261126T151851Z/overhead-20261126T093729Z.csv` 及 `runs/overhead-*/`。
+证据：`/opt/cann-ebpf/m2-test-20261126T151851Z/overhead-20261126T093729Z.csv` 及 `runs/overhead-*/`。
 
 ## 6. 固定负载工具（A4）
 

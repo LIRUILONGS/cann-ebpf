@@ -4,7 +4,7 @@
 # overwritten.
 set -u
 
-ROOT=${ROOT:-/root/cann-ebpf/m4-20261126}
+ROOT=${ROOT:-/opt/cann-ebpf/m4-20261126}
 DURATION=${DURATION:-5s}
 HEALTH=${VLLM_HEALTH:-http://127.0.0.1:8905/health}
 STAMP=$(date -u +%Y%m%dT%H%M%SZ)

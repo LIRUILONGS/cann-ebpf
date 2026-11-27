@@ -478,7 +478,7 @@ JSONL 每行一个 span：
   "schema": "cann.span.v1",
   "run_id": "20261125-orinfer-01",
   "profile": "orinfer",
-  "host": "bms-84865758",
+  "host": "target-host",
   "pid": 1691816,
   "tid": 12345,
   "dev_id": 0,
@@ -528,7 +528,7 @@ JSONL 每行一个 span：
   "tool_version": "cann-ebpf/0.1.0",
   "config_sha256": "...",
   "profile": "orinfer",
-  "host": "bms-84865758",
+  "host": "target-host",
   "kernel": "5.10.0-136...",
   "cann_version": "9.2.0",
   "target_pids": [1691816],
@@ -828,7 +828,7 @@ watchdog：
 
 | 项 | 值 |
 |---|---|
-| 主机 | `bms-84865758`，openEuler 5.10，aarch64 |
+| 主机 | `target-host`，openEuler 5.10，aarch64 |
 | NPU | 8 × 910B2，每卡 64GB HBM |
 | Orinfer | 当前未运行；历史 PID `1691816` 已不存在；等待单独授权窗口 |
 | V4 / vLLM-Ascend | `vllm-ds4-8905.service` active；8 Worker_TP + frontend + EngineCore |

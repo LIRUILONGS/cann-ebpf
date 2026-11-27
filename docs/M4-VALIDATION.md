@@ -28,7 +28,7 @@
 
 | 项 | 值 | 来源 |
 |---|---|---|
-| 主机 | `bms-84865758` | `delivery-meta/uname.txt` |
+| 主机 | `target-host` | `delivery-meta/uname.txt` |
 | 架构 | `aarch64` | 同上 |
 | 内核 | `5.10.0-136.108.0.188.31.oe2203sp1.bclinux.aarch64` | 同上 |
 | 目标服务 | `vllm-ds4-8905.service` | `service-state.txt` |
@@ -56,7 +56,7 @@ version cann-ebpf 0.4.0-m4 linux/arm64
 服务器副本：
 
 ```text
-/root/cann-ebpf/m4-20261126/cann-ebpf-linux-arm64
+/opt/cann-ebpf/m4-20261126/cann-ebpf-linux-arm64
 sha256  cf441013b88e3545b986eea16fa615be4fd0ca3cb8f4f694577b832812095f03
 ```
 
@@ -125,7 +125,7 @@ Discovery 只读 `/proc`、目标 root 下的库和 ELF 符号，不 attach、�
 命令：
 
 ```bash
-OUT=/root/cann-ebpf/m4-20261126/runs/ebpf-auto-10s-final-20261126 \
+OUT=/opt/cann-ebpf/m4-20261126/runs/ebpf-auto-10s-final-20261126 \
 DURATION=10s \
 sh scripts/server_auto_capture.sh
 ```
@@ -133,7 +133,7 @@ sh scripts/server_auto_capture.sh
 证据目录：
 
 ```text
-/root/cann-ebpf/m4-20261126/runs/ebpf-auto-10s-final-20261126
+/opt/cann-ebpf/m4-20261126/runs/ebpf-auto-10s-final-20261126
 ```
 
 关键结果：
@@ -195,14 +195,14 @@ frontend `4188787` 和 EngineCore `4192024` 在该 10 秒窗口没有产生 span
 命令：
 
 ```bash
-OUT=/root/cann-ebpf/m4-20261126/runs/context-test-final-20261126 \
+OUT=/opt/cann-ebpf/m4-20261126/runs/context-test-final-20261126 \
 sh scripts/context-smoke.sh
 ```
 
 证据目录：
 
 ```text
-/root/cann-ebpf/m4-20261126/runs/context-test-final-20261126
+/opt/cann-ebpf/m4-20261126/runs/context-test-final-20261126
 ```
 
 该脚本自动选择第一个 `VLLM::Worker_TP`，读取目标 UID/GID，以该 UID/GID 运行 Python 客户端，
@@ -266,7 +266,7 @@ delivery-meta/
 
 ## 9. 复现命令
 
-以下命令在服务器证据根目录 `/root/cann-ebpf/m4-20261126` 下执行。每次运行必须使用新的输出
+以下命令在服务器证据根目录 `/opt/cann-ebpf/m4-20261126` 下执行。每次运行必须使用新的输出
 目录；脚本拒绝覆盖已有证据。
 
 校验：
@@ -289,7 +289,7 @@ delivery-meta/
 10 秒自动采集：
 
 ```bash
-OUT="/root/cann-ebpf/m4-20261126/runs/ebpf-auto-10s-$(date -u +%Y%m%dT%H%M%SZ)" \
+OUT="/opt/cann-ebpf/m4-20261126/runs/ebpf-auto-10s-$(date -u +%Y%m%dT%H%M%SZ)" \
 DURATION=10s \
 sh scripts/server_auto_capture.sh
 ```
@@ -297,7 +297,7 @@ sh scripts/server_auto_capture.sh
 上下文协议 smoke：
 
 ```bash
-OUT="/root/cann-ebpf/m4-20261126/runs/context-test-$(date -u +%Y%m%dT%H%M%SZ)" \
+OUT="/opt/cann-ebpf/m4-20261126/runs/context-test-$(date -u +%Y%m%dT%H%M%SZ)" \
 sh scripts/context-smoke.sh
 ```
 
