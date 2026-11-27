@@ -131,6 +131,21 @@ func hardwareSamplesToPoints(source string, samples []hardware.Sample) []Point {
 			point.Device = device
 			points = append(points, point)
 		}
+		addCounter := func(name string, value *int64, labels map[string]string) {
+			if value == nil {
+				return
+			}
+			point := Counter(name, "count", float64(*value), labels)
+			point.Source = source
+			point.Device = device
+			points = append(points, point)
+		}
+		addIntGauge := func(name string, value *int64, labels map[string]string) {
+			if value == nil {
+				return
+			}
+			addGauge(name, "count", Float(float64(*value)), labels)
+		}
 		if sample.AICorePct != nil {
 			ratio := *sample.AICorePct / 100
 			addGauge("npu_aicore_utilization_ratio", "ratio", &ratio, baseLabels)
@@ -163,6 +178,40 @@ func hardwareSamplesToPoints(source string, samples []hardware.Sample) []Point {
 			value := 1.0
 			addGauge("npu_health", "count", &value, labels)
 		}
+
+		// --- P0 extended NPU metrics (frequency / ECC / voltage / PCIe) ---
+		// Units stay aligned with the existing catalog: ratios are 0..1,
+		// clocks are MHz, voltage is volts, counters use "count".
+		addGauge("npu_aicore_clock_mhz", "mhz", sample.AICoreClockMHz, baseLabels)
+		addGauge("npu_aicore_clock_max_mhz", "mhz", sample.AICoreClockMaxMHz, baseLabels)
+		addGauge("npu_hbm_clock_mhz", "mhz", sample.HBMClockMHz, baseLabels)
+		if sample.HBMBandwidthUtilPct != nil {
+			ratio := *sample.HBMBandwidthUtilPct / 100
+			addGauge("npu_hbm_bandwidth_util_ratio", "ratio", &ratio, baseLabels)
+		}
+		addGauge("npu_voltage_volts", "volts", sample.VoltageV, baseLabels)
+
+		addIntGauge("npu_hbm_ecc_single_bit_errors", sample.ECCSingleBitErrors, baseLabels)
+		addIntGauge("npu_hbm_ecc_double_bit_errors", sample.ECCDoubleBitErrors, baseLabels)
+		addCounter("npu_hbm_ecc_single_bit_total", sample.ECCSingleBitTotal, baseLabels)
+		addCounter("npu_hbm_ecc_double_bit_total", sample.ECCDoubleBitTotal, baseLabels)
+		addIntGauge("npu_hbm_ecc_single_bit_isolated_pages", sample.ECCSingleBitIsolatedPages, baseLabels)
+		addIntGauge("npu_hbm_ecc_double_bit_isolated_pages", sample.ECCDoubleBitIsolatedPages, baseLabels)
+		addIntGauge("npu_hbm_ecc_single_bit_next_isolated_pages", sample.ECCSingleBitNextIsolatedPages, baseLabels)
+		addIntGauge("npu_hbm_ecc_double_bit_next_isolated_pages", sample.ECCDoubleBitNextIsolatedPages, baseLabels)
+		if sample.ECCEnabled != nil {
+			enabled := 0.0
+			if *sample.ECCEnabled {
+				enabled = 1
+			}
+			addGauge("npu_hbm_ecc_enabled", "count", &enabled, baseLabels)
+		}
+
+		addCounter("npu_pcie_tx_errors_total", sample.PCIeTXErrors, baseLabels)
+		addCounter("npu_pcie_rx_errors_total", sample.PCIeRXErrors, baseLabels)
+		addCounter("npu_pcie_lcrc_errors_total", sample.PCIeLCRCErrors, baseLabels)
+		addCounter("npu_pcie_ecrc_errors_total", sample.PCIeECRCErrors, baseLabels)
+		addCounter("npu_pcie_retry_total", sample.PCIeRetry, baseLabels)
 	}
 	return points
 }

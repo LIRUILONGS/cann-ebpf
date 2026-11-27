@@ -56,6 +56,7 @@ type sampleConfig struct {
 	Duration   time.Duration
 	DCMI       bool
 	NPUSMI     bool
+	NPUSMIExt  bool
 	System     bool
 	PIDs       []int
 	Cgroups    []string
@@ -124,6 +125,7 @@ func parseSampleArgs(args []string) (*sampleConfig, error) {
 	duration := fs.Duration("duration", 0, "collection duration; 0 means until SIGINT/SIGTERM")
 	dcmi := fs.Bool("dcmi", false, "sample the dcmi_probe backend")
 	npuSMI := fs.Bool("npu-smi", false, "sample npu-smi info (minimum interval 5s)")
+	npuSMIExt := fs.Bool("npu-smi-ext", false, "sample extended npu-smi fields: clocks, HBM bandwidth util, ECC, voltage, PCIe errors (30s interval)")
 	system := fs.Bool("system", false, "sample host metrics from procfs and sysfs")
 	var pids repeatInts
 	fs.Var(&pids, "pid", "process id to sample from /proc (repeatable)")
@@ -166,7 +168,7 @@ func parseSampleArgs(args []string) (*sampleConfig, error) {
 	}
 	return &sampleConfig{
 		Out: *out, Interval: *interval, Duration: *duration,
-		DCMI: *dcmi, NPUSMI: *npuSMI, System: *system, PIDs: append([]int(nil), pids...),
+		DCMI: *dcmi, NPUSMI: *npuSMI, NPUSMIExt: *npuSMIExt, System: *system, PIDs: append([]int(nil), pids...),
 		Cgroups: append([]string(nil), cgroups...), Prometheus: specs,
 		Include: append([]string(nil), include...), JSON: *jsonOut,
 	}, nil
@@ -200,7 +202,7 @@ func parsePrometheusSpec(value string) (prometheusSpec, error) {
 }
 
 func buildSampleSources(config *sampleConfig) ([]metrics.Source, error) {
-	explicit := config.DCMI || config.NPUSMI || config.System || len(config.PIDs) > 0 || len(config.Cgroups) > 0 || len(config.Prometheus) > 0
+	explicit := config.DCMI || config.NPUSMI || config.NPUSMIExt || config.System || len(config.PIDs) > 0 || len(config.Cgroups) > 0 || len(config.Prometheus) > 0
 	useDCMI := config.DCMI
 	useNPUSMI := config.NPUSMI
 	probe := ""
@@ -233,6 +235,14 @@ func buildSampleSources(config *sampleConfig) ([]metrics.Source, error) {
 	}
 	if useNPUSMI {
 		sources = append(sources, metrics.NewNPUSmiSource("npu-smi", config.Interval, 5*time.Second))
+	}
+	if config.NPUSMIExt {
+		if _, err := exec.LookPath("npu-smi"); err != nil {
+			return nil, fmt.Errorf("npu-smi not found in PATH: %w", err)
+		}
+		// Extended fields require several per-device -t queries; 30s keeps the
+		// 10s/8-card overhead from dominating the sampling window.
+		sources = append(sources, metrics.NewNPUSmiExtendedSource("npu-smi", nil, nil, 30*time.Second, 60*time.Second))
 	}
 	if len(config.PIDs) > 0 {
 		sources = append(sources, metrics.NewProcSource(config.PIDs, "/proc", config.Interval, 2*time.Second))

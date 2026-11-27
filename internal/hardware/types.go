@@ -25,10 +25,52 @@ type Sample struct {
 	PowerW        *float64 `json:"power_w,omitempty"`
 	TempC         *float64 `json:"temp_c,omitempty"`
 	Source        string   `json:"source"`
+
+	// --- P0 extended NPU metrics (parsed from `npu-smi info -t <type>`) ---
+	//
+	// All extra fields are pointers with omitempty so that an older parser
+	// (single `npu-smi info` table) still emits a valid cann.hardware.v1
+	// record and old JSONL files remain readable.
+
+	// Frequency. AICoreClockMHz is the current AICore clock (`-t common`,
+	// `Aicore curFreq`); AICoreClockMaxMHz is the rated/max AICore clock
+	// (`-t common`, `Aicore Freq`); HBMClockMHz comes from `-t memory`.
+	AICoreClockMHz    *float64 `json:"aicore_clock_mhz,omitempty"`
+	AICoreClockMaxMHz *float64 `json:"aicore_clock_max_mhz,omitempty"`
+	HBMClockMHz       *float64 `json:"hbm_clock_mhz,omitempty"`
+
+	// HBM bandwidth is only available as a whole-card utilisation percentage;
+	// the driver does not expose absolute GB/s (see docs/HBM-CAPABILITY-PROBE.md).
+	HBMBandwidthUtilPct *float64 `json:"hbm_bandwidth_util_pct,omitempty"`
+
+	// HBM ECC. The "Errors" fields are the current window counters, "Total"
+	// are the aggregate (since clear/reboot) counters, and the isolated pages
+	// counters track pages retired after correction.
+	ECCSingleBitErrors            *int64 `json:"ecc_single_bit_errors,omitempty"`
+	ECCDoubleBitErrors            *int64 `json:"ecc_double_bit_errors,omitempty"`
+	ECCSingleBitTotal             *int64 `json:"ecc_single_bit_total,omitempty"`
+	ECCDoubleBitTotal             *int64 `json:"ecc_double_bit_total,omitempty"`
+	ECCSingleBitIsolatedPages     *int64 `json:"ecc_single_bit_isolated_pages,omitempty"`
+	ECCDoubleBitIsolatedPages     *int64 `json:"ecc_double_bit_isolated_pages,omitempty"`
+	ECCSingleBitNextIsolatedPages *int64 `json:"ecc_single_bit_next_isolated_pages,omitempty"`
+	ECCDoubleBitNextIsolatedPages *int64 `json:"ecc_double_bit_next_isolated_pages,omitempty"`
+	ECCEnabled                    *bool  `json:"ecc_enabled,omitempty"`
+
+	// Voltage is a single chip-level value (`-t volt`); no per-rail limits.
+	VoltageV *float64 `json:"voltage_v,omitempty"`
+
+	// PCIe error counters (`-t pcie-err`). There is no PCIe throughput in
+	// npu-smi, only these five cumulative error counts.
+	PCIeTXErrors   *int64 `json:"pcie_tx_errors_total,omitempty"`
+	PCIeRXErrors   *int64 `json:"pcie_rx_errors_total,omitempty"`
+	PCIeLCRCErrors *int64 `json:"pcie_lcrc_errors_total,omitempty"`
+	PCIeECRCErrors *int64 `json:"pcie_ecrc_errors_total,omitempty"`
+	PCIeRetry      *int64 `json:"pcie_retry_total,omitempty"`
 }
 
 func floatPtr(v float64) *float64 { return &v }
 func intPtr(v int64) *int64       { return &v }
+func boolPtr(v bool) *bool        { return &v }
 
 // HBMFreePct returns the free percentage when both used/total are known.
 func (s Sample) HBMFreePct() (float64, bool) {
