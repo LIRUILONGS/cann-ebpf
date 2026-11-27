@@ -562,14 +562,8 @@ const VIEWS = (DATA && DATA.views) ? DATA.views : {};
 const VIEWS_V2 = (DATA && DATA.views_v2) ? DATA.views_v2 : {};
 const VIEWS_V2_LABELS = [
   ['load_latency', '负载-延迟拐点'],
-  ['critical_path', '关键路径瀑布'],
-  ['summed_delay', 'Summed Delay vs Critical Path'],
-  ['slack_cdf', 'Slack CDF'],
   ['off_cpu', 'off-CPU ribbon'],
   ['operator_treemap', '算子 Treemap'],
-  ['roofline', 'Roofline'],
-  ['ab_diff', 'A/B 差分'],
-  ['change_point', '变化点 / 异常带'],
   ['service_topology', '服务拓扑']
 ];
 const METRICS = (DATA && DATA.metrics) ? DATA.metrics : null;

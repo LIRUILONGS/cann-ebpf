@@ -9,6 +9,7 @@
 | `v4-maintenance-window.sh` | 单次 V4 维护窗口脚本 | 实验；不用于生产 |
 | `V4-SINGLE-WINDOW-PLAN.md` | 维护窗口方案 | 实验 |
 | `VLLM-PROFILER-PATCH-PLAN.md` | profiler 补丁方案 | 实验 |
+| `report-views/` | 不可用报告视图代码（critical path / slack / roofline / A-B / change point） | 实验；已从生产 UI/构建移除 |
 
 生产可用范围见 `docs/PRODUCTION-SCOPE.md`：
 

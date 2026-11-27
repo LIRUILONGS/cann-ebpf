@@ -75,10 +75,6 @@ func buildReportViewsV2(input viewsV2BuildInput) ReportViewsV2 {
 
 	views.LoadLatency = buildLoadLatencyView(paths.sweep)
 
-	views.CriticalPath = BuildCriticalPath(input.spans, input.devices)
-	views.SummedDelay = BuildSummedDelay(views.CriticalPath)
-	views.SlackCDF = BuildSlackCDF(views.CriticalPath)
-
 	offCPUOptions := OffCPUOptions{
 		WindowStartNS: input.windowStartNS,
 		MaxRows:       input.opts.MaxSpanPoints,
@@ -86,46 +82,6 @@ func buildReportViewsV2(input viewsV2BuildInput) ReportViewsV2 {
 	}
 	views.OffCPU = BuildOffCPU(input.spans, offCPUOptions)
 	views.OperatorTreemap = BuildOperatorTreemap(input.spans, input.devices)
-
-	rooflineOptions := RooflineOptions{
-		PeakTFLOPS: input.opts.RooflinePeakTFLOPS,
-		PeakGBPS:   input.opts.RooflinePeakGBPS,
-		DType:      input.opts.RooflineDType,
-		Source:     "ops.jsonl",
-	}
-	if paths.ops == "" {
-		views.Roofline = BuildRoofline(nil, rooflineOptions)
-		views.Roofline.Status.Reason = "ops.jsonl not provided; per-op FLOPs/bytes evidence is required"
-	} else {
-		ops, err := loadRooflineOps(paths.ops)
-		if err != nil {
-			views.Roofline = RooflineData{
-				Status:     viewsV2Unavailable(fmt.Sprintf("read ops.jsonl: %v", err), "ops.jsonl"),
-				PeakTFLOPS: rooflineOptions.PeakTFLOPS,
-				PeakGBPS:   rooflineOptions.PeakGBPS,
-				DType:      rooflineOptions.DType,
-				Points:     []RooflinePoint{},
-			}
-		} else {
-			views.Roofline = BuildRoofline(ops, rooflineOptions)
-		}
-	}
-
-	views.ABDiff = buildABDiffView(input.opts)
-
-	events, eventErr := loadChangeEvents(paths.events, input.windowStartNS)
-	if input.metrics == nil {
-		views.ChangePoint = BuildChangePoint(nil, events, ChangePointOptions{})
-	} else {
-		views.ChangePoint = BuildChangePoint(input.metrics.Series, events, ChangePointOptions{})
-	}
-	if eventErr != nil {
-		views.ChangePoint.Status.Reason = joinViewReason(
-			views.ChangePoint.Status.Reason,
-			fmt.Sprintf("events.jsonl ignored: %v", eventErr),
-		)
-	}
-
 	views.ServiceTopology = buildTopologyView(paths.otel, input.spans, input.opts.TopologyRootService)
 	return views
 }
@@ -170,126 +126,6 @@ func buildLoadLatencyView(path string) LoadLatencyData {
 		}
 	}
 	return data
-}
-
-func buildABDiffView(opts Options) ABDiffData {
-	aPath := strings.TrimSpace(opts.ABAPath)
-	bPath := strings.TrimSpace(opts.ABBRunPath)
-	workloadID := strings.TrimSpace(opts.ABWorkloadID)
-	if aPath == "" || bPath == "" {
-		return ABDiffData{
-			Status:      viewsV2Unavailable("both --ab-a and --ab-b runs are required", "none"),
-			Metrics:     []ABMetricDelta{},
-			Functions:   []ABFunctionDelta{},
-			Significant: []string{},
-		}
-	}
-	if workloadID == "" {
-		return ABDiffData{
-			Status:      viewsV2Unavailable("--ab-workload-id is required for a valid A/B comparison", "none"),
-			Metrics:     []ABMetricDelta{},
-			Functions:   []ABFunctionDelta{},
-			Significant: []string{},
-		}
-	}
-	a, err := loadABRunInput(aPath, workloadID)
-	if err != nil {
-		return ABDiffData{
-			Status:      viewsV2Unavailable(fmt.Sprintf("load A/B run A: %v", err), "spans+metrics"),
-			ARun:        filepath.Base(filepath.Clean(aPath)),
-			BRun:        filepath.Base(filepath.Clean(bPath)),
-			Metrics:     []ABMetricDelta{},
-			Functions:   []ABFunctionDelta{},
-			Significant: []string{},
-		}
-	}
-	b, err := loadABRunInput(bPath, workloadID)
-	if err != nil {
-		return ABDiffData{
-			Status:      viewsV2Unavailable(fmt.Sprintf("load A/B run B: %v", err), "spans+metrics"),
-			ARun:        a.RunID,
-			BRun:        filepath.Base(filepath.Clean(bPath)),
-			Metrics:     []ABMetricDelta{},
-			Functions:   []ABFunctionDelta{},
-			Significant: []string{},
-		}
-	}
-	return BuildABDiff(a, b)
-}
-
-func loadABRunInput(path, workloadID string) (ABRunInput, error) {
-	path = strings.TrimSpace(path)
-	if path == "" {
-		return ABRunInput{}, fmt.Errorf("run path is empty")
-	}
-	info, err := os.Stat(path)
-	if err != nil {
-		return ABRunInput{}, err
-	}
-	runDir := path
-	if !info.IsDir() {
-		runDir = filepath.Dir(path)
-	}
-
-	input := ABRunInput{WorkloadID: workloadID}
-	metricsPath := filepath.Join(runDir, "metrics.jsonl")
-	if info, err := os.Stat(metricsPath); err == nil && !info.IsDir() {
-		metrics, loadErr := LoadMetrics(metricsPath, MetricsOptions{MaxSeries: 2048})
-		if loadErr != nil {
-			return ABRunInput{}, fmt.Errorf("metrics: %w", loadErr)
-		}
-		if metrics.Available {
-			input.Metrics = metrics.Series
-		}
-	}
-
-	spansPath := filepath.Join(runDir, "spans.jsonl")
-	if info, err := os.Stat(spansPath); err == nil && !info.IsDir() {
-		loaded, loadErr := diagnoseInputForViews(runDir)
-		if loadErr != nil {
-			return ABRunInput{}, fmt.Errorf("spans: %w", loadErr)
-		}
-		opts := Options{}
-		opts.normalize()
-		input.Functions, _ = buildFunctions(loaded.Spans, opts)
-		if loaded.Manifest != nil {
-			input.RunID = loaded.Manifest.RunID
-		}
-		if input.RunID == "" && len(loaded.Spans) > 0 {
-			input.RunID = loaded.Spans[0].RunID
-		}
-	}
-	if input.RunID == "" {
-		input.RunID = filepath.Base(filepath.Clean(path))
-	}
-	if len(input.Metrics) == 0 && len(input.Functions) == 0 {
-		return ABRunInput{}, fmt.Errorf("no metrics.jsonl or spans.jsonl evidence in %s", runDir)
-	}
-	return input, nil
-}
-
-// diagnoseInputForViews is a narrow indirection used to keep A/B loading in
-// this file; the actual reader remains diagnose.Load and is never modified.
-var diagnoseInputForViews = loadDiagnoseInput
-
-func loadDiagnoseInput(path string) (*diagnose.Input, error) {
-	return diagnose.Load(path)
-}
-
-func loadRooflineOps(path string) ([]RooflineOp, error) {
-	ops := make([]RooflineOp, 0)
-	err := scanJSONLFile(path, func(line int, raw []byte) error {
-		var op RooflineOp
-		if err := json.Unmarshal(raw, &op); err != nil {
-			return fmt.Errorf("line %d: %w", line, err)
-		}
-		ops = append(ops, op)
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-	return ops, nil
 }
 
 func loadChangeEvents(path string, windowStartNS int64) ([]ChangeEvent, error) {

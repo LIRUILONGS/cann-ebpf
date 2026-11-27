@@ -15,14 +15,8 @@ type ViewStatus struct {
 // fill these structures without changing their JSON shape.
 type ReportViewsV2 struct {
 	LoadLatency     LoadLatencyData     `json:"load_latency"`
-	CriticalPath    CriticalPathData    `json:"critical_path"`
-	SummedDelay     SummedDelayData     `json:"summed_delay"`
-	SlackCDF        SlackCDFData        `json:"slack_cdf"`
 	OffCPU          OffCPUData          `json:"off_cpu"`
 	OperatorTreemap TreemapData         `json:"operator_treemap"`
-	Roofline        RooflineData        `json:"roofline"`
-	ABDiff          ABDiffData          `json:"ab_diff"`
-	ChangePoint     ChangePointData     `json:"change_point"`
 	ServiceTopology ServiceTopologyData `json:"service_topology"`
 }
 
