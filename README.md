@@ -563,6 +563,7 @@ unicode dict，单次最多 64 个 key；batch span 写入标准 `spans.jsonl`�
 - `docs/B1-PREP.md`：collector 注入 V4 的准备、激活与回滚（未执行重启）。
 - `docs/B4-HCCL-PLAN.md`：真实 HCCL correlationId 的测试方案与独占卡要求。
 - `docs/OBSERVABILITY.md`：Prometheus 抓取、Grafana 看板与告警规则接入。
+- `docs/MAINTENANCE-PLAN.md`：停机窗口 B1-B4 的任务分配、阶段、回滚与验收。
 - `docs/M4-VALIDATION.md`：当前交付的实测数据、复现命令、证据和边界。
 - `docs/M4-CONTEXT-PROTOCOL.md`：batch 协议、权限模型、插件安装与激活步骤。
 - `docs/M5-TRACE-AND-CPY-POC.md`：链路追踪 schema、POC 设计、真实 V4 证据和边界。
