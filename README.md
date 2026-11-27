@@ -256,16 +256,36 @@ runs/ebpf-.../
 
 `scripts/run_sweep.sh` 是压测客户端，会占用目标服务容量。
 
+V4 / vLLM：
+
 ```bash
 VLLM_API_KEY=... sh scripts/run_sweep.sh \
   --workdir runs/sweep-$(date -u +%Y%m%dT%H%M%SZ) \
+  --run runs/ebpf-... \
+  --report runs/sweep-report.html \
   --tiers 1,2,4,8 \
   --duration 30 --max-tokens 64 \
   --base-url http://127.0.0.1:8905 --model deepseek-v4-flash \
   --bin ./cann-ebpf-linux-arm64 --yes
 ```
 
-生产背景负载高时，`load_latency` 会标 `partial`，不能计算容量 knee。
+V4.1 / Orinfer（指标前缀是 `orinfer_`；如无鉴权，API_KEY 可传任意非空值）：
+
+```bash
+PROM_INCLUDE='^(vllm:|orinfer_)' sh scripts/run_sweep.sh \
+  --workdir runs/sweep-$(date -u +%Y%m%dT%H%M%SZ) \
+  --run runs/report-... \
+  --report runs/sweep-report.html \
+  --stacks runs/stacks-... \
+  --tiers 1,2,4,8 \
+  --duration 10 --max-tokens 32 \
+  --base-url http://127.0.0.1:8000 --model deepseek-v4.1 \
+  --api-key local --bin ./cann-ebpf-linux-arm64 --yes
+```
+
+- `--stacks DIR`：把已有 `stacks.folded` 的火焰图带进压测报告
+- `PROM_INCLUDE`：metrics 指标名前缀，默认 `^(vllm:|orinfer_)`
+- 生产背景负载高时，`load_latency` 会标 `partial`，不能计算容量 knee
 
 ## 安全与权限
 
