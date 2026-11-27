@@ -1112,6 +1112,27 @@ static void CannMsptiAutoStart() {
             }
         }
     }
+    // Optional narrower filter: only start in processes whose cmdline contains
+    // this substring (e.g. VLLM::Worker_TP). This avoids starting a collector in
+    // every python helper when a service uses LD_PRELOAD globally.
+    const char *only_cmdline = std::getenv("CANN_MSPTI_ONLY_CMDLINE");
+    if (only_cmdline != nullptr && *only_cmdline != '\0') {
+        FILE *cmd = std::fopen("/proc/self/cmdline", "rb");
+        if (cmd != nullptr) {
+            char buf[8192];
+            const size_t n = std::fread(buf, 1, sizeof(buf) - 1, cmd);
+            std::fclose(cmd);
+            std::string args(buf, n);
+            for (char &ch : args) {
+                if (ch == '\0') {
+                    ch = ' ';
+                }
+            }
+            if (args.find(only_cmdline) == std::string::npos) {
+                return;
+            }
+        }
+    }
     // {pid} lets a service-level LD_PRELOAD give every worker its own file;
     // otherwise all ranks would race on one output path.
     std::string output_path(output);
@@ -1130,9 +1151,19 @@ static void CannMsptiAutoStart() {
 }
 
 static void CannMsptiAutoStop() {
-    if (g_auto_started.load()) {
-        cann_mspti_stop();
+    if (!g_auto_started.load()) {
+        return;
     }
+    // Stopping from a static destructor runs after Python/torch have already
+    // torn down their threads; msptiUnsubscribe/FlushAll there was observed to
+    // SIGSEGV. In service/LD_PRELOAD mode the default is to let process exit
+    // close the files (data is flushed periodically); set
+    // CANN_MSPTI_AUTO_STOP=1 only when an explicit, ordered stop is safe.
+    const char *auto_stop = std::getenv("CANN_MSPTI_AUTO_STOP");
+    if (auto_stop == nullptr || std::strcmp(auto_stop, "1") != 0) {
+        return;
+    }
+    cann_mspti_stop();
 }
 
 namespace {

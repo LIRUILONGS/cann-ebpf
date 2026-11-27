@@ -8,7 +8,7 @@
   collector 的 `__attribute__((constructor))` 在全局 `std::string` 构造前执行，写 `g_run_id`
   空指针导致 SIGSEGV。已改为文件末尾 `AutoLifecycle` 对象；9.0.1/9.2 构建+selftest 通过，
   bash/python `LD_PRELOAD` 不再崩溃；**真实 torch_npu 进程已采到 109 API + 1 MEMCPY**。
-  剩余：进程退出析构 SIGSEGV、真实 V4 验证。详见 `docs/B1-COLLECTOR-FIX.md`。
+  剩余：同窗口 host span join、限制 collector 进程/输出。详见 `docs/B1-COLLECTOR-FIX.md`。
 - 已准备：`m3/mspti_collector` 可从当前源码构建并通过 selftest；`attach --device-jsonl`
   可导入 collector 产物、抓 pidmap 并封存 artifact。
 - 进一步准备（2026-11-26）：`deploy/b1/stage-collector.sh --stage` 已把

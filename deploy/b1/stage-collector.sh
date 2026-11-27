@@ -50,6 +50,8 @@ CANN_MSPTI_ACTIVITIES=api,acl_api,runtime_api,kernel,memcpy,hccl
 CANN_MSPTI_ONLY_COMM=vllm,python
 CANN_MSPTI_OUTPUT=/cache/cann-ebpf/device-{pid}.jsonl
 CANN_MSPTI_RUN_ID=vllm-collector
+CANN_MSPTI_MAX_BYTES=67108864
+CANN_MSPTI_AUTO_STOP=0
 CANN_MSPTI_FLUSH_INTERVAL_MS=1000
 # END cann-ebpf collector'
 

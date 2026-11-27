@@ -53,14 +53,16 @@ python3 -c 'import torch,torch_npu; torch.npu.set_device(0); x=torch.ones(256,de
 
 ## 4. 仍未完成
 
-1. **退出析构崩溃**：`~AutoLifecycle` 在 Python/torch 已销毁后调用 `cann_mspti_stop()`，
-   会 SIGSEGV。需要改成更早的 `atexit`/信号处理，或禁用自动 stop 并让 meta 在进程存活时周期落盘。
-2. **真实 V4/vLLM 进程**：尚未用修复后的 lib 启动 V4 验证（需要停 V4.1；当前 V4.1 有真实流量）。
-3. **多进程 `{pid}` 与 HCCL correlationId**：未验证。
+1. ~~退出析构崩溃~~ **已修**：新增 `CANN_MSPTI_AUTO_STOP`（默认 0），静态析构不再
+   调用 `cann_mspti_stop()`；修复后 bash/python `LD_PRELOAD` 退出码 0。
+2. **真实 V4/vLLM 进程**：本次已用真实 V4 采到 1.32M 条 device 记录（见
+   `docs/B1-DEVICE-EVIDENCE.md`），但没有同窗口 host span，host↔device join 未验证。
+3. **多进程 `{pid}` 与 HCCL correlationId**：真实 V4 数据已证明 HCCL
+   2,802/2,802 `mspti_communication` 带 correlation_id；仍需限制 collector 进程数/输出量。
 4. 若 msPTI 已有其他订阅者，`msptiSubscribe` 返回 2，当前只提示并放弃采集。
 
 ## 5. 结论
 
 - collector 崩溃不是 vLLM/Orinfer 的 bug，是 **C++ 静态初始化顺序 bug**，已修复；
-- 修复后在真实 `torch_npu` 进程可产出 API/MEMCPY 记录；
-- 距离 B1 生产可用还差“退出析构”和“真实 V4 验证”。
+- 修复后在真实 `torch_npu` 进程可产出 API/MEMCPY 记录，真实 V4 数据已证明 HCCL correlation；
+- 距离 B1 生产可用还差：同窗口 host span join、限制 collector 进程数/输出量。

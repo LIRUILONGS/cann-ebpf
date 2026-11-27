@@ -6,8 +6,8 @@
 
 | 环境 | 路径 | SHA-256 |
 |---|---|---|
-| CANN 9.0.1（V4） | `/opt/cann-ebpf/collectors/9.0.1/libcannmspti.so` | `298fc7199ba06a07172ac15879fc738400301ed0b3f7417c146ef7e9ba654fce` |
-| CANN 9.2（Orinfer） | `/opt/cann-ebpf/collectors/9.2/libcannmspti.so` | `e423ad63fc1800b7c3db0829bb9e422257d002bc394c82424c273aa0240cb7e4` |
+| CANN 9.0.1（V4） | `/opt/cann-ebpf/collectors/9.0.1/libcannmspti.so` | `bd94de8574dfb949fbabb60e7c254ad05e7dd5817ec90904a8baee798c3fb621` |
+| CANN 9.2（Orinfer） | `/opt/cann-ebpf/collectors/9.2/libcannmspti.so` | `a449bdd93fc85ff6dc36b266f27d154b2c65b003132a3b4dfc2c594be1b9d77e` |
 
 - 两版均从当前源码（`AutoLifecycle` 修复）构建；
 - `cann-mspti-selftest` 10/10 通过；
