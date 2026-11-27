@@ -43,7 +43,8 @@ export CANN_MSPTI_CLOCK=auto
 ```
 
 `libmspti.so` 必须排在 `libcannmspti.so` 前面，保证 mspTI 自身先完成初始化。
-`CANN_MSPTI_DURATION=0` 表示一直采到进程退出；维护窗口建议设短窗口（如 10–30 秒）。
+`CANN_MSPTI_DURATION=0` 表示一直采到进程退出；维护窗口建议设短窗口
+（B1 一次采集窗口推荐 60s，可用 `CANN_MSPTI_DURATION=60s`）。
 运行期间每 1 秒 flush 时同步刷新 `device.jsonl.meta.json`，记录 pid、container_id、run_id、
 活动类型、当前记录数、字节数、丢弃/截断计数和 warning；停止时写最终值。
 
@@ -57,6 +58,31 @@ A2 加固后，meta 还会输出 `clock_offset_start_ns` / `clock_offset_last_ns
 默认 `auto` 将其转换为 monotonic，并保留 `raw_start_ns`/`raw_end_ns` 原始值。
 offset 不是常量：collector 启动时记录一次，之后每个 flush 周期重估，NTP 跳变和容器 time
 namespace 调整会体现在 `clock_drift_ns`。
+
+## 进程门禁（多进程 LD_PRELOAD）
+
+`LD_PRELOAD` 会被容器里的所有子进程继承。`CannMsptiAutoStart()` 按下面的顺序做门禁，
+任一条件不通过就完全不启动（不会创建输出文件或 meta）：
+
+| 变量 | 读取位置 | 语义 |
+|---|---|---|
+| `CANN_MSPTI_ONLY_COMM` | `/proc/self/comm` | 逗号分隔子串匹配；加载期的 python 进程 comm 通常是 `python3`，不是 Worker 标题 |
+| `CANN_MSPTI_ONLY_PARENT_COMM` | `/proc/<getppid()>/comm` | 逗号分隔子串匹配；父进程 comm 读不到时不启动。V4 的 8 个 Worker 父进程均为 `VLLM::EngineCor`（comm 内核截断到 15 字节，正好等于该值），可精确只命中 Worker |
+| `CANN_MSPTI_ONLY_CMDLINE` | `/proc/self/cmdline` | 只反映 exec 时的 argv；vLLM 在 Worker 内 `set_process_title()` 之后改写的标题不可见，因此不能用于 Worker 过滤 |
+
+vLLM 的 Worker 由 EngineCore 以 `multiprocessing spawn` 启动，加载期 cmdline 是
+`python3 -c "from multiprocessing.spawn import spawn_main; ..."`。所以
+`CANN_MSPTI_ONLY_CMDLINE=VLLM::Worker...` 会命中 0 个进程并静默无数据；B1 推荐用
+`CANN_MSPTI_ONLY_PARENT_COMM=VLLM::EngineCor` 把采集限制到 8 个 Worker。
+
+## 一次性采集窗口（CANN_MSPTI_DURATION）
+
+`CANN_MSPTI_DURATION` 接受纯秒数（`60`、`1.5`）或 Go duration（`60s`、`1m30s`、`500ms`）。
+启动后由后台线程在到期时调用 `cann_mspti_stop()`：输出文件和 meta 正常收尾
+（`stop_complete=true`），库仍留在进程里但不再写文件，因此不必为了卸载 collector 再
+重启一次服务。`0` 或不设置表示一直采到进程退出；B1 一次窗口建议 `60s`。
+`CANN_MSPTI_AUTO_STOP=0` 仍然表示“进程退出时不做 stop”，与 `CANN_MSPTI_DURATION`
+到期停止相互独立。
 
 ## 独立启动器
 

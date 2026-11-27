@@ -4,12 +4,25 @@
 # Default is a dry-run. --stage only copies the library and writes the env
 # fragment; --apply also appends a marked block to /etc/vllm-ds4.env. The
 # change takes effect on the next V4 restart; this script never restarts it.
+#
+# Worker-only collection: vLLM rewrites Worker argv after exec, so
+# CANN_MSPTI_ONLY_CMDLINE cannot select Workers (it silently matches 0
+# processes). The env block therefore leaves ONLY_CMDLINE unset. To collect
+# only from the 8 V4 Workers, stage with the parent-comm filter enabled:
+#   PARENT_COMM=VLLM::EngineCor sh stage-collector.sh --stage
+# For a one-shot window (stop without a second restart), add DURATION:
+#   PARENT_COMM=VLLM::EngineCor DURATION=60s sh stage-collector.sh --stage
 set -eu
 
 CACHE=${CACHE:-/data/cache/cann-ebpf}
 LIB=${LIB:-/tmp/cann-mspti-final-src/build/libcannmspti.so}
 ENV_FILE=${ENV_FILE:-/etc/vllm-ds4.env}
 FRAGMENT=${FRAGMENT:-/etc/cann-ebpf/collector.env}
+# Optional: set to VLLM::EngineCor to emit CANN_MSPTI_ONLY_PARENT_COMM and
+# restrict collection to the vLLM Worker processes (children of EngineCore).
+PARENT_COMM=${PARENT_COMM:-}
+# Optional: seconds or Go duration (60, 60s, 1m) for a one-shot window.
+DURATION=${DURATION:-}
 MODE=dry-run
 
 while [ $# -gt 0 ]; do
@@ -44,16 +57,32 @@ else
   PRELOAD_VALUE="$MS_PRELOAD:$COLLECTOR_PRELOAD"
 fi
 
-BLOCK='# BEGIN cann-ebpf collector
-LD_PRELOAD='"$PRELOAD_VALUE"'
+BLOCK="# BEGIN cann-ebpf collector
+LD_PRELOAD=$PRELOAD_VALUE
 CANN_MSPTI_ACTIVITIES=api,acl_api,runtime_api,kernel,memcpy,hccl
 CANN_MSPTI_ONLY_COMM=vllm,python
+# CANN_MSPTI_ONLY_CMDLINE is intentionally unset: vLLM rewrites Worker argv
+# after exec, so Worker titles match 0 processes (silent no-data). Use
+# CANN_MSPTI_ONLY_PARENT_COMM instead to narrow collection to Workers.
+# Optional Worker-only filter (uncomment, or stage with PARENT_COMM=VLLM::EngineCor):
+# CANN_MSPTI_ONLY_PARENT_COMM=VLLM::EngineCor
 CANN_MSPTI_OUTPUT=/cache/cann-ebpf/device-{pid}.jsonl
 CANN_MSPTI_RUN_ID=vllm-collector
 CANN_MSPTI_MAX_BYTES=67108864
 CANN_MSPTI_AUTO_STOP=0
+# One-shot window: stop collecting N seconds after start, without restarting V4.
+# Recommended B1 window: 60s (accepts 60, 60s, 1m). Uncomment, or stage with
+# DURATION=60s. AUTO_STOP=0 still means: do not stop when the process exits.
+# CANN_MSPTI_DURATION=60s
 CANN_MSPTI_FLUSH_INTERVAL_MS=1000
-# END cann-ebpf collector'
+# END cann-ebpf collector"
+
+if [ -n "$PARENT_COMM" ]; then
+  BLOCK=$(printf '%s\n' "$BLOCK" | sed "s|^# CANN_MSPTI_ONLY_PARENT_COMM=.*|CANN_MSPTI_ONLY_PARENT_COMM=$PARENT_COMM|")
+fi
+if [ -n "$DURATION" ]; then
+  BLOCK=$(printf '%s\n' "$BLOCK" | sed "s|^# CANN_MSPTI_DURATION=.*|CANN_MSPTI_DURATION=$DURATION|")
+fi
 
 if [ "$MODE" = dry-run ]; then
   echo "would copy $LIB -> $CACHE/libcannmspti.so"

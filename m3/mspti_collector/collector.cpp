@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cctype>
 #include <cerrno>
 #include <chrono>
 #include <condition_variable>
@@ -793,6 +794,114 @@ double EnvDouble(const char *name, double fallback) {
     return parsed;
 }
 
+// Parse a Go-style duration ("90s", "1m30s", "500ms", "1h2m3s"). Returns false
+// on any malformed component so the caller can fall back instead of silently
+// treating "1m30s" as one second.
+bool ParseGoDurationSeconds(const std::string &spec, double *seconds) {
+    if (seconds == nullptr || spec.empty()) {
+        return false;
+    }
+    size_t pos = 0;
+    bool negative = false;
+    if (spec[pos] == '+' || spec[pos] == '-') {
+        negative = spec[pos] == '-';
+        ++pos;
+    }
+    if (pos == spec.size()) {
+        return false;
+    }
+    double total = 0.0;
+    bool saw_component = false;
+    while (pos < spec.size()) {
+        const size_t number_start = pos;
+        while (pos < spec.size() && std::isdigit(static_cast<unsigned char>(spec[pos]))) {
+            ++pos;
+        }
+        if (pos < spec.size() && spec[pos] == '.') {
+            ++pos;
+            while (pos < spec.size() && std::isdigit(static_cast<unsigned char>(spec[pos]))) {
+                ++pos;
+            }
+        }
+        if (pos == number_start) {
+            return false;
+        }
+        const std::string number = spec.substr(number_start, pos - number_start);
+        char *number_end = nullptr;
+        const double value = std::strtod(number.c_str(), &number_end);
+        if (number_end == number.c_str() || *number_end != '\0') {
+            return false;
+        }
+        const size_t unit_start = pos;
+        while (pos < spec.size() && !std::isdigit(static_cast<unsigned char>(spec[pos])) &&
+               spec[pos] != '.') {
+            ++pos;
+        }
+        const std::string unit = spec.substr(unit_start, pos - unit_start);
+        double multiplier = 0.0;
+        if (unit == "ns") {
+            multiplier = 1e-9;
+        } else if (unit == "us" || unit == "\xc2\xb5s" || unit == "\xce\xbcs") {
+            multiplier = 1e-6;  // us, UTF-8 micro sign, UTF-8 Greek mu
+        } else if (unit == "ms") {
+            multiplier = 1e-3;
+        } else if (unit == "s") {
+            multiplier = 1.0;
+        } else if (unit == "m") {
+            multiplier = 60.0;
+        } else if (unit == "h") {
+            multiplier = 3600.0;
+        } else {
+            return false;
+        }
+        total += value * multiplier;
+        saw_component = true;
+    }
+    if (!saw_component) {
+        return false;
+    }
+    *seconds = negative ? -total : total;
+    return true;
+}
+
+// Seconds from either a bare number ("60", "1.5") or a Go duration
+// ("60s", "1m30s", "500ms"). Bare numbers are already seconds.
+double EnvDurationSeconds(const char *name, double fallback) {
+    const char *value = std::getenv(name);
+    if (value == nullptr || *value == '\0') {
+        return fallback;
+    }
+    std::string spec(value);
+    // Trim surrounding ASCII whitespace; systemd Environment= values often
+    // arrive with no spaces, but interactive shells may add them.
+    const size_t first = spec.find_first_not_of(" \t\r\n");
+    const size_t last = spec.find_last_not_of(" \t\r\n");
+    if (first == std::string::npos) {
+        return fallback;
+    }
+    spec = spec.substr(first, last - first + 1);
+    char *end = nullptr;
+    const double plain = std::strtod(spec.c_str(), &end);
+    if (end != spec.c_str()) {
+        const char *tail = end;
+        while (*tail == ' ' || *tail == '\t') {
+            ++tail;
+        }
+        if (*tail == '\0') {
+            return plain;
+        }
+    }
+    double parsed = 0.0;
+    if (ParseGoDurationSeconds(spec, &parsed) && parsed >= 0.0) {
+        return parsed;
+    }
+    std::fprintf(stderr,
+                 "cann-mspti: invalid %s '%s' (expected seconds or Go duration, "
+                 "e.g. 60, 60s, 1m30s); timers stay disabled\n",
+                 name, value);
+    return fallback;
+}
+
 }  // namespace
 
 extern "C" int cann_mspti_start(const char *output_path, const char *run_id,
@@ -957,7 +1066,11 @@ extern "C" int cann_mspti_start(const char *output_path, const char *run_id,
         }).detach();
     }
 
-    const double duration_seconds = EnvDouble("CANN_MSPTI_DURATION", 0.0);
+    // One-shot window: stop from a background thread after N seconds instead
+    // of waiting for process exit, so a service does not need a second restart
+    // to unload the collector. AUTO_STOP=0 still means "never stop at exit";
+    // this timer is an explicit runtime stop, not a static-destructor stop.
+    const double duration_seconds = EnvDurationSeconds("CANN_MSPTI_DURATION", 0.0);
     if (duration_seconds > 0.0) {
         std::thread([duration_seconds, flush_generation]() {
             std::this_thread::sleep_for(
@@ -1077,6 +1190,18 @@ extern "C" int cann_mspti_stop(void) {
 
 extern "C" int cann_mspti_is_active(void) { return g_running.load() ? 1 : 0; }
 
+// True when `value` contains any non-empty comma-separated token from `spec`.
+static bool CommaSubstringMatch(const std::string &value, const char *spec) {
+    std::stringstream wanted(spec);
+    std::string token;
+    while (std::getline(wanted, token, ',')) {
+        if (!token.empty() && value.find(token) != std::string::npos) {
+            return true;
+        }
+    }
+    return false;
+}
+
 // Auto-start is deliberately NOT __attribute__((constructor)). GCC emits such
 // a function into .init_array ahead of this translation unit's
 // _GLOBAL__sub_I_collector.cpp, so it ran before the std::string / std::map
@@ -1098,18 +1223,33 @@ static void CannMsptiAutoStart() {
         std::ifstream comm_file("/proc/self/comm");
         std::string comm;
         if (std::getline(comm_file, comm)) {
-            std::stringstream wanted(only_comm);
-            std::string token;
-            bool matched = false;
-            while (std::getline(wanted, token, ',')) {
-                if (!token.empty() && comm.find(token) != std::string::npos) {
-                    matched = true;
-                    break;
-                }
-            }
-            if (!matched) {
+            if (!CommaSubstringMatch(comm, only_comm)) {
                 return;
             }
+        }
+    }
+    // Optional parent-process filter: LD_PRELOAD is inherited by every vLLM
+    // helper (forkserver, resource_tracker, multiprocessing spawn helpers), and
+    // vLLM rewrites Worker argv with set_process_title() after exec, so
+    // CANN_MSPTI_ONLY_CMDLINE cannot see "VLLM::Worker" in a Worker. The parent
+    // comm is stable: all V4 Workers are direct children of VLLM::EngineCor.
+    // Read /proc/<getppid()>/comm (kernel truncates comm to 15 bytes, which is
+    // exactly "VLLM::EngineCor") and allow comma-separated substring matches.
+    // If the parent comm cannot be read we cannot prove a match, so do not start.
+    const char *only_parent_comm = std::getenv("CANN_MSPTI_ONLY_PARENT_COMM");
+    if (only_parent_comm != nullptr && *only_parent_comm != '\0') {
+        const pid_t parent = getppid();
+        bool matched = false;
+        if (parent > 0) {
+            std::ifstream parent_comm_file("/proc/" +
+                                           std::to_string(static_cast<long long>(parent)) + "/comm");
+            std::string parent_comm;
+            if (std::getline(parent_comm_file, parent_comm)) {
+                matched = CommaSubstringMatch(parent_comm, only_parent_comm);
+            }
+        }
+        if (!matched) {
+            return;
         }
     }
     // Optional narrower filter: only start in processes whose cmdline contains

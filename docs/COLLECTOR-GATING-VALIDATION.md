@@ -17,7 +17,7 @@
 4. **因此当前这三项限制只解决“单文件无上限/总输出过大”，不解决“28 个进程/多文件”**：
    - 8 个非空 Worker × 64 MiB = 最多约 512 MiB（原始 3.2 GB → 约 0.5 GB，约 6 倍收敛）；
    - 但进程/文件数量不变：启动瞬间仍是 8 个非空文件 + 约 20 个空文件；当前稳态容器内共有 **313 个后代进程**（8 Worker + 17 spawn_main + 147 forkserver + 6 resource_tracker + 其他）。
-5. **要“只命中 Worker”需要在 collector 里新增父进程过滤**（建议 `CANN_MSPTI_ONLY_PARENT_COMM=VLLM::EngineCor`，比较 `/proc/<ppid>/comm`），或按 Worker PID 显式启动。只靠现有 `CANN_MSPTI_ONLY_CMDLINE` 做不到。
+5. **要“只命中 Worker”需要在 collector 里新增父进程过滤**（建议 `CANN_MSPTI_ONLY_PARENT_COMM=VLLM::EngineCor`，比较 `/proc/<ppid>/comm`），或按 Worker PID 显式启动。只靠现有 `CANN_MSPTI_ONLY_CMDLINE` 做不到。（此项已于 2026-11-27 实现并验证，见第 10 节。）
 6. **`CANN_MSPTI_AUTO_STOP` 必须保持默认 0**：把 `AUTO_STOP=1` 后静态析构里调用 `cann_mspti_stop()` 复现了 SIGSEGV（exit 139）；默认 0 时 bash/python 均 exit 0。
 
 > 一句话：**大小问题基本解决（每文件 64 MiB 硬顶），进程扇出问题没有解决；不要把 `ONLY_CMDLINE` 设成 `VLLM::Worker_TP`，否则会变成“看起来配了过滤、实际一行数据都没有”。**
@@ -209,10 +209,11 @@ CANN_MSPTI_AUTO_STOP=0             # 必须 0；=1 会静态析构 SIGSEGV
 CANN_MSPTI_FLUSH_INTERVAL_MS=1000
 ```
 
-若采纳 5.2 的改动，再加：
+5.2 的父进程过滤已在第 10 节实现，推荐再加上：
 
 ```sh
-CANN_MSPTI_ONLY_PARENT_COMM=VLLM::EngineCor
+CANN_MSPTI_ONLY_PARENT_COMM=VLLM::EngineCor   # 只命中 8 个 Worker
+CANN_MSPTI_DURATION=60s                       # 一次性窗口：到期自动 stop，不必二次重启
 ```
 
 ---
@@ -261,3 +262,92 @@ done
 - 新增本文档：`docs/COLLECTOR-GATING-VALIDATION.md`。
 - 未修改任何 tracked 代码（`collector.cpp`、`stage-collector.sh` 等均保持原样），未 commit。
 - 验证用临时源码/脚本只存在于服务器 `/tmp/cann-gating`（已删除）与本地临时目录，不属于仓库交付物。
+
+---
+
+## 10. 后续实现与验证（2026-11-27 19:0x–19:3x）
+
+本节记录第 5.2 节建议的落地：新增父进程过滤，并补充 `CANN_MSPTI_DURATION`
+的 Go duration 解析。**本次只改 `m3/mspti_collector/collector.cpp`、
+`deploy/b1/stage-collector.sh` 和文档；未停/重启 V4、未注入生产进程、未压测、未
+`git add`/`commit`。**
+
+### 10.1 代码改动
+
+- `CannMsptiAutoStart()` 新增 `CANN_MSPTI_ONLY_PARENT_COMM`：
+  - 在 `CANN_MSPTI_ONLY_COMM` 之后、`CANN_MSPTI_ONLY_CMDLINE` 之前判断；
+  - 读 `/proc/<getppid()>/comm`，按逗号分词做**子串**匹配；
+  - `getppid() <= 0` 或 comm 读不到时视为不匹配，直接 return（不启动）；
+  - 提取 `CommaSubstringMatch()`，`ONLY_COMM` 与 `ONLY_PARENT_COMM` 共用，行为不变。
+- `CANN_MSPTI_DURATION` 原实现（后台线程 sleep 后调用 `cann_mspti_stop()`）保留，
+  新增 `EnvDurationSeconds()` / `ParseGoDurationSeconds()`：
+  - 纯数字仍按秒（`60`、`1.5`）；
+  - 支持 Go duration：`60s`、`1m30s`、`500ms`、`1h2m3s`，以及 `us`/`µs`/`ns`；
+  - 非法值（如 `not-a-duration`）打印一次 warning 并退回 0（不启用定时停止）；
+  - 修复旧 `strtod` 只读到数字前缀的问题（`1m30s` 不会被误读成 1 秒，`500ms`
+    不会被误读成 500 秒）。
+- `deploy/b1/stage-collector.sh`：
+  - 默认块**不设置** `CANN_MSPTI_ONLY_CMDLINE`，并明确注释原因；
+  - 新增可选 `PARENT_COMM` / `DURATION` 环境变量，设置后分别把
+    `CANN_MSPTI_ONLY_PARENT_COMM=VLLM::EngineCor`、`CANN_MSPTI_DURATION=<值>`
+    写进 env 块；
+  - 默认块保留 `MAX_BYTES=67108864`、`AUTO_STOP=0`，并注释 B1 窗口推荐 `60s`。
+
+### 10.2 验证环境
+
+- 临时容器，均 `--rm --network none --memory 4g --cpus 4`，**不挂 NPU、不联网**：
+  - CANN **9.0.1**：`ds4/vllm-ascend:v0.23.0rc1-nonroot`，g++ 10.3.1；
+  - CANN **9.2.0**：`quay.nju.edu.cn/ascend/vllm-ascend:v0.30.0rc2`。
+- 构建：
+  - `libcannmspti_stub.so`：真实 `collector.cpp` + 同步 stub `mspti*`（不产生记录）；
+  - `libcannmspti_real.so`：真实 `collector.cpp` + 容器内 `libmspti.so`；
+  - `selftest`：`collector.cpp + selftest.cpp + stub`。
+- 父进程 comm 用 Python `ctypes` 调 `prctl(PR_SET_NAME)` 设置，再 `subprocess` 启动
+  子进程；`LD_PRELOAD` 只注入子进程，harness 自身不预加载。这样能精确模拟
+  “Worker 的父进程是 `VLLM::EngineCor`”和“父进程是普通 python3”两种情形。
+- 判定：清空目录后按 `device-*` 文件数（meta + jsonl = 2）判门禁是否放行；读
+  meta 的 `stop_complete` / `stop_unix_ns` 判断定时停止。
+
+### 10.3 结果（两个 CANN 版本各 46 项检查，全部通过）
+
+| 用例 | 条件 | 期望 | 9.0.1 | 9.2.0 |
+|---|---|---|---:|---:|
+| parent-match-bash | 父 comm=`VLLM::EngineCor`，bash，`ONLY_PARENT_COMM` | 启动，2 文件 | ✅ | ✅ |
+| parent-mismatch-bash | 父 comm=`python3`，同过滤 | 不启动，0 文件，exit 0 | ✅ | ✅ |
+| parent-match-python | 父 comm 匹配，python 子进程 | 启动，2 文件 | ✅ | ✅ |
+| parent-mismatch-python | 父 comm 不匹配，python | 不启动，0 文件 | ✅ | ✅ |
+| parent-list-match | `ONLY_PARENT_COMM=NoSuch,Bogus,VLLM::EngineCor` | 启动（任一 token 命中） | ✅ | ✅ |
+| parent-list-mismatch | `ONLY_PARENT_COMM=NoSuch,Bogus` | 不启动 | ✅ | ✅ |
+| no-parent-filter | 不设父过滤（旧行为） | 启动 | ✅ | ✅ |
+| only-comm-mismatch | 父匹配 + `ONLY_COMM=php` | 仍不启动（原有门禁保留） | ✅ | ✅ |
+| only-cmdline-mismatch | 父匹配 + `ONLY_CMDLINE=VLLM::Worker_TP` | 仍不启动 | ✅ | ✅ |
+| only-cmdline-match | `exec -a VLLM::Worker_TP0` + 对应过滤 | 启动（正向保留） | ✅ | ✅ |
+| real-parent-match-bash/python | 真实 `libmspti.so`，父匹配 | 2 文件，随后 `msptiSubscribe` 因无驱动 abort | ✅ | ✅ |
+| real-parent-mismatch-bash/python | 真实库，父不匹配 | 0 文件，exit 0 | ✅ | ✅ |
+| selftest | 10 项生命周期检查 | 10/10 | ✅ | ✅ |
+| duration `0.4` / `400ms` / `0.4s` | 子进程 hold 3 s | 到期 `stop_complete=true` | ✅ | ✅ |
+| duration `1m30s` | 子进程 hold 4 s | 1.5 s 时仍未停止（证明按 90 s 解析） | ✅ | ✅ |
+| duration `not-a-duration` | 非法值 | 不启用定时停止 + warning | ✅ | ✅ |
+| post-stop | 0.3 s 停止后进程继续存活 1.7 s | 文件大小不变、`stop_complete=true` | ✅ | ✅ |
+
+补充：
+- `real` 用例的退出码在 Python `subprocess` 下是 **250**（`SIGABRT` → `-6` 被
+  `sys.exit` 映射），在 shell 直接执行时是 134；stderr 为
+  `Failed to get function: "halGetAPIVersion" from "libascend_hal.so"`，属于临时容器
+  缺 NPU 驱动，不是 collector 回归。
+- 构建只出现两类 warning：CANN 头文件的 `-Wpacked-not-aligned` 和原有
+  `ActivityEnabled` 未使用；无新增 warning/error。
+- `stage-collector.sh` 用 `sh -n` 语法检查通过；默认 dry-run 不含
+  `ONLY_CMDLINE`/`ONLY_PARENT_COMM`/`DURATION` 的生效行；带
+  `PARENT_COMM=VLLM::EngineCor DURATION=60s` 时 dry-run 和 `--stage` 生成的块都正确。
+
+### 10.4 风险与边界
+
+1. `CANN_MSPTI_DURATION` 的后台线程是 detached 的（沿用既有 flush 线程模式）。
+   正常服务窗口远长于 60 s，到期时 stop 是安全的；若进程在到期前退出，线程随进程
+   结束，不会执行 stop（这正是 `AUTO_STOP=0` 的语义）。不要在静态析构里依赖它。
+2. 定时 stop 后再收到 flush 调用会直接返回（`g_running=false`），不会重开文件。
+3. `ONLY_PARENT_COMM` 依赖父进程 comm 稳定；若未来 vLLM 改成由 forkserver 直接
+   spawn Worker（父进程变成 python3），需要改用 PID 显式启动或调整匹配串。
+4. 本次仍未验证“真实 V4 进程内 8 个 Worker 全部命中”的端到端结果；需要 B1 维护
+   窗口停 V4 后验证（属于生产操作，本次按要求未做）。

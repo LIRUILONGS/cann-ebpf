@@ -112,8 +112,11 @@ cd build
 | `CANN_MSPTI_OUTPUT` | 无，必填 | `device.jsonl` 路径 |
 | `CANN_MSPTI_RUN_ID` | 空 | 写入每条记录和 meta 的 run id |
 | `CANN_MSPTI_ACTIVITIES` | `api,acl_api,runtime_api,kernel,memcpy,hccl` | 活动类型，逗号分隔 |
-| `CANN_MSPTI_DURATION` | 0 | 秒；0 表示直到进程退出 |
+| `CANN_MSPTI_DURATION` | 0 | 秒或 Go duration（`60s`、`1m30s`、`500ms`）；到期由后台线程 stop；0 表示直到进程退出 |
 | `CANN_MSPTI_MAX_BYTES` | 512 MiB | 超过后丢弃新记录并置 `truncated=true` |
+| `CANN_MSPTI_ONLY_COMM` | 空 | `/proc/self/comm` 逗号分隔子串匹配，不匹配不启动 |
+| `CANN_MSPTI_ONLY_PARENT_COMM` | 空 | `/proc/<getppid()>/comm` 逗号分隔子串匹配，不匹配不启动；V4 用 `VLLM::EngineCor` 只命中 Worker |
+| `CANN_MSPTI_ONLY_CMDLINE` | 空 | `/proc/self/cmdline` 子串匹配；只反映 exec 时 argv，不能用于匹配 Worker 标题 |
 | `CANN_MSPTI_CLOCK` | `auto` | `auto` / `realtime` / `monotonic` |
 | `CANN_MSPTI_FLUSH_INTERVAL_MS` | 1000 | 周期 flush 与 meta 刷新间隔 |
 
