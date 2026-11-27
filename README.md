@@ -27,6 +27,44 @@ CANN / vLLM-Ascend 的**主机侧只读观测工具**：用 eBPF uprobe 记录 h
 - 看 HBM/AICore/功耗/温度/ECC/PCIe 等硬件状态；
 - 把一次 run 的 span、指标、火焰图合成离线 HTML，事后分析。
 
+## 运行环境
+
+### 构建环境
+
+- Go **1.24**（当前构建验证：go1.24.11）
+- `CGO_ENABLED=0`
+- 交叉编译目标：`GOOS=linux GOARCH=arm64`
+- 纯 Go 二进制，目标机不需要 Python 才能运行 `preflight`/`discover`/`attach`/`sample`/`report`/`diagnose`
+- 可选脚本 `scripts/run_sweep.sh` 使用 Python 3 跑压测客户端
+
+### 目标机
+
+- Linux **arm64**
+- 已验证内核：**5.10.0-136...oe2203sp1.aarch64**（openEuler 22.03 系列）
+- 8× **Ascend 910B2**
+- 已验证 CANN：**9.0.1** 和 **9.2.0**
+- 目标服务：vLLM-Ascend / Orinfer v4.1
+- 硬件指标依赖：`npu-smi`（或 DCMI helper）
+- 内核栈火焰图依赖：`perf_event` + `/proc/kallsyms` 可读
+
+### 权限与内核能力
+
+`attach` / `stacks` 需要：
+
+- root，或 `CAP_BPF` + `CAP_PERFMON`（按内核版本）
+- BPF、uprobe、tracefs、perf_event 可用
+- `/proc/kallsyms` 可读（火焰图符号化）
+- 能看到目标进程的 host PID/线程（容器内 PID 需先映射到 host PID）
+
+`sample` 的 Prometheus 源需要能访问对应 `/metrics` endpoint；`report` 完全离线，不联网。
+
+### 资源
+
+- 10 分钟 host 采集的 `spans.jsonl` 约 **200MB**
+- 同一份报告 HTML 约 **8–9MB**
+- 火焰图 `stacks.folded` 约几百 KB
+- 采样频率默认：host stack `99Hz`，metrics 基础间隔 `1s`，`--npu-smi-ext` 默认 `30s`
+
 ## 快速开始
 
 ### 1. 构建
