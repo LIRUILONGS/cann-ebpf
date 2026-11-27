@@ -31,6 +31,7 @@ cann-ebpf sample \
 | `--duration` | `0` | `0` 表示持续到 SIGINT/SIGTERM；支持 `10m`、`1h` |
 | `--dcmi` | 自动 | 使用 `CANN_DCMI_PROBE` 或 PATH 中的 `dcmi_probe` |
 | `--npu-smi` | 自动 | 运行 `npu-smi info` |
+| `--system` | 关闭 | 从 procfs/sysfs 采集主机整体 CPU、load、memory、PSI、disk、net、thermal 和 cpufreq；详见 `docs/METRICS-SCHEMA-SYSTEM.md` |
 | `--pid` | 无 | 从 `/proc/<pid>` 采集；可重复；不指定时不会主动读取未知 PID |
 | `--cgroup` | 无 | cgroup v2 目录；可重复 |
 | `--prometheus` | 无 | `[name=]http(s)://host/metrics`；可重复 |
@@ -139,16 +140,23 @@ Prometheus 的 `_bucket{le="+Inf"}` 不写入 `buckets` 数组：`buckets` 只�
 | `proc_cpu_user_seconds` / `proc_cpu_system_seconds` | counter | seconds |
 | `proc_rss_bytes` | gauge | bytes |
 | `proc_threads` | gauge | count |
+| `proc_fds` | gauge | count |
+| `proc_vm_size_bytes` | gauge | bytes |
+| `proc_vm_rss_bytes` | gauge | bytes |
+| `proc_context_switches_voluntary_total` | counter | count |
+| `proc_context_switches_nonvoluntary_total` | counter | count |
+| `proc_page_faults_minor_total` | counter | count |
+| `proc_page_faults_major_total` | counter | count |
 | `proc_sched_run_delay_seconds` | counter | seconds |
 | `proc_sched_running_seconds` | counter | seconds |
 | `proc_sched_timeslices` | counter | count |
 | `proc_io_read_bytes` / `proc_io_write_bytes` | counter | bytes |
 
-`utime`/`stime` 按 Linux 常见 `USER_HZ=100` 换算；若目标内核使用不同 `USER_HZ`，该换算需要现场校准。标签为 `pid` 和 `comm`。
+`proc_fds` 统计 `/proc/<pid>/fd` 目录项数量，不跟随符号链接。`proc_vm_size_bytes` 来自 `VmSize`，`proc_vm_rss_bytes` 来自 `VmRSS`（同时保留既有 `proc_rss_bytes` 兼容名）；均从 `status` 的 kB 换算为 bytes。上下文切换和 page fault 均保留内核累计值。`utime`/`stime` 按 Linux 常见 `USER_HZ=100` 换算；若目标内核使用不同 `USER_HZ`，该换算需要现场校准。标签为 `pid` 和 `comm`。可选文件缺失时跳过，不补零；读取失败记录 warning。
 
 ### 4.3 cgroup v2
 
-读取 `cpu.stat`、`memory.current`、`memory.max`、`memory.peak`、`memory.events`、`pids.current`、`pids.max`：
+读取 `cpu.stat`、`cpu.pressure`、`memory.pressure`、`io.pressure`、`memory.current`、`memory.max`、`memory.peak`、`memory.events`、`pids.current`、`pids.max`：
 
 - `cgroup_cpu_usage_seconds`、`cgroup_cpu_user_seconds`、`cgroup_cpu_system_seconds`、`cgroup_cpu_throttled_seconds`
 - `cgroup_cpu_nr_periods`、`cgroup_cpu_nr_throttled`
@@ -156,9 +164,29 @@ Prometheus 的 `_bucket{le="+Inf"}` 不写入 `buckets` 数组：`buckets` 只�
 - `cgroup_memory_events_total{event="low|high|max|oom|oom_kill"}`
 - `cgroup_pids_current`、`cgroup_pids_max`
 
-`max` 值不伪造为数字，直接省略并保留原文件语义。标签 `cgroup` 为路径。
+PSI 指标：
+
+| 指标 | 类型 | 单位 | 说明 |
+|---|---|---|---|
+| `cgroup_cpu_pressure_some_avg10_ratio` / `cgroup_cpu_pressure_some_avg60_ratio` / `cgroup_cpu_pressure_some_avg300_ratio` | gauge | ratio | `cpu.pressure` 的 `some` 平均占用比例（0–1） |
+| `cgroup_cpu_pressure_some_total_seconds` | counter | seconds | `cpu.pressure` 的 `some total` 微秒值 / 1e6 |
+| `cgroup_cpu_pressure_full_avg10_ratio` / `cgroup_cpu_pressure_full_avg60_ratio` / `cgroup_cpu_pressure_full_avg300_ratio` | gauge | ratio | `cpu.pressure` 的 `full` 平均占用比例（0–1） |
+| `cgroup_cpu_pressure_full_total_seconds` | counter | seconds | `cpu.pressure` 的 `full total` 微秒值 / 1e6 |
+| `cgroup_memory_pressure_some_avg10_ratio` / `cgroup_memory_pressure_some_avg60_ratio` / `cgroup_memory_pressure_some_avg300_ratio` | gauge | ratio | `memory.pressure` 的 `some` 平均占用比例（0–1） |
+| `cgroup_memory_pressure_some_total_seconds` | counter | seconds | `memory.pressure` 的 `some total` 微秒值 / 1e6 |
+| `cgroup_memory_pressure_full_avg10_ratio` / `cgroup_memory_pressure_full_avg60_ratio` / `cgroup_memory_pressure_full_avg300_ratio` | gauge | ratio | `memory.pressure` 的 `full` 平均占用比例（0–1） |
+| `cgroup_memory_pressure_full_total_seconds` | counter | seconds | `memory.pressure` 的 `full total` 微秒值 / 1e6 |
+| `cgroup_io_pressure_some_avg10_ratio` / `cgroup_io_pressure_some_avg60_ratio` / `cgroup_io_pressure_some_avg300_ratio` | gauge | ratio | `io.pressure` 的 `some` 平均占用比例（0–1） |
+| `cgroup_io_pressure_some_total_seconds` | counter | seconds | `io.pressure` 的 `some total` 微秒值 / 1e6 |
+| `cgroup_io_pressure_full_avg10_ratio` / `cgroup_io_pressure_full_avg60_ratio` / `cgroup_io_pressure_full_avg300_ratio` | gauge | ratio | `io.pressure` 的 `full` 平均占用比例（0–1） |
+| `cgroup_io_pressure_full_total_seconds` | counter | seconds | `io.pressure` 的 `full total` 微秒值 / 1e6 |
+
+PSI 的 `avg10`/`avg60`/`avg300` 字段单位是 percent，`total` 字段单位是微秒。某 `.pressure` 文件不存在时静默跳过；文件存在但格式错误时记录 warning，不输出该文件指标。`max` 值不伪造为数字，直接省略并保留原文件语义。标签 `cgroup` 为路径。
 
 ### 4.4 Prometheus
+
+本节只覆盖 Prometheus source；`--system` 的主机整体指标单独定义在
+`docs/METRICS-SCHEMA-SYSTEM.md`，不与进程、cgroup 或 NPU 指标混为同一归因层。
 
 支持标准文本 exposition：
 

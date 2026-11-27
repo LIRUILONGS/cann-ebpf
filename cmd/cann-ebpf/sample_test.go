@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"cann-ebpf/internal/metrics"
 )
 
 func TestParseSampleArgs(t *testing.T) {
@@ -11,6 +13,7 @@ func TestParseSampleArgs(t *testing.T) {
 		"--out", "runs/metrics-test",
 		"--interval", "2s",
 		"--duration", "10m",
+		"--system",
 		"--pid", "123",
 		"--pid", "456",
 		"--cgroup", "/sys/fs/cgroup/test",
@@ -32,6 +35,9 @@ func TestParseSampleArgs(t *testing.T) {
 	}
 	if !config.JSON {
 		t.Fatal("json flag not set")
+	}
+	if !config.System {
+		t.Fatal("system flag not set")
 	}
 }
 
@@ -72,5 +78,38 @@ func TestBuildSampleSourcesProcOnly(t *testing.T) {
 	}
 	if len(sources) != 1 || sources[0].Name() != "proc" {
 		t.Fatalf("sources=%v", sources)
+	}
+}
+
+func TestBuildSampleSourcesSystemOnly(t *testing.T) {
+	sources, err := buildSampleSources(&sampleConfig{Interval: time.Second, System: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sources) != 1 || sources[0].Name() != "system" {
+		t.Fatalf("sources=%v", sources)
+	}
+	systemSource, ok := sources[0].(*metrics.SystemSource)
+	if !ok {
+		t.Fatalf("source type=%T", sources[0])
+	}
+	if systemSource.ProcRoot != "/proc" || systemSource.SysRoot != "/sys" {
+		t.Fatalf("system roots=%q/%q", systemSource.ProcRoot, systemSource.SysRoot)
+	}
+	if systemSource.Interval() != time.Second || systemSource.Timeout() != 2*time.Second {
+		t.Fatalf("system interval/timeout=%s/%s", systemSource.Interval(), systemSource.Timeout())
+	}
+}
+
+func TestBuildSampleSourcesSystemWithProc(t *testing.T) {
+	sources, err := buildSampleSources(&sampleConfig{Interval: time.Second, System: true, PIDs: []int{123}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sources) != 2 || sources[0].Name() != "proc" || sources[1].Name() != "system" {
+		t.Fatalf("sources=%v", sources)
+	}
+	if _, ok := sources[1].(*metrics.SystemSource); !ok {
+		t.Fatalf("system source type=%T", sources[1])
 	}
 }

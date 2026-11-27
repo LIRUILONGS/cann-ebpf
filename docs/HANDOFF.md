@@ -16,9 +16,9 @@
 | Linux/arm64 二进制（M3 + A1/A2） | `dist/cann-ebpf-linux-arm64-m3` |
 | 二进制大小 | `13,407,163` bytes |
 | 二进制 SHA-256 | `3fe700bb4d2345e7cee459c2c9449a1478e0b720da8db5ade29fc6f4569769c3` |
-| Linux/arm64 二进制（metrics/visual） | `dist/cann-ebpf-linux-arm64-m1m2` |
-| 二进制大小 | `14,645,153` bytes |
-| 二进制 SHA-256 | `4fd7bd27ccfcc39d1111bb989698989da8c92913752a4cc15952606d40cf1f2e` |
+| Linux/arm64 二进制（metrics/visual + system/stats） | `dist/cann-ebpf-linux-arm64-m1m2-stats` |
+| 二进制大小 | `14,730,758` bytes |
+| 二进制 SHA-256 | `1150b2dbb955a936a681f1dd7fff24b9b8677f6faef506afe4a2b7580fbe882f` |
 | collector A2 产物 | `dist/cann-mspti-a2-20261126/`（`libcannmspti.so`、`cann-mspti-selftest`、`synthetic_acl`、`SHA256SUMS.txt`） |
 | collector A2 服务器副本 | `/root/cann-ebpf/cann-mspti-a2-20261126/` |
 | 历史已验证二进制 | `dist/cann-ebpf-linux-arm64-batch`（`0.5.0-m5`，上表 SHA 已替换为 M2 构建，旧包仍保留在 dist/） |
@@ -56,8 +56,9 @@
 | 纯 eBPF vLLM batch 标准采集 | 完成 | 已并入 `spans.jsonl`/summary，真实 V4 验证通过 |
 | P0 `diagnose` 命令 | 完成 | 只读读取已有证据，JSON/Markdown，单测覆盖；不需要 NPU |
 | P1 `report` 性能仪表盘 | 完成 | 只读生成单文件离线 HTML；时间轴/散点/热力图/TopN/CDF/设备四象限，无外部依赖 |
-| 独立 metrics 采集 | 完成 | `cann-ebpf sample`；DCMI/npu-smi、进程、cgroup、Prometheus 四类源；不修改 trace 原始证据 |
+| 独立 metrics 采集 | 完成 | `cann-ebpf sample`；DCMI/npu-smi、进程、cgroup、主机 system、Prometheus 五类源；不修改 trace 原始证据 |
 | M1/M2 可视化增强 | 完成 | 延迟热图、次秒偏移热图、函数分位带、尾 cohort、多指标小倍数；有明确空态/降级原因 |
+| 指标统计表/主机指标 | 完成 | metrics series 的 current/mean/p50/p95/p99/max、counter rate；`sample --system` 采集主机 CPU/load/memory/PSI/disk/net/thermal/frequency |
 | M2 off-CPU/futex 归因 | 完成并上机验证 | sched_switch + syscalls futex tracepoint、`offcpu_ns`/`futex_ns`；V4 10 秒与合成锁竞争均通过 |
 | E 层 npu-smi 硬件指标 | 完成并上机验证 | `hardware.jsonl`、manifest artifact、`hbm_pressure`；8 设备/HBM/AICore/功耗/温度 |
 | `preflight` 环境检查 | 完成并上机验证 | 15 项检查；V4 pass=15 warn=0 fail=0 |
@@ -270,7 +271,7 @@ span_id, seq
 
 ### 3.15 独立 metrics 与 M1/M2 可视化增强
 
-- **采集命令**：`cann-ebpf sample --out <dir> [--dcmi|--npu-smi] [--pid <pid>] [--cgroup <path>]
+- **采集命令**：`cann-ebpf sample --out <dir> [--dcmi|--npu-smi|--system] [--pid <pid>] [--cgroup <path>]
   [--prometheus name=url] [--interval 2s] [--duration 30s]`。
 - **输出契约**：`metrics.jsonl` 每行一个 `cann.metrics.v1` 点，支持 gauge/counter/histogram；
   旁路 `metrics.meta.json` 记录 schema、interval、sources、status、warnings 和 artifact SHA-256。
@@ -278,6 +279,10 @@ span_id, seq
   失败不会修改 `spans.jsonl`、`device.jsonl` 或 `hardware.jsonl`。
 - **报告叠加**：`report --metrics` 只对 run 窗口内的点做派生；早于起点或晚于终点的点丢弃并写 warning，
   metrics-only 的 `HardwareAvailable` 仅在存在 `npu_*`/DCMI/npu-smi series 时为真。
+  主机系统指标见 `docs/METRICS-SCHEMA-SYSTEM.md`，只表示宿主机整体，不代表进程/cgroup/NPU。
+- **指标统计**：报告新增 `指标统计` 表，展示每个 series 的当前值、均值、p50/p95/p99、最大值和 counter 速率；
+  统计基于完整 metrics 样本，span 窗口裁剪只影响绘图序列，不重新计算统计值。
+- **主机指标**：`sample --system` 只表示宿主机整体，不等同于进程、cgroup 或 NPU 指标；缺失的 procfs/sysfs 文件不补零。
 - **空态**：每个新视图都有 `available/reason`；缺 span 或样本不足时显示原因，不插值、不补造数据。
 
 详见 `docs/METRICS-SCHEMA.md`、`docs/M1-M2-DATA-CONTRACT.md` 与 `docs/VISUALIZATION-RESEARCH.md`。
@@ -579,6 +584,7 @@ OUT="runs/ebpf-batch-$(date -u +%Y%m%dT%H%M%SZ)"
 
 # 独立 metrics（短窗口示例）；再叠加到报告
 ./cann-ebpf sample --out "$OUT/metrics" --dcmi --interval 2s --duration 10s
+./cann-ebpf sample --out "$OUT/system-metrics" --system --interval 1s --duration 10s
 ./cann-ebpf report --input "$OUT" --metrics "$OUT/metrics" --out "$OUT/report-metrics.html"
 
 # metrics-only 降级报告（无 spans，函数归因会明确不可用）

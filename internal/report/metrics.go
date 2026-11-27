@@ -22,6 +22,7 @@ type MetricsData struct {
 	Sources      []string       `json:"sources"`
 	IntervalMS   float64        `json:"interval_ms"`
 	Series       []MetricSeries `json:"series"`
+	Stats        []MetricStat   `json:"stats"`
 	Warnings     []string       `json:"warnings"`
 	Coverage     float64        `json:"coverage"`
 	ClockQuality string         `json:"clock_quality"`
@@ -43,6 +44,30 @@ type MetricSeries struct {
 	Count          int               `json:"count"`
 	Downsampled    bool              `json:"downsampled"`
 	OriginalPoints int               `json:"original_points"`
+}
+
+// MetricStat is a compact statistical summary for one emitted series. It is
+// computed from the raw points before downsampling. First and Last are the
+// first and last observed values, not timestamps. Rate fields are populated
+// for counters only and are expressed per second.
+type MetricStat struct {
+	ID       string  `json:"id"`
+	Name     string  `json:"name"`
+	Kind     string  `json:"kind"`
+	Unit     string  `json:"unit"`
+	Source   string  `json:"source"`
+	Device   string  `json:"device,omitempty"`
+	Points   int     `json:"points"`
+	First    float64 `json:"first"`
+	Last     float64 `json:"last"`
+	Min      float64 `json:"min"`
+	Max      float64 `json:"max"`
+	Mean     float64 `json:"mean"`
+	P50      float64 `json:"p50"`
+	P95      float64 `json:"p95"`
+	P99      float64 `json:"p99"`
+	RateLast float64 `json:"rate_last"`
+	RateMean float64 `json:"rate_mean"`
 }
 
 // MetricsOptions controls the report-side metrics projection. Raw JSONL is
@@ -85,6 +110,7 @@ func LoadMetrics(path string, opts MetricsOptions) (*MetricsData, error) {
 		Available:    false,
 		Sources:      []string{},
 		Series:       []MetricSeries{},
+		Stats:        []MetricStat{},
 		Warnings:     []string{},
 		ClockQuality: "mono",
 	}
@@ -186,6 +212,7 @@ func LoadMetrics(path string, opts MetricsOptions) (*MetricsData, error) {
 		if agg.point.Kind == metrics.KindHistogram {
 			series.Name += ":p95"
 		}
+		stat := computeMetricStat(series, agg.points)
 		pointsOut, downsampled := downsampleMetricPoints(agg.points, opts.MaxPoints)
 		series.T = make([]float64, len(pointsOut))
 		series.V = make([]float64, len(pointsOut))
@@ -196,6 +223,7 @@ func LoadMetrics(path string, opts MetricsOptions) (*MetricsData, error) {
 		series.Count = len(series.T)
 		series.Downsampled = downsampled
 		data.Series = append(data.Series, series)
+		data.Stats = append(data.Stats, stat)
 		sourceSet[agg.point.Source] = struct{}{}
 	}
 	if len(data.Sources) == 0 {
@@ -298,6 +326,96 @@ func downsampleMetricPoints(points []metricPoint, maxPoints int) ([]metricPoint,
 		out = out[:maxPoints]
 	}
 	return out, true
+}
+
+// computeMetricStat derives stats from the raw, sorted series points. The
+// caller computes this before downsampling so percentiles are not distorted
+// by the display projection.
+func computeMetricStat(series MetricSeries, points []metricPoint) MetricStat {
+	stat := MetricStat{
+		ID:     series.ID,
+		Name:   series.Name,
+		Kind:   series.Kind,
+		Unit:   series.Unit,
+		Source: series.Source,
+		Device: series.Device,
+	}
+	if len(points) == 0 {
+		return stat
+	}
+	values := make([]float64, len(points))
+	var sum float64
+	for i, point := range points {
+		values[i] = point.V
+		sum += point.V
+	}
+	sorted := append([]float64(nil), values...)
+	sort.Float64s(sorted)
+	stat.Points = len(points)
+	stat.First = points[0].V
+	stat.Last = points[len(points)-1].V
+	stat.Min = sorted[0]
+	stat.Max = sorted[len(sorted)-1]
+	stat.Mean = sum / float64(len(points))
+	stat.P50 = metricPercentile(sorted, 0.50)
+	stat.P95 = metricPercentile(sorted, 0.95)
+	stat.P99 = metricPercentile(sorted, 0.99)
+	if series.Kind == string(metrics.KindCounter) {
+		stat.RateLast, stat.RateMean = counterRates(points)
+	}
+	return stat
+}
+
+// metricPercentile uses the same nearest-rank definition as the span report
+// percentiles so metric and trace summaries agree.
+func metricPercentile(sorted []float64, p float64) float64 {
+	if len(sorted) == 0 {
+		return 0
+	}
+	if p <= 0 {
+		return sorted[0]
+	}
+	if p >= 1 {
+		return sorted[len(sorted)-1]
+	}
+	index := int(math.Ceil(p*float64(len(sorted)))) - 1
+	if index < 0 {
+		index = 0
+	}
+	if index >= len(sorted) {
+		index = len(sorted) - 1
+	}
+	return sorted[index]
+}
+
+// counterRates returns per-second rates for a counter. Counter resets are not
+// interpreted as negative rates: RateMean sums positive deltas over the valid
+// observed time, and RateLast is zero when the final valid delta is not
+// positive.
+func counterRates(points []metricPoint) (rateLast, rateMean float64) {
+	if len(points) < 2 {
+		return 0, 0
+	}
+	var positiveDelta, validSeconds float64
+	var lastRate float64
+	for i := 1; i < len(points); i++ {
+		deltaSeconds := (points[i].T - points[i-1].T) / 1000
+		if deltaSeconds <= 0 {
+			continue
+		}
+		validSeconds += deltaSeconds
+		delta := points[i].V - points[i-1].V
+		if delta > 0 {
+			positiveDelta += delta
+			lastRate = delta / deltaSeconds
+		} else {
+			lastRate = 0
+		}
+	}
+	if validSeconds > 0 {
+		rateMean = positiveDelta / validSeconds
+	}
+	return lastRate, rateMean
 }
 
 func metricPriority(name string) int {

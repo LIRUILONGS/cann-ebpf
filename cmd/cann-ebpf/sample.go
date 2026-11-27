@@ -56,6 +56,7 @@ type sampleConfig struct {
 	Duration   time.Duration
 	DCMI       bool
 	NPUSMI     bool
+	System     bool
 	PIDs       []int
 	Cgroups    []string
 	Prometheus []prometheusSpec
@@ -123,6 +124,7 @@ func parseSampleArgs(args []string) (*sampleConfig, error) {
 	duration := fs.Duration("duration", 0, "collection duration; 0 means until SIGINT/SIGTERM")
 	dcmi := fs.Bool("dcmi", false, "sample the dcmi_probe backend")
 	npuSMI := fs.Bool("npu-smi", false, "sample npu-smi info (minimum interval 5s)")
+	system := fs.Bool("system", false, "sample host metrics from procfs and sysfs")
 	var pids repeatInts
 	fs.Var(&pids, "pid", "process id to sample from /proc (repeatable)")
 	var cgroups repeatStrings
@@ -164,7 +166,7 @@ func parseSampleArgs(args []string) (*sampleConfig, error) {
 	}
 	return &sampleConfig{
 		Out: *out, Interval: *interval, Duration: *duration,
-		DCMI: *dcmi, NPUSMI: *npuSMI, PIDs: append([]int(nil), pids...),
+		DCMI: *dcmi, NPUSMI: *npuSMI, System: *system, PIDs: append([]int(nil), pids...),
 		Cgroups: append([]string(nil), cgroups...), Prometheus: specs,
 		Include: append([]string(nil), include...), JSON: *jsonOut,
 	}, nil
@@ -198,7 +200,7 @@ func parsePrometheusSpec(value string) (prometheusSpec, error) {
 }
 
 func buildSampleSources(config *sampleConfig) ([]metrics.Source, error) {
-	explicit := config.DCMI || config.NPUSMI || len(config.PIDs) > 0 || len(config.Cgroups) > 0 || len(config.Prometheus) > 0
+	explicit := config.DCMI || config.NPUSMI || config.System || len(config.PIDs) > 0 || len(config.Cgroups) > 0 || len(config.Prometheus) > 0
 	useDCMI := config.DCMI
 	useNPUSMI := config.NPUSMI
 	probe := ""
@@ -237,6 +239,9 @@ func buildSampleSources(config *sampleConfig) ([]metrics.Source, error) {
 	}
 	if len(config.Cgroups) > 0 {
 		sources = append(sources, metrics.NewCgroupSource(config.Cgroups, config.Interval, 2*time.Second))
+	}
+	if config.System {
+		sources = append(sources, metrics.NewSystemSource("/proc", "/sys", config.Interval, 2*time.Second))
 	}
 	for _, spec := range config.Prometheus {
 		source, err := metrics.NewPrometheusSource(metrics.PrometheusConfig{

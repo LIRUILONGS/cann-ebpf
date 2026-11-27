@@ -163,6 +163,7 @@ type MetricsData struct {
     Sources      []string       `json:"sources"`
     IntervalMS   float64        `json:"interval_ms"`
     Series       []MetricSeries `json:"series"`
+    Stats        []MetricStat   `json:"stats"`
     Warnings     []string       `json:"warnings"`
     Coverage     float64        `json:"coverage"`
     ClockQuality string         `json:"clock_quality"`
@@ -182,7 +183,38 @@ type MetricSeries struct {
     Downsampled    bool              `json:"downsampled"`
     OriginalPoints int               `json:"original_points"`
 }
+
+type MetricStat struct {
+    ID       string  `json:"id"`
+    Name     string  `json:"name"`
+    Kind     string  `json:"kind"` // gauge|counter|histogram
+    Unit     string  `json:"unit"`
+    Source   string  `json:"source"`
+    Device   string  `json:"device,omitempty"`
+    Points   int     `json:"points"`
+    First    float64 `json:"first"`
+    Last     float64 `json:"last"`
+    Min      float64 `json:"min"`
+    Max      float64 `json:"max"`
+    Mean     float64 `json:"mean"`
+    P50      float64 `json:"p50"`
+    P95      float64 `json:"p95"`
+    P99      float64 `json:"p99"`
+    RateLast float64 `json:"rate_last"`
+    RateMean float64 `json:"rate_mean"`
+}
 ```
+
+统计层约定：
+
+- 每个成功投影的 series 对应一条 `MetricStat`，顺序与 `series` 一致；被 `MaxSeries` 截断的 series 不产生 stat。
+- `points` 是该 series 过滤非法值后的原始点数；统计基于 downsample 之前的原始点，`MaxPoints` 只影响 `series.t/v` 的绘图密度，不影响 min/max/mean/percentiles。
+- `first` / `last` 是首末观测值，不是时间戳。缺失采样不插值，也不补造点。
+- `p50` / `p95` / `p99` 使用与 span 报告一致的最近秩（nearest-rank）定义。
+- histogram 的统计值来自每个采样点的 p95 点值（series 名带 `:p95`），不是从桶重新构造原始分布。
+- `rate_last` / `rate_mean` 仅对 counter 有意义，单位是“每秒”；gauge/histogram 恒为 0。counter 重置不会被解释为负速率：`rate_mean` 只累加正增量，`rate_last` 在最后一次增量为负时取 0。
+- 这是 series 级统计，不是 request 级统计；不能据此宣称单个请求的关键路径或尾延迟归因。
+- `MetricStat` 在 `LoadMetrics` 阶段基于 `metrics.jsonl` 的原始 series 计算；报告后续按 span 窗口裁剪/重排绘图序列时，不重新计算统计值。
 
 多指标小倍数默认选：
 
@@ -214,4 +246,5 @@ Histogram：
 - 合成 fixture：1s 周期尖刺、双峰延迟、空 run、metrics-only；metrics-only 报告不能补造 span。
 - metrics 点严格裁剪到 span 窗口：早于起点和晚于终点的点都丢弃并写 warning。
 - metrics-only 的 `HardwareAvailable` 仅在存在 `npu_*`/DCMI/npu-smi series 时为真。
+- `stats` 在空文件、单点、非法 histogram 和 downsample 场景下不 panic；单点 series 的 min/max/mean/p50/p95/p99 均等于该点值，rate 为 0。
 - 不引入外部 JS/CSS/CDN；不修改原始证据。

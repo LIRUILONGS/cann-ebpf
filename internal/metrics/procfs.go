@@ -74,9 +74,16 @@ func collectProcPID(root string, pid int) ([]Point, []string) {
 	points = append(points,
 		withProcIdentity(Counter("proc_cpu_user_seconds", "seconds", userSeconds, labels)),
 		withProcIdentity(Counter("proc_cpu_system_seconds", "seconds", systemSeconds, labels)),
+		withProcIdentity(Counter("proc_page_faults_minor_total", "count", float64(stat.minflt), labels)),
+		withProcIdentity(Counter("proc_page_faults_major_total", "count", float64(stat.majflt), labels)),
 	)
 	if stat.threads > 0 {
 		points = append(points, withProcIdentity(Gauge("proc_threads", "count", float64(stat.threads), labels)))
+	}
+	if fdCount, err := countDirEntries(filepath.Join(dir, "fd")); err == nil {
+		points = append(points, withProcIdentity(Gauge("proc_fds", "count", float64(fdCount), labels)))
+	} else if !os.IsNotExist(err) {
+		warnings = append(warnings, fmt.Sprintf("proc pid %d: %v", pid, err))
 	}
 
 	status, statusErr := readProcStatus(filepath.Join(dir, "status"))
@@ -85,9 +92,19 @@ func collectProcPID(root string, pid int) ([]Point, []string) {
 	}
 	if status.rssBytes != nil {
 		points = append(points, withProcIdentity(Gauge("proc_rss_bytes", "bytes", float64(*status.rssBytes), labels)))
+		points = append(points, withProcIdentity(Gauge("proc_vm_rss_bytes", "bytes", float64(*status.rssBytes), labels)))
+	}
+	if status.vsizeBytes != nil {
+		points = append(points, withProcIdentity(Gauge("proc_vm_size_bytes", "bytes", float64(*status.vsizeBytes), labels)))
 	}
 	if status.threads != nil && stat.threads <= 0 {
 		points = append(points, withProcIdentity(Gauge("proc_threads", "count", float64(*status.threads), labels)))
+	}
+	if status.voluntaryContextSwitches != nil {
+		points = append(points, withProcIdentity(Counter("proc_context_switches_voluntary_total", "count", float64(*status.voluntaryContextSwitches), labels)))
+	}
+	if status.nonvoluntaryContextSwitches != nil {
+		points = append(points, withProcIdentity(Counter("proc_context_switches_nonvoluntary_total", "count", float64(*status.nonvoluntaryContextSwitches), labels)))
 	}
 
 	if sched, err := readProcSchedstat(filepath.Join(dir, "schedstat")); err == nil {
@@ -118,6 +135,8 @@ func withProcIdentity(p Point) Point {
 
 type procStat struct {
 	comm       string
+	minflt     int64
+	majflt     int64
 	utimeTicks int64
 	stimeTicks int64
 	threads    int64
@@ -136,10 +155,16 @@ func readProcStat(path string) (procStat, error) {
 	}
 	stat := procStat{comm: text[open+1 : close]}
 	fields := strings.Fields(text[close+1:])
-	// fields[0] is field 3 (state); utime/stime are fields 14/15 and
-	// num_threads is field 20.
+	// fields[0] is field 3 (state); minflt/majflt are fields 10/12,
+	// utime/stime are fields 14/15 and num_threads is field 20.
 	if len(fields) < 18 {
 		return procStat{}, fmt.Errorf("malformed stat: %d fields", len(fields))
+	}
+	if stat.minflt, err = strconv.ParseInt(fields[7], 10, 64); err != nil {
+		return procStat{}, fmt.Errorf("stat minflt: %w", err)
+	}
+	if stat.majflt, err = strconv.ParseInt(fields[9], 10, 64); err != nil {
+		return procStat{}, fmt.Errorf("stat majflt: %w", err)
 	}
 	if stat.utimeTicks, err = strconv.ParseInt(fields[11], 10, 64); err != nil {
 		return procStat{}, fmt.Errorf("stat utime: %w", err)
@@ -154,8 +179,11 @@ func readProcStat(path string) (procStat, error) {
 }
 
 type procStatus struct {
-	rssBytes *int64
-	threads  *int64
+	rssBytes                    *int64
+	vsizeBytes                  *int64
+	threads                     *int64
+	voluntaryContextSwitches    *int64
+	nonvoluntaryContextSwitches *int64
 }
 
 func readProcStatus(path string) (procStatus, error) {
@@ -184,9 +212,24 @@ func readProcStatus(path string) (procStatus, error) {
 					out.rssBytes = &bytes
 				}
 			}
+		case "VmSize":
+			if len(fields) >= 2 && strings.EqualFold(fields[1], "kB") {
+				if kb, err := strconv.ParseInt(fields[0], 10, 64); err == nil {
+					bytes := kb * 1024
+					out.vsizeBytes = &bytes
+				}
+			}
 		case "Threads":
 			if threads, err := strconv.ParseInt(fields[0], 10, 64); err == nil {
 				out.threads = &threads
+			}
+		case "voluntary_ctxt_switches":
+			if switches, err := strconv.ParseInt(fields[0], 10, 64); err == nil {
+				out.voluntaryContextSwitches = &switches
+			}
+		case "nonvoluntary_ctxt_switches":
+			if switches, err := strconv.ParseInt(fields[0], 10, 64); err == nil {
+				out.nonvoluntaryContextSwitches = &switches
 			}
 		}
 	}
@@ -194,6 +237,14 @@ func readProcStatus(path string) (procStatus, error) {
 		return procStatus{}, err
 	}
 	return out, nil
+}
+
+func countDirEntries(path string) (int, error) {
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		return 0, err
+	}
+	return len(entries), nil
 }
 
 type procSchedstat struct {

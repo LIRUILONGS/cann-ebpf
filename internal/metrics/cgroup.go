@@ -3,6 +3,7 @@ package metrics
 import (
 	"context"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -94,6 +95,32 @@ func collectCgroupPath(path string) ([]Point, []string) {
 	} else if !os.IsNotExist(err) {
 		warnings = append(warnings, fmt.Sprintf("cgroup %s: %v", path, err))
 	}
+	for _, pressure := range []struct {
+		file   string
+		prefix string
+	}{
+		{file: "cpu.pressure", prefix: "cgroup_cpu_pressure_"},
+		{file: "memory.pressure", prefix: "cgroup_memory_pressure_"},
+		{file: "io.pressure", prefix: "cgroup_io_pressure_"},
+	} {
+		samples, err := readPressureFile(filepath.Join(path, pressure.file))
+		if err != nil {
+			if !os.IsNotExist(err) {
+				warnings = append(warnings, fmt.Sprintf("cgroup %s: %s: %v", path, pressure.file, err))
+			}
+			continue
+		}
+		for _, kind := range []string{"some", "full"} {
+			sample, ok := samples[kind]
+			if !ok {
+				continue
+			}
+			addGauge(pressure.prefix+kind+"_avg10_ratio", "ratio", sample.avg10/100)
+			addGauge(pressure.prefix+kind+"_avg60_ratio", "ratio", sample.avg60/100)
+			addGauge(pressure.prefix+kind+"_avg300_ratio", "ratio", sample.avg300/100)
+			addCounter(pressure.prefix+kind+"_total_seconds", "seconds", sample.total/1e6)
+		}
+	}
 	if value, ok := readScalarFile(filepath.Join(path, "memory.current")); ok {
 		addGauge("cgroup_memory_current_bytes", "bytes", value)
 	}
@@ -122,6 +149,75 @@ func collectCgroupPath(path string) ([]Point, []string) {
 		addGauge("cgroup_pids_max", "count", value)
 	}
 	return points, warnings
+}
+
+type pressureSample struct {
+	avg10  float64
+	avg60  float64
+	avg300 float64
+	total  float64
+}
+
+func readPressureFile(path string) (map[string]pressureSample, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]pressureSample)
+	for lineIndex, rawLine := range strings.Split(string(data), "\n") {
+		fields := strings.Fields(rawLine)
+		if len(fields) == 0 {
+			continue
+		}
+		kind := fields[0]
+		if kind != "some" && kind != "full" {
+			return nil, fmt.Errorf("line %d: unknown pressure type %q", lineIndex+1, kind)
+		}
+		if len(fields) != 5 {
+			return nil, fmt.Errorf("line %d: expected 5 fields, got %d", lineIndex+1, len(fields))
+		}
+		values := make(map[string]float64, 4)
+		for _, field := range fields[1:] {
+			key, rawValue, ok := strings.Cut(field, "=")
+			if !ok {
+				return nil, fmt.Errorf("line %d: malformed field %q", lineIndex+1, field)
+			}
+			switch key {
+			case "avg10", "avg60", "avg300", "total":
+			default:
+				return nil, fmt.Errorf("line %d: unknown pressure field %q", lineIndex+1, key)
+			}
+			if _, duplicate := values[key]; duplicate {
+				return nil, fmt.Errorf("line %d: duplicate pressure field %q", lineIndex+1, key)
+			}
+			value, err := strconv.ParseFloat(rawValue, 64)
+			if err != nil {
+				return nil, fmt.Errorf("line %d: %s: %w", lineIndex+1, key, err)
+			}
+			if math.IsNaN(value) || math.IsInf(value, 0) {
+				return nil, fmt.Errorf("line %d: %s is not finite", lineIndex+1, key)
+			}
+			values[key] = value
+		}
+		for _, key := range []string{"avg10", "avg60", "avg300", "total"} {
+			if _, ok := values[key]; !ok {
+				return nil, fmt.Errorf("line %d: missing pressure field %q", lineIndex+1, key)
+			}
+		}
+		if _, duplicate := out[kind]; duplicate {
+			return nil, fmt.Errorf("line %d: duplicate pressure type %q", lineIndex+1, kind)
+		}
+		out[kind] = pressureSample{
+			avg10:  values["avg10"],
+			avg60:  values["avg60"],
+			avg300: values["avg300"],
+			total:  values["total"],
+		}
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("empty pressure file")
+	}
+	return out, nil
 }
 
 func eventLabels(base map[string]string, event string) map[string]string {

@@ -37,7 +37,7 @@
 | 纯 eBPF vLLM batch 标准采集 | 完成；`attach --python-batch` 已并入 `spans.jsonl`/`summary`，真实 V4 验证 10 个 batch、6 个 request ID，类型确认为 `SchedulerOutput` |
 | `diagnose` 只读定位命令 | 完成；JSON `cann.diagnose.report.v1` + Markdown，单测覆盖全部过滤与判定分支，并已在 V4 真实 evidence 上只读运行 |
 | M2 host off-CPU/futex | 完成并上机验证；V4 10 秒 `attached=4 failed=0`，合成锁竞争 `host_lock_contention` 1.00 |
-| 独立 metrics 采集 | 完成；`cann-ebpf sample` 支持 DCMI/npu-smi、进程、cgroup 和 Prometheus 源，输出 `cann.metrics.v1` JSONL |
+| 独立 metrics 采集 | 完成；`cann-ebpf sample` 支持 DCMI/npu-smi、进程、cgroup、主机 system 和 Prometheus 源，输出 `cann.metrics.v1` JSONL |
 | 指标与可视化增强 | 完成；延迟热图、次秒偏移热图、分位带、尾 cohort、多指标小倍数；metrics-only 也支持降级报告 |
 | E 层 npu-smi 硬件指标 | 完成并上机验证；8 设备 HBM/AICore/功耗/温度，`hbm_pressure` |
 | `preflight` 环境检查 | 完成并上机验证；V4 pass=15 warn=0 fail=0 |
@@ -187,7 +187,7 @@ cann-ebpf attach-tracefs  tracefs 后备采集
 cann-ebpf trace           按 trace_id/parent 聚合 spans.jsonl
 cann-ebpf diagnose        只读定位报告（JSON/Markdown）
 cann-ebpf report          只读性能仪表盘（单文件 HTML）
-cann-ebpf sample          独立 metrics 采集（DCMI/npu-smi/进程/cgroup/Prometheus）
+cann-ebpf sample          独立 metrics 采集（DCMI/npu-smi/进程/cgroup/system/Prometheus）
 cann-ebpf metrics         Prometheus 指标（text 或 /metrics）
 cann-ebpf version         版本和平台
 ```
@@ -303,6 +303,8 @@ V4，只读取 `SchedulerOutput.num_scheduled_tokens` 的请求 ID 键和 dict �
 
 # 同时叠加一次独立 metrics 采集；目录或 metrics.jsonl 都支持
 ./cann-ebpf sample --out runs/metrics-20261127T101500Z --dcmi --interval 2s --duration 30s
+# 主机整体 CPU/load/memory/PSI/disk/net/thermal/frequency
+./cann-ebpf sample --out runs/system-metrics-20261127T101500Z --system --interval 1s --duration 30s
 ./cann-ebpf report --input runs/ebpf-... --metrics runs/metrics-... --out report.html
 
 # 调慢阈值/最小耗时、只看某个容器里的 device 时间线
@@ -581,6 +583,8 @@ unicode dict，单次最多 64 个 key；batch span 写入标准 `spans.jsonl`�
 - `docs/HANDOFF.md`：交接总览、已完成/未完成、下一步与硬约束。
 - `docs/DIAGNOSE.md`：`diagnose` 用法、时间窗语义、判定规则和边界。
 - `docs/METRICS-SCHEMA.md`：`sample` 命令、`cann.metrics.v1`/`cann.metrics.meta.v1` 契约与退出码。
+- `docs/METRICS-SCHEMA-SYSTEM.md`：`sample --system` 的主机指标来源、单位和解释边界。
+- `docs/METRICS-CATALOG.md`：已有/本轮新增/建议新增指标，以及 LLM 停机对采集验收的影响。
 - `docs/M1-M2-DATA-CONTRACT.md`：metrics、热图、分位带、cohort 的并行开发数据契约。
 - `docs/VISUALIZATION-RESEARCH.md`：可视化论文调研、候选图表、分期方案和不可用边界。
 - `docs/M2-OFFCPU.md`：M2 设计、判定口径和边界。
