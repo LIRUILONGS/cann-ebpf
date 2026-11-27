@@ -101,3 +101,25 @@
 | 任务提交 | `trs_ioctl`、`devdrv_msg_ring_doorbell`、`devdrv_set_sq_doorbell`、`devdrv_dma_done_task` | 可实现 |
 | SVM | `devmm_svm_mmap` / `devmm_svm_munmap` 未在本次精确符号清单出现 | 需真机 `kallsyms` 复核；缺失时明确 `unavailable`，不补零 |
 | XSMEM | 未在本次精确符号清单出现 | 当前应视为 `unavailable`，除非后续确认 `ascend_xsmem` 导出的函数名 |
+
+## 8. 真机验证（2026-11-28）
+
+目标机 bms-84865758 / 36.137.90.82，aarch64，kernel 5.10.0-136.108.0.188.31.oe2203sp1.bclinux.aarch64，root。验证对象 orinfer PID 2796550，只读采样 12 秒，没有重启、停止或压测服务。
+
+- binary: /tmp/cann-ebpf-driverfix-20261128
+- binary sha256: 16d1c2fc11c5eaa1b6d475805ce2db88aba32f5a52bf8a1a3873fd4714596d3a
+- run: /tmp/cann-ebpf-runs/driver-fix-20261128T190100Z
+- metrics points: 29247
+- metrics sha256: a46f1829a90c5700144b4bcd4097101b429478a9db43d7c3b7e735e288a0be8c
+- sources: driver-ebpf, proc
+
+结果：
+
+- collection 正常加载；npu_driver_source_info 为 status=degraded，probes_attached=24，probes_failed=9。
+- npu_driver_metric_status 最新快照：47 个 available，24 个 unavailable。
+- devmm_svm_ioctl、devmm_svm_mmap 同时在 drv_devmm_host 和 drv_devmm_host_agent 导出；未猜模块，相关指标标 ambiguous_kernel_symbol 并跳过。
+- xsmem_alloc/free/pool_* 在当前 /proc/kallsyms 不存在，标 symbol_not_found；不补零。
+- trs_ioctl 的 npu_ioctl_total、npu_ioctl_latency_ns、npu_task_submit_total、npu_task_wait_ns 可用。
+- iommu_dma_map_page 的 map latency/count 可用；部分厂商 devdrv_* 的 byte 指标仍因 size 签名未确认标 size_signature_unverified。
+
+边界：source_info=degraded 是预期降级，不是全量驱动采集成功；报告必须同时读取 npu_driver_metric_status。

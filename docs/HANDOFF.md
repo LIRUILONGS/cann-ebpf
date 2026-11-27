@@ -12,7 +12,7 @@
 | 本地工作区 | `C:\Users\liruilong\pentagi\cann-ebpf` |
 | Git 分支 | `main` |
 | 最新提交 | 见 `git log -1`（M3 A1/A2、diagnose/metrics、A3-A8 收尾） |
-| Git remote | 未配置；交接前建议先配置内部 Git 远程并推送 |
+| Git remote | git@github.com:LIRUILONGS/cann-ebpf.git |
 | Linux/arm64 二进制（M3 + A1/A2） | `dist/cann-ebpf-linux-arm64-m3` |
 | 二进制大小 | `13,407,163` bytes |
 | 二进制 SHA-256 | `3fe700bb4d2345e7cee459c2c9449a1478e0b720da8db5ade29fc6f4569769c3` |
@@ -654,3 +654,10 @@ OUT="runs/ebpf-m2-$(date -u +%Y%m%dT%H%M%SZ)"
 
 
 
+
+## 8. 2026-11-28 增量验证记录
+
+- 当前修复提交：926d877；上一提交 3f517b7 已推送到 origin/main。
+- DCMI/HCCS 真实 run：49,319 points，1,413 条 series，报告可绘制 1,429 条（含 histogram 展开）。
+- 驱动层真机验证：source_info=degraded，24 probes attached，9 failed；证据见 docs/DRIVER-METRICS.md 第 8 节。
+- 当前报告生产数据层是 4 个 host 视图：load_latency、off_cpu、operator_treemap、service_topology；历史六视图未接入。
