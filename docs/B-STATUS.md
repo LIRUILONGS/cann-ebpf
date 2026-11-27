@@ -58,6 +58,9 @@
   各 2 轮；client rps off 8.616→on 9.146（-6.15%，on 略快）、client p95 -1.92%、
   agent CPU -0.065pp、dropped 0、health 151/151=200。噪声 stdev/median≈11.8%，
   2 轮不能证明严格 <3%；详见 `docs/B3-V41-GATE.md`。
+- **B3 V4 固定负载（不停机）**：1 并发、30 秒、off/on 各 3 轮；client rps 0.400→0.400（0%），
+  client p95 4.574→5.193s（+13.5%，严格阈值不通过），agent CPU 1.20%→1.13%、dropped 0；
+  样本仅 11–15 个请求且生产流量干扰，**不能归因**。详见 `docs/B3-V4-GATE.md`。
 - **V4.1 切换完成**：V4 已停，`orinfer-v41` active，`127.0.0.1:8000/health` 200，
   `/v1/models` 返回 `deepseek-v4.1`；collector env block 已移除，无 device 文件。
 - **B2 Orinfer 采集（有负载）成功**：20 秒、2 并发固定请求，`spans=584`，包含
