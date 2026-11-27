@@ -28,6 +28,7 @@ func cmdReport(args []string) int {
 	bucketCount := fs.Int("buckets", 160, "number of time buckets used by the heatmap and device busy chart")
 	deviceMode := fs.String("device-mode", "matched", "device embedding: matched or none")
 	deviceContainerID := fs.String("device-container-id", "", "container id used to translate device pid/tid when pidmap.json is absent")
+	maxSeries := fs.Int("max-series", 256, "maximum number of metric series embedded in the report")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -39,7 +40,7 @@ func cmdReport(args []string) int {
 		fmt.Fprintln(os.Stderr, "report: --out must not be empty")
 		return 2
 	}
-	if *minDuration < 0 || *slowThreshold < 0 || *topN <= 0 || *maxLanes <= 0 || *bucketCount <= 0 {
+	if *minDuration < 0 || *slowThreshold < 0 || *topN <= 0 || *maxLanes <= 0 || *bucketCount <= 0 || *maxSeries <= 0 {
 		fmt.Fprintln(os.Stderr, "report: durations must be non-negative and counts must be positive")
 		return 2
 	}
@@ -74,7 +75,7 @@ func cmdReport(args []string) int {
 	}
 	var metricsData *report.MetricsData
 	if path != "" {
-		metricsData, err = report.LoadMetrics(path, report.MetricsOptions{})
+		metricsData, err = report.LoadMetrics(path, report.MetricsOptions{MaxSeries: *maxSeries})
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "report: metrics: %v\n", err)
 			return 4

@@ -337,6 +337,21 @@ func findMetricStat(stats []MetricStat, name string) *MetricStat {
 	return nil
 }
 
+func TestMetricPriorityKeepsOrinferCriticalSeries(t *testing.T) {
+	generic := metricPriority("orinfer_admission_seconds_total")
+	for _, name := range []string{
+		"orinfer_requests_running",
+		"orinfer_requests_waiting",
+		"orinfer_request_time_to_first_token_seconds:p95",
+		"orinfer_request_latency_seconds:p95",
+		"orinfer_generated_tokens_total",
+	} {
+		if metricPriority(name) >= generic {
+			t.Fatalf("metricPriority(%q) = %d, want < %d", name, metricPriority(name), generic)
+		}
+	}
+}
+
 func assertClose(t *testing.T, got, want float64) {
 	t.Helper()
 	if math.Abs(got-want) > 1e-9 {
