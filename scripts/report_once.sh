@@ -3,8 +3,8 @@
 # Read-only: never restarts or modifies the target process.
 set -eu
 
-BIN=${BIN:-cann-ebpf}
-PROFILE=${PROFILE:-vllm-ascend}
+BIN=${BIN:-./cann-ebpf}
+PROFILE=${PROFILE:-auto}
 PROFILES_DIR=${PROFILES_DIR:-profiles}
 DURATION=${DURATION:-10m}
 FREQ=${FREQ:-99}
@@ -16,29 +16,53 @@ WITH_STACKS=${WITH_STACKS:-1}
 
 usage() {
   cat <<'EOF'
-usage: report_once.sh --pid PID [--pid PID ...] --out DIR [options]
-       report_once.sh --pid auto --out DIR [options]
+usage: report_once.sh --out DIR [options]
+       report_once.sh --pid PID [--pid PID ...] --out DIR [options]
 
-  --pid PID            target host PID; repeat for vLLM (frontend/EngineCore/Workers)
-                       or pass "auto" to use profile discovery
+  --pid PID            optional host PID; repeat for vLLM (frontend/EngineCore/Workers)
+                       omit or "auto" to auto-detect Orinfer or vLLM
   --out DIR            new output directory (must not exist)
   --duration DUR       collection duration (default 10m)
   --freq HZ            stack sampling frequency (default 99)
-  --profile NAME       discovery profile (default vllm-ascend; V4.1 use orinfer)
+  --profile NAME       auto|vllm-ascend|orinfer (default auto)
   --profiles-dir DIR   profile directory (default profiles)
-  --bin PATH           cann-ebpf binary (default cann-ebpf)
+  --bin PATH           cann-ebpf binary (default ./cann-ebpf)
   --metrics MODE       auto|on|off (default auto)
   --no-stacks          skip kernel stack sampling / flamegraph
   --yes                required only for --metrics on against a live service
+
+Examples:
+  ./scripts/report_once.sh --out runs/report-$(date -u +%Y%m%dT%H%M%SZ)
+  ./scripts/report_once.sh --pid 1234 --profile orinfer --out runs/report-...
+  PIDS=$(pgrep -f 'VLLM::Worker_TP|VLLM::EngineCore|vllm serve' | sort -u)
+  ./scripts/report_once.sh $(for p in $PIDS; do echo --pid $p; done) --out runs/report-...
 
 Outputs:
   DIR/attach/{spans.jsonl,metrics.jsonl,...}
   DIR/stacks/{stacks.folded,stacks.meta.json}
   DIR/report.html
 
-This command only reads evidence; it does not send load requests.
-For a pressure/sweep run, use scripts/run_sweep.sh separately.
+Read-only: no load requests, no service restart.
+For pressure testing use scripts/run_sweep.sh separately.
 EOF
+}
+
+detect_profile() {
+  if pgrep -f '/opt/orinfer/bin/orinfer serve' >/dev/null 2>&1; then
+    echo orinfer
+  elif pgrep -f 'vllm serve|VLLM::Worker_TP|VLLM::EngineCore' >/dev/null 2>&1; then
+    echo vllm-ascend
+  else
+    echo ""
+  fi
+}
+
+resolve_pids() {
+  case "$1" in
+    orinfer) pgrep -f '/opt/orinfer/bin/orinfer serve' 2>/dev/null || true ;;
+    vllm-ascend) pgrep -f 'vllm serve|VLLM::Worker_TP|VLLM::EngineCore' 2>/dev/null | sort -u ;;
+    *) pgrep -f '/opt/orinfer/bin/orinfer serve|vllm serve|VLLM::Worker_TP|VLLM::EngineCore' 2>/dev/null | sort -u ;;
+  esac
 }
 
 YES=0
@@ -71,23 +95,41 @@ while [ $# -gt 0 ]; do
   shift
 done
 
-if [ "$PID_AUTO" -eq 0 ] && [ -z "$(printf '%s' "$PIDS" | tr -d ' ')" ]; then
-  echo "--pid is required (repeat for vLLM multi-process, or use --pid auto)" >&2
-  exit 2
-fi
 [ -n "$OUT" ] || { echo "--out is required" >&2; exit 2; }
 [ ! -e "$OUT" ] || { echo "refusing to overwrite: $OUT" >&2; exit 2; }
 [ "$METRICS" = "on" ] && [ "$YES" -ne 1 ] && { echo "--metrics on requires --yes" >&2; exit 2; }
+if [ ! -x "$BIN" ] && [ -x "dist/cann-ebpf-linux-arm64" ]; then
+  BIN="dist/cann-ebpf-linux-arm64"
+fi
+[ -x "$BIN" ] || { echo "binary is not executable: $BIN (pass --bin)" >&2; exit 4; }
 
-if [ "$PID_AUTO" -eq 1 ]; then
-  PID_ARGS="--pid auto"
-else
-  PID_ARGS=""
-  for p in $PIDS; do PID_ARGS="$PID_ARGS --pid $p"; done
+if [ "$PROFILE" = "auto" ]; then
+  PROFILE=$(detect_profile)
+  [ -n "$PROFILE" ] || {
+    echo "no target process found; use --pid or run:" >&2
+    echo "  Orinfer: pgrep -af '/opt/orinfer/bin/orinfer serve'" >&2
+    echo "  vLLM:    pgrep -af 'vllm serve|VLLM::Worker_TP|VLLM::EngineCore'" >&2
+    exit 4
+  }
 fi
 
+if [ "$PID_AUTO" -eq 1 ] || [ -z "$(printf '%s' "$PIDS" | tr -d ' ')" ]; then
+  RESOLVED=$(resolve_pids "$PROFILE")
+  [ -n "$RESOLVED" ] || {
+    echo "no PID matched profile $PROFILE; list candidates with:" >&2
+    echo "  Orinfer: pgrep -af '/opt/orinfer/bin/orinfer serve'" >&2
+    echo "  vLLM:    pgrep -af 'vllm serve|VLLM::Worker_TP|VLLM::EngineCore'" >&2
+    exit 4
+  }
+  PIDS=$(printf '%s\n' "$RESOLVED" | tr '\n' ' ')
+fi
+
+PID_ARGS=""
+for p in $PIDS; do PID_ARGS="$PID_ARGS --pid $p"; done
+[ -n "$PID_ARGS" ] || { echo "no target PID" >&2; exit 4; }
+
 mkdir -p "$OUT/attach"
-echo "pids=${PID_ARGS} duration=$DURATION out=$OUT"
+echo "profile=$PROFILE pids=${PID_ARGS# } duration=$DURATION out=$OUT"
 # shellcheck disable=SC2086
 "$BIN" attach \
   $PID_ARGS \

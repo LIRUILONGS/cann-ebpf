@@ -121,18 +121,29 @@ OUT="runs/ebpf-$(date -u +%Y%m%dT%H%M%SZ)"
 
 ### 一条命令出报告（host span + 火焰图）
 
-`scripts/report_once.sh` 把 attach、stacks、report 串成一条命令：
+`scripts/report_once.sh` 把 attach、stacks、report 串成一条命令。  
+**不传 PID 时会自动识别目标**：
 
 ```bash
-PID=$(ps -eo pid,args | grep 'orinfer serve' | grep -v grep | awk '{print $1}' | head -1)
-
 sh scripts/report_once.sh \
-  --pid "$PID" \
-  --profile orinfer \
-  --profiles-dir /opt/cann-ebpf/profiles \
   --duration 10m \
-  --bin /opt/cann-ebpf/bin/cann-ebpf-report-demo \
-  --out "/var/log/cann-ebpf/runs/report-once-$(date -u +%Y%m%dT%H%M%SZ)"
+  --out "runs/report-$(date -u +%Y%m%dT%H%M%SZ)"
+```
+
+自动识别规则：
+
+- 找到 `/opt/orinfer/bin/orinfer serve` → profile=`orinfer`，取该主进程 PID
+- 找到 `vllm serve` / `VLLM::Worker_TP` / `VLLM::EngineCore` → profile=`vllm-ascend`，取全部相关 PID
+- 找不到 → 报错并打印 `pgrep` 排查命令，不会静默采空
+
+二进制默认找 `./cann-ebpf`；如果不存在，会回退到 `dist/cann-ebpf-linux-arm64`。也可以显式指定：
+
+```bash
+sh scripts/report_once.sh \
+  --bin ./dist/cann-ebpf-linux-arm64 \
+  --profiles-dir ./profiles \
+  --duration 10m \
+  --out "runs/report-$(date -u +%Y%m%dT%H%M%SZ)"
 ```
 
 产物：
@@ -146,18 +157,25 @@ sh scripts/report_once.sh \
 
 它**不发压测请求**；只做只读采集和离线报告。要压测请单独用 `scripts/run_sweep.sh`。
 
-### V4 vLLM 多进程怎么传 PID
+### 显式指定 PID（自动识别失败时）
 
-V4 不是一个进程：通常有 frontend、`VLLM::EngineCore`、8 个 `VLLM::Worker_TP`。  
-只传一个 PID 只能采一个进程。
+单进程 Orinfer：
 
-显式取全部 PID：
+```bash
+sh scripts/report_once.sh \
+  --pid 1571634 --profile orinfer \
+  --profiles-dir /opt/cann-ebpf/profiles \
+  --duration 10m \
+  --bin /opt/cann-ebpf/bin/cann-ebpf-report-demo \
+  --out "/var/log/cann-ebpf/runs/report-once-$(date -u +%Y%m%dT%H%M%SZ)"
+```
+
+vLLM 多进程：传重复 `--pid`，或逗号分隔。
 
 ```bash
 PIDS=$(pgrep -f 'vllm serve|VLLM::Worker_TP|VLLM::EngineCore' | sort -u)
 PID_ARGS=""
 for p in $PIDS; do PID_ARGS="$PID_ARGS --pid $p"; done
-echo "$PID_ARGS"
 
 sh scripts/report_once.sh $PID_ARGS \
   --profile vllm-ascend \
@@ -167,17 +185,7 @@ sh scripts/report_once.sh $PID_ARGS \
   --out "/var/log/cann-ebpf/runs/report-v4-$(date -u +%Y%m%dT%H%M%SZ)"
 ```
 
-也可以让 `attach` 用 profile 自动发现：
-
-```bash
-sh scripts/report_once.sh \
-  --pid auto --profile vllm-ascend --profiles-dir /opt/cann-ebpf/profiles \
-  --duration 10m --bin /opt/cann-ebpf/bin/cann-ebpf-report-demo \
-  --out "/var/log/cann-ebpf/runs/report-v4-auto-$(date -u +%Y%m%dT%H%M%SZ)"
-```
-
-`--pid auto` 依赖 profile 匹配，V4 上曾出现过匹配不到；多进程场景**优先用显式 PID 列表**。  
-`stacks --pid auto` 还会从当前目录找 `profiles`，建议在仓库根目录执行，或直接用显式 PID。
+`--pid auto` 也可以，但显式 PID 列表更可控；`stacks` 在多进程场景建议用显式列表。
 
 ## 报告里有什么
 
