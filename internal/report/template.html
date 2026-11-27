@@ -60,6 +60,7 @@ input[type="number"] { width: 76px; }
 button { background: #13233d; color: var(--text); border: 1px solid #2c4266; border-radius: 6px; padding: 5px 10px; font: inherit; cursor: pointer; }
 button:hover { border-color: var(--accent); color: #fff; }
 .hint { color: var(--dim); font-size: 11px; margin: 2px 0 8px; }
+.chart-note { color: #8aa0bd; font-size: 11px; line-height: 1.55; margin: 8px 0 0; padding-top: 7px; border-top: 1px solid rgba(52,78,113,.55); }
 .scroll { max-height: 660px; overflow: auto; border-radius: 8px; }
 canvas { display: block; }
 .grid2 { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, .85fr); gap: 12px; }
@@ -353,6 +354,7 @@ footer { color: var(--dim); font-size: 11px; margin-top: 20px; border-top: 1px s
     <div class="fg-status" id="flamegraphStatus" role="status" hidden></div>
     <div class="scroll fg-scroll"><div id="flamegraphSvg"></div></div>
     <div class="fg-table-wrap" id="flamegraphTable"></div>
+    <div class="chart-note"><b>怎么看：</b>横轴是样本数，方块越宽=采样命中占比越高；纵轴是调用栈，越往下越靠近栈底。点击方块缩放、搜索函数/模块。宽块表示“CPU 常在这条内核路径上”，不等于精确耗时，也不含 AI Core 算子。</div>
     <noscript><div class="fg-unavailable-card"><b>火焰图需要 JavaScript</b><span>报告数据已内嵌；stacks.folded 也可直接用其他折叠栈工具离线打开。</span></div></noscript>
   </section>
 
@@ -371,6 +373,7 @@ footer { color: var(--dim); font-size: 11px; margin-top: 20px; border-top: 1px s
     </div>
     <div class="hint">滚轮缩放 · 拖拽平移 · 双击复位；全窗口视图下自动切换为密度条，避免毫秒级 span 不可见。</div>
     <div class="scroll"><canvas id="timeline"></canvas></div>
+    <div class="chart-note"><b>怎么看：</b>横轴是时间，纵轴是 TID；一条横条就是一次 host CANN 调用，越长越慢。sync 条多说明 host 在等设备返回；空白多说明线程没在跑 CANN。下方设备 stream 只在有 device 证据时出现。</div>
   </section>
 
   <section class="panel">
@@ -382,6 +385,7 @@ footer { color: var(--dim); font-size: 11px; margin-top: 20px; border-top: 1px s
       <div class="legend"><span><i style="background:#ff6b6b"></i>sync</span><span><i style="background:#2ec4b6"></i>memory</span><span><i style="background:#7f8fa6"></i>handle</span><span><i style="background:#ffd166"></i>event</span><span><i style="background:#4cc9f0"></i>submit</span><span><i style="background:#b388ff"></i>hccl</span></div>
     </div>
     <canvas id="scatter"></canvas>
+    <div class="chart-note"><b>怎么看：</b>每个点是一次调用，越靠上越慢。同一时间竖线密集=突发；周期性尖刺=定时任务/轮询；长期高位=该函数本身慢。</div>
   </section>
 
   <div class="grid2">
@@ -396,6 +400,7 @@ footer { color: var(--dim); font-size: 11px; margin-top: 20px; border-top: 1px s
         </div>
       </div>
       <div class="scroll"><canvas id="heatmap"></canvas></div>
+      <div class="chart-note"><b>怎么看：</b>亮格=该时间桶的 p95 或慢调用数高；横向亮带=持续慢，竖线=瞬时尖刺。</div>
     </section>
     <section class="panel">
       <div class="panel-head">
@@ -405,6 +410,7 @@ footer { color: var(--dim); font-size: 11px; margin-top: 20px; border-top: 1px s
         </div>
       </div>
       <div id="topn"></div>
+      <div class="chart-note"><b>怎么看：</b>条形越长=总耗时越高；次数多但 p95 低是频繁小调用，p95 高是少数慢调用。先看总耗时，再看 p95/max 判断是否尾延迟。</div>
     </section>
   </div>
 
@@ -423,6 +429,7 @@ footer { color: var(--dim); font-size: 11px; margin-top: 20px; border-top: 1px s
     </div>
     <div class="scroll"><canvas id="latencyHeatmap"></canvas></div>
     <div class="empty" id="latencyHeatmapEmpty" style="display:none"></div>
+    <div class="chart-note"><b>怎么看：</b>每列是一段时间，每行是一个延迟区间；亮块=该延迟段的调用多。p95/p99 线整体抬升=尾部变慢；出现两个亮团=有两类调用混在一起。</div>
   </section>
 
   <div class="grid2">
@@ -436,6 +443,7 @@ footer { color: var(--dim); font-size: 11px; margin-top: 20px; border-top: 1px s
       </div>
       <div class="scroll"><canvas id="subsecondHeatmap"></canvas></div>
       <div class="empty" id="subsecondHeatmapEmpty" style="display:none"></div>
+      <div class="chart-note"><b>怎么看：</b>纵轴是事件在“秒内”的位置，不是延迟；固定水平亮带说明每秒/每分钟有周期性抖动。</div>
     </section>
     <section class="panel" id="aggregateBandsPanel">
       <div class="panel-head">
@@ -451,6 +459,7 @@ footer { color: var(--dim); font-size: 11px; margin-top: 20px; border-top: 1px s
       </div>
       <div class="scroll"><canvas id="aggregateBands"></canvas></div>
       <div class="empty" id="aggregateBandsEmpty" style="display:none"></div>
+      <div class="chart-note"><b>怎么看：</b>每个函数一行，p50 实线、p95 阴影、p99 虚线。阴影越宽=波动越大；p99 远高于 p50=尾延迟重。</div>
     </section>
   </div>
 
@@ -462,6 +471,7 @@ footer { color: var(--dim); font-size: 11px; margin-top: 20px; border-top: 1px s
       </div>
     </div>
     <div id="cohort"></div>
+    <div class="chart-note"><b>怎么看：</b>比较“最慢 5%”与“典型样本”的函数/类别占比、off-CPU、futex。某类别在慢尾明显升高，说明它贡献了尾延迟；占比是 cohort 内占比，不是全量。</div>
   </section>
   </div>
 
@@ -497,6 +507,7 @@ footer { color: var(--dim); font-size: 11px; margin-top: 20px; border-top: 1px s
       </div>
       <div class="metrics-stats-empty" id="metricsStatsEmpty" hidden></div>
     </div>
+    <div class="chart-note"><b>怎么看：</b>每行一个指标组，曲线是组均值；counter 自动显示 Δ/s。先看 CPU/内存/NPU/HBM/ECC/PCIe 是否异常，再对照时间线和延迟图判断因果。</div>
   </section>
 
   <div class="grid2">
@@ -508,6 +519,7 @@ footer { color: var(--dim); font-size: 11px; margin-top: 20px; border-top: 1px s
         </div>
       </div>
       <canvas id="cdf"></canvas>
+      <div class="chart-note"><b>怎么看：</b>曲线越靠右下=尾越重；p95/p99 与曲线交点表示 95%/99% 的调用低于该耗时。当前是全部 host span 的汇总 CDF，不按函数拆分。</div>
     </section>
     <section class="panel" id="quadrantPanel" style="display:none">
       <div class="panel-head">
