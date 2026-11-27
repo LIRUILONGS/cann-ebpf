@@ -187,6 +187,15 @@ canvas { display: block; }
 .cohort-delta.up { color: #ffb703; }
 .cohort-delta.down { color: #2ec4b6; }
 .cohort-notes { margin-top: 9px; color: var(--dim); font-size: 11px; line-height: 1.5; }
+.metrics-category-head { margin: 12px 0 2px; padding-left: 10px; border-left: 3px solid #4cc9f0; }
+.metrics-category-head h3 { margin: 0 0 3px; font-size: 15px; font-weight: 600; }
+.metrics-category-head p { margin: 0; color: var(--dim); font-size: 11px; line-height: 1.6; }
+.metrics-hook-doc { margin: 6px 0 8px; border: 1px solid rgba(36,54,83,.55); border-radius: 8px; background: rgba(10,18,34,.45); padding: 6px 10px; }
+.metrics-hook-doc summary { cursor: pointer; color: var(--muted); font-size: 11.5px; }
+.metrics-hook-table { width: 100%; border-collapse: collapse; margin-top: 6px; font-size: 10.5px; }
+.metrics-hook-table th, .metrics-hook-table td { border-top: 1px solid rgba(36,54,83,.45); padding: 4px 6px; text-align: left; vertical-align: top; }
+.metrics-hook-table th { color: var(--dim); font-weight: 500; }
+
 .metrics-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 10px 0 6px; }
 .metrics-search { flex: 1 1 240px; min-width: 210px; max-width: 420px; background: #0a1222; color: var(--text); border: 1px solid #2c4266; border-radius: 6px; padding: 5px 8px; font: inherit; }
 .metrics-search::placeholder { color: var(--dim); }
@@ -772,7 +781,7 @@ function renderKPIs() {
     document.getElementById('kpis').innerHTML = cards.map((card) => '<div class="kpi"><div class="kpi-label">' + esc(card[0]) + '</div><div class="kpi-value">' + esc(card[1]) + '</div><div class="kpi-sub">' + esc(card[2]) + '</div></div>').join('');
     return;
   }
-  if (METRICS && METRICS.available && Array.isArray(METRICS.series) && METRICS.series.length) {
+  if (METRICS && METRICS.available && Array.isArray(METRICS.series) && METRICS.series.length && (!DATA.summary || !DATA.summary.spans)) {
     const rendered = numeric(METRICS.rendered_series, METRICS.series.length);
     const eligible = numeric(METRICS.eligible_series, rendered);
     const sources = Array.isArray(METRICS.sources) ? METRICS.sources.length : 0;
@@ -3472,7 +3481,7 @@ const metricsState = {
   crosshair: null,
   matrixHover: null,
   selectedKey: '',
-  source: 'all',
+  source: '',
   query: '',
   changedOnly: false,
   sort: 'change',
@@ -3491,7 +3500,11 @@ const METRIC_LINE_COLORS = [
 ];
 const METRIC_DETAIL_MAX_ROWS = 12;
 const METRIC_SOURCE_COLORS = {
+  'dcmi': '#4cc9f0',
   'npu-smi': '#4cc9f0',
+  'npu-smi-hccs': '#2ec4b6',
+  'driver-ebpf': '#ffb703',
+  'prometheus:orinfer': '#b388ff',
   'prometheus:vllm': '#ffb703',
   'proc': '#b388ff',
   'system': '#2ec4b6',
@@ -3792,14 +3805,65 @@ function buildMetricGroupBuckets(group, minT, maxT) {
 
 function metricSourceLabel(source) {
   const lower = String(source || '').toLowerCase();
-  if (lower.includes('dcmi')) return 'DCMI';
-  if (lower.includes('npu-smi')) return 'NPU-smi';
-  if (lower.includes('npu')) return 'NPU';
+  if (lower.includes('dcmi')) return 'DCMI 设备';
+  if (lower.includes('npu-smi')) return 'HCCS 链路';
+  if (lower.includes('driver')) return '驱动 hook';
+  if (lower.includes('prometheus')) return 'Orinfer';
   if (lower.includes('vllm')) return 'vLLM';
   if (lower.includes('proc')) return '进程';
   if (lower.includes('system') || lower.includes('node')) return '主机';
   if (lower.includes('cgroup')) return 'cgroup';
   return source || 'other';
+}
+
+function metricCategoryInfo(source) {
+  const lower = String(source || '').toLowerCase();
+  if (lower.includes('dcmi')) return {
+    title: 'DCMI 设备指标矩阵',
+    note: 'DCMI 是设备级健康/功耗/温度/频率/HBM/AICore/ECC 指标（10s 采样）。每行是 8 卡均值，点开行看每卡曲线；不要和驱动 hook 混读。',
+    detail: `<table class="metrics-hook-table">
+<tr><th>组</th><th>指标</th><th>怎么看</th></tr>
+<tr><td>利用率/频率</td><td>npu_aicore_utilization_ratio、npu_aivector_utilization_ratio、npu_aicore_clock_mhz、npu_hbm_clock_mhz</td><td>8 卡折线或热力图；长期低但请求排队，说明瓶颈不在算力；频率明显低于 max 先查降频</td></tr>
+<tr><td>HBM/温度/功耗</td><td>npu_hbm_used_bytes、npu_hbm_bandwidth_util_ratio、npu_temperature_celsius、npu_power_watts</td><td>使用率看水位，带宽利用率看是否被 HBM 限制；温度/功耗和频率叠图看降频</td></tr>
+<tr><td>ECC/PCIe/健康</td><td>npu_hbm_ecc_*、npu_pcie_*_errors_total、npu_health</td><td>累计 counter 看是否增长；双比特 ECC 和 PCIe 错误优先处理；健康状态用状态表，不画折线</td></tr>
+</table>`
+  };
+  if (lower.includes('npu-smi')) return {
+    title: 'HCCS 链路指标矩阵',
+    note: 'HCCS 是 8 卡 × 7 lane 的链路计数器（30s 采样）。tx/rx 为累计 counter，矩阵按 Δ/s 画；retry/error 应长期为 0，非 0 时优先查链路。',
+    detail: `<table class="metrics-hook-table">
+<tr><th>组</th><th>指标</th><th>怎么看</th></tr>
+<tr><td>链路状态</td><td>npu_hccs_healthy、npu_hccs_lane_mode、npu_hccs_link_speed</td><td>8 卡状态表；lane mode/speed 是 raw 值，和硬件拓扑核对</td></tr>
+<tr><td>流量</td><td>npu_hccs_tx_packets_total、npu_hccs_rx_packets_total、npu_hccs_tx_bytes_total、npu_hccs_rx_bytes_total</td><td>先转 Δ/s，再画 8×7 lane 热力图；看流量是否只压在某几个 lane</td></tr>
+<tr><td>错误</td><td>npu_hccs_retry_total、npu_hccs_error_total</td><td>应为 0；非 0 用红色状态块，不混在流量折线里</td></tr>
+</table>`
+  };
+  if (lower.includes('driver')) return {
+    title: '驱动 hook 指标矩阵',
+    note: '驱动层是 kprobe/kretprobe + syscalls tracepoint：ioctl 看命令入口/返回；hdc_* 看 host-device 通道；task_submit/done 看任务门铃；dma_map/unmap、iova、svm、xsmem 看内存/地址映射；mmap 看用户态映射。counter 按 Δ/s，延迟看 detail 的 p50/p95/p99。',
+    detail: `<table class="metrics-hook-table">
+<tr><th>阶段</th><th>挂载符号</th><th>看什么</th></tr>
+<tr><td>ioctl 入口</td><td>drv_ascend_intf_ioctl、devmm_svm_ioctl、hdcdrv_ioctl、trs_ioctl</td><td>npu_ioctl_total、npu_ioctl_latency_ns：命令在驱动入口的排队/拷贝/等锁；慢不等于设备执行慢</td></tr>
+<tr><td>HDC 通道</td><td>hdcdrv_send、hdcdrv_recv、hdcdrv_msg_chan_send、hdcdrv_get_w_sq_desc、hdcdrv_copy_sq_desc_to_remote、hdccom_alloc_mem</td><td>npu_hdc_send/recv/submit_total、npu_hdc_latency_ns、npu_hdc_alloc_ops_total：host-device 通道，不是 device-device HCCS</td></tr>
+<tr><td>任务门铃</td><td>devdrv_msg_ring_doorbell、devdrv_set_sq_doorbell、devdrv_dma_done_task</td><td>npu_task_submit/doorbell/done_total、npu_task_wait_ns：submit 与 done 的速率差、wait p95 是任务在驱动里等了多久</td></tr>
+<tr><td>DMA/IOVA</td><td>devdrv_dma_map_page、devdrv_dma_map_single、dma_map_page_attrs、iommu_dma_map_page、devdrv_dma_unmap_page、dma_unmap_page_attrs、iommu_dma_unmap_page、alloc_iova、alloc_iova_fast、iommu_dma_alloc_iova、free_iova、free_iova_fast</td><td>npu_dma_*_ops_total、npu_dma_*_bytes、npu_dma_*_latency_ns、npu_iova_*：看 ops/s、bytes/s、p95；频繁小映射会拖首 token</td></tr>
+<tr><td>SVM/xsmem/mmap</td><td>devmm_svm_mmap、devmm_svm_munmap、xsmem_alloc、xsmem_free、xsmem_pool_alloc、xsmem_pool_free、sys_enter_mmap</td><td>npu_mmap_bytes、npu_svm_*、npu_xsmem_*：分配/释放 bytes/s；unavailable 保留原因，不补 0</td></tr>
+</table>
+<p>先看 npu_driver_metric_status 和 npu_driver_bpf_* 确认采集链路健康；counter 先转 Δ/s，histogram 看 p50/p95/p99。完整 33 个 probe 说明见 docs/METRICS-HOOKS.md。</p>`
+  };
+  if (lower.includes('prometheus')) return {
+    title: 'Orinfer 推理指标矩阵',
+    note: '来自 Orinfer /metrics 的进程内指标：请求、队列、token、KV cache 等；和 host span、驱动 hook 对齐看，才能区分“排队慢”还是“执行慢”。'
+  };
+  if (lower.includes('proc') || lower.includes('cgroup')) return {
+    title: '进程指标矩阵',
+    note: '进程/cgroup 的 CPU、内存、线程、fd 等资源指标；用于解释 host 侧阻塞和调度抖动。'
+  };
+  if (lower.includes('system')) return {
+    title: '主机指标矩阵',
+    note: '主机 CPU、内存、网络、磁盘等系统指标；用于排除主机资源竞争，不直接代表 NPU 执行。'
+  };
+  return { title: metricSourceLabel(source) + ' 指标矩阵', note: '按 source 单独渲染，不与其他类别混合。' };
 }
 
 function metricSourceCounts() {
@@ -3815,9 +3879,7 @@ function renderMetricsSourceTabs() {
   if (!host) return;
   const counts = metricSourceCounts();
   const sources = Array.from(counts.keys()).sort((a, b) => String(a).localeCompare(String(b)));
-  const tabs = [{ source: 'all', label: '全部', count: metricsState.groups.length }].concat(
-    sources.map((source) => ({ source, label: metricSourceLabel(source), count: counts.get(source) }))
-  );
+  const tabs = sources.map((source) => ({ source, label: metricSourceLabel(source), count: counts.get(source) }));
   host.innerHTML = tabs.map((tab) =>
     '<button type="button" class="metrics-source-tab' + (metricsState.source === tab.source ? ' active' : '') +
     '" data-metric-source="' + esc(tab.source) + '" title="' + esc(tab.source) + '">' +
@@ -3852,7 +3914,7 @@ function selectedMetricGroup() {
 function renderMetricsFiltered() {
   const query = metricsState.query.trim().toLowerCase();
   const filtered = metricsState.groups.filter((group) => {
-    if (metricsState.source !== 'all' && group.source !== metricsState.source) return false;
+    if (group.source !== metricsState.source) return false;
     if (metricsState.changedOnly && !group.changed) return false;
     if (query && group.search.indexOf(query) < 0) return false;
     return true;
@@ -3867,6 +3929,23 @@ function renderMetricsFiltered() {
     });
   }
   metricsState.visible = filtered;
+  const categoryInfo = metricCategoryInfo(metricsState.source);
+  const categoryTitle = document.getElementById('metricsCategoryTitle');
+  const categoryNote = document.getElementById('metricsCategoryNote');
+  const categorySeries = filtered.reduce((sum, group) => sum + group.series.length, 0);
+  if (categoryTitle) categoryTitle.textContent = categoryInfo.title + ' · ' + filtered.length + ' 组 / ' + categorySeries + ' series';
+  if (categoryNote) categoryNote.textContent = categoryInfo.note;
+  const hookDoc = document.getElementById('metricsHookDoc');
+  const hookBody = document.getElementById('metricsHookDocBody');
+  if (hookDoc && hookBody) {
+    if (categoryInfo.detail) {
+      hookBody.innerHTML = categoryInfo.detail;
+      hookDoc.hidden = false;
+    } else {
+      hookBody.innerHTML = '';
+      hookDoc.hidden = true;
+    }
+  }
   metricsState.matrixHover = null;
   metricsState.crosshair = null;
   metricsState.tipHtml = '';
@@ -3874,8 +3953,8 @@ function renderMetricsFiltered() {
   const counter = document.getElementById('metricsVisibleCount');
   if (counter) {
     const hidden = metricsState.groups.length - metricsState.visible.length;
-    counter.textContent = '显示 ' + metricsState.visible.length + ' / ' + metricsState.groups.length + ' 组' +
-      (hidden > 0 ? ' · 隐藏 ' + hidden : '');
+    counter.textContent = '本类 ' + metricsState.visible.length + ' 组 / 全部 ' + metricsState.groups.length + ' 组' +
+      (hidden > 0 ? ' · 其他类别 ' + hidden : '');
   }
   ensureSelectedMetricGroup();
   updateMetricDetail();
@@ -4374,6 +4453,11 @@ function renderMetricsSmallMultiples() {
   const groups = buildMetricGroups(series);
   const range = metricTimeRange(groups);
   metricsState.groups = groups;
+  const availableSources = Array.from(new Set(groups.map((group) => group.source)));
+  const preferredSources = ['dcmi', 'npu-smi-hccs', 'driver-ebpf'];
+  if (!metricsState.source || !availableSources.includes(metricsState.source)) {
+    metricsState.source = preferredSources.find((source) => availableSources.includes(source)) || availableSources[0] || '';
+  }
   metricsState.minT = range.minT;
   metricsState.maxT = range.maxT;
   metricsState.intervalMS = numeric(metrics.interval_ms, 0);
@@ -4393,6 +4477,8 @@ function renderMetricsSmallMultiples() {
   if (metrics.clock_quality) labels.push('时钟 ' + metrics.clock_quality);
   if (meta) meta.textContent = labels.join(' · ');
   host.innerHTML =
+    '<div class="metrics-category-head"><h3 id="metricsCategoryTitle"></h3><p id="metricsCategoryNote"></p></div>' +
+    '<details class="metrics-hook-doc" id="metricsHookDoc"><summary>指标与 hook 语义（当前类别）</summary><div id="metricsHookDocBody"></div></details>' +
     '<div class="metrics-toolbar">' +
       '<div class="metrics-source-tabs" id="metricsSourceTabs"></div>' +
       '<input type="search" id="metricsSearch" class="metrics-search" placeholder="搜索指标 / 来源 / 标签" aria-label="搜索指标组">' +
