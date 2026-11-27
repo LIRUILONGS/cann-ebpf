@@ -509,7 +509,7 @@ footer { color: var(--dim); font-size: 11px; margin-top: 20px; border-top: 1px s
       </div>
       <canvas id="cdf"></canvas>
     </section>
-    <section class="panel" id="quadrantPanel">
+    <section class="panel" id="quadrantPanel" style="display:none">
       <div class="panel-head">
         <div>
           <h2>设备四象限</h2>
@@ -522,7 +522,7 @@ footer { color: var(--dim); font-size: 11px; margin-top: 20px; border-top: 1px s
     </section>
   </div>
 
-  <section class="panel" id="busyPanel">
+  <section class="panel" id="busyPanel" style="display:none">
     <div class="panel-head">
       <div>
         <h2>设备忙率</h2>
@@ -534,7 +534,7 @@ footer { color: var(--dim); font-size: 11px; margin-top: 20px; border-top: 1px s
     <div class="empty" id="busyEmpty" style="display:none">没有匹配到的设备区间。</div>
   </section>
 
-  <section class="panel">
+  <section class="panel" id="notesPanel" style="display:none">
     <div class="notes">
       <div class="warn">
         <h3>采集告警</h3>
