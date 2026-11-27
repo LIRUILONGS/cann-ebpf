@@ -121,7 +121,7 @@ OUT="runs/ebpf-$(date -u +%Y%m%dT%H%M%SZ)"
 
 ### 一条命令出报告（host span + 火焰图）
 
-`scripts/report_once.sh` 把 attach、stacks、report 串成一条命令。  
+Go 子命令 `report-once` 把 attach、stacks、report 串成一条命令。  
 **PID 必须自己传，不做自动识别。**
 
 Orinfer（单进程）：
@@ -129,7 +129,7 @@ Orinfer（单进程）：
 ```bash
 PID=$(pgrep -f '/opt/orinfer/bin/orinfer serve' | head -1)
 
-sh scripts/report_once.sh \
+cann-ebpf report-once \
   --pid "$PID" \
   --profile orinfer \
   --profiles-dir /opt/cann-ebpf/profiles \
@@ -145,22 +145,11 @@ PID_ARGS=""
 for p in $PIDS; do PID_ARGS="$PID_ARGS --pid $p"; done
 echo "PIDS: $PIDS"
 
-sh scripts/report_once.sh $PID_ARGS \
+cann-ebpf report-once $PID_ARGS \
   --profile vllm-ascend \
   --profiles-dir /opt/cann-ebpf/profiles \
   --duration 10m \
   --out "/var/log/cann-ebpf/runs/report-vllm-$(date -u +%Y%m%dT%H%M%SZ)"
-```
-
-二进制默认找 `./cann-ebpf`；不存在时回退到 `dist/cann-ebpf-linux-arm64`。也可以显式指定：
-
-```bash
-sh scripts/report_once.sh \
-  --pid "$PID" --profile orinfer \
-  --bin ./dist/cann-ebpf-linux-arm64 \
-  --profiles-dir ./profiles \
-  --duration 10m \
-  --out "runs/report-$(date -u +%Y%m%dT%H%M%SZ)"
 ```
 
 产物：
@@ -173,6 +162,8 @@ sh scripts/report_once.sh \
 ```
 
 它**不发压测请求**；只做只读采集和离线报告。要压测请单独用 `scripts/run_sweep.sh`。
+
+`scripts/report_once.sh` 保留为兼容包装，功能等价；正式入口用 `cann-ebpf report-once`。
 
 ## 报告里有什么
 
