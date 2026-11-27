@@ -9,6 +9,7 @@
 - batch 上下文协议、可选 vLLM general plugin 适配器，以及不依赖插件的纯 eBPF batch 采集；
 - JSONL、manifest、summary 证据链；
 - 只读 `diagnose` 定位命令（JSON/Markdown，不 attach）；
+- 只读 `report` 性能仪表盘（单文件离线 HTML，不 attach、不联网）；
 - M2 host off-CPU/futex（`sched_switch` + futex syscall tracepoint，已在 V4 和合成锁竞争上验证）；
 - E 层 npu-smi 硬件采样（HBM/AICore/功耗/温度，已上机验证）；
 - M3 device 时间线 join 管线 + in-process msPTI collector（合成 ACL 已验证，生产注入待维护窗口）；
@@ -180,6 +181,7 @@ cann-ebpf attach          eBPF uprobe 采集
 cann-ebpf attach-tracefs  tracefs 后备采集
 cann-ebpf trace           按 trace_id/parent 聚合 spans.jsonl
 cann-ebpf diagnose        只读定位报告（JSON/Markdown）
+cann-ebpf report          只读性能仪表盘（单文件 HTML）
 cann-ebpf metrics         Prometheus 指标（text 或 /metrics）
 cann-ebpf version         版本和平台
 ```
@@ -286,6 +288,27 @@ V4，只读取 `SchedulerOutput.num_scheduled_tokens` 的请求 ID 键和 dict �
 输出命中 PID/TID/batch/request、top slow function/category、host off-CPU/futex 比例、证据 span，
 以及“当前无法判定”的原因（缺 off-CPU、缺 msPTI、batch 非 request、插件未激活）。
 时间窗使用与 span 相同的单调时钟 ns，详见 `docs/DIAGNOSE.md`。
+
+### 只读性能仪表盘：`report`
+
+```bash
+# 读取一个 run 目录（spans.jsonl，可选 device.jsonl/hardware.jsonl），生成单文件 HTML
+./cann-ebpf report --input runs/ebpf-20261126T000000Z --out report.html
+
+# 调慢阈值/最小耗时、只看某个容器里的 device 时间线
+./cann-ebpf report --input runs/ebpf-... --out report.html \
+  --slow-threshold 5ms --min-duration 100us \
+  --device-container-id <container-id>
+```
+
+报告是纯静态 HTML + 原生 Canvas，无外部 CDN/JS 依赖，可直接发给他人或用浏览器离线打开。
+内容包括：线程时间轴（TID 泳道 + device stream 轨道，滚轮缩放/拖拽/密度条）、延迟散点
+（时间 × 对数耗时，点击聚焦时间轴）、时间热力图（p95 或慢调用数）、TopN 函数、延迟 CDF、
+设备四象限（host 等待 vs device busy）与设备忙率曲线。所有图表都从既有证据只读派生，
+不修改 `spans.jsonl` / `device.jsonl` / `hardware.jsonl`。
+
+边界：没有调用栈采样，因此这不是按栈聚合的火焰图；线程时间轴只到 TID/函数级，不能替代
+msPTI 的 kernel 级时间线。缺 `device.jsonl` 时设备区显示不可用，不会补造数据。
 
 ### M2 host off-CPU/futex 采集
 

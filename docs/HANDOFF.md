@@ -52,6 +52,7 @@
 | M5 trace context + CPython POC | 完成 | trace 链路树、纯 eBPF CPython batch POC |
 | 纯 eBPF vLLM batch 标准采集 | 完成 | 已并入 `spans.jsonl`/summary，真实 V4 验证通过 |
 | P0 `diagnose` 命令 | 完成 | 只读读取已有证据，JSON/Markdown，单测覆盖；不需要 NPU |
+| P1 `report` 性能仪表盘 | 完成 | 只读生成单文件离线 HTML；时间轴/散点/热力图/TopN/CDF/设备四象限，无外部依赖 |
 | M2 off-CPU/futex 归因 | 完成并上机验证 | sched_switch + syscalls futex tracepoint、`offcpu_ns`/`futex_ns`；V4 10 秒与合成锁竞争均通过 |
 | E 层 npu-smi 硬件指标 | 完成并上机验证 | `hardware.jsonl`、manifest artifact、`hbm_pressure`；8 设备/HBM/AICore/功耗/温度 |
 | `preflight` 环境检查 | 完成并上机验证 | 15 项检查；V4 pass=15 warn=0 fail=0 |
@@ -237,6 +238,26 @@ span_id, seq
   `scripts/m5_compare.py`（两边 diagnose 后生成 compare.md）；V4 双 run smoke 通过。
   详见 `docs/A8-M5.md`。
 
+### 3.14 `report` 性能仪表盘（已完成）
+
+- **命令**：`cann-ebpf report --input <run_dir> --out <report.html>`；只读，不 attach、不联网、
+  不修改原始证据。
+- **输入**：`spans.jsonl`（必需），`device.jsonl` / `hardware.jsonl`（可选）；有 pidmap 时复用
+  `device.CapturePIDMaps`/`ReadPIDMap` 做容器 PID 映射，无快照时可用 `--device-container-id`。
+- **输出**：单文件 HTML（`//go:embed template.html`），原生 Canvas/CSS/JS，无 CDN；数据内嵌为
+  JSON，`</` 转义为 `<\/`，避免脚本提前闭合。
+- **图表**：线程时间轴（TID 泳道 + device stream 轨道，滚轮缩放/拖拽/密度条）、延迟散点
+  （时间 × 对数耗时，慢阈值线，点击聚焦）、时间热力图（p95 或慢调用数）、TopN 函数
+  （总耗时/p95/max/慢调用数）、延迟 CDF（p50/p95/p99）、设备四象限（host 等待 vs
+  device busy%，区分 `device_bound`/`launch_starvation`）、设备忙率（busy/kernel/memcpy/HCCL）。
+- **判定口径**：设备区间只按 `device.Join` 的匹配结果统计；busy 是区间并集，kernel/memcpy/HCCL
+  是区间时长之和，可能重叠；无 device 证据时明确显示“设备证据不可用”，不补造。
+- **边界**：没有调用栈采样，不是按栈聚合的火焰图；TID 泳道只能到线程/函数级，不能回答单
+  request 延迟，也不能替代 msPTI kernel 级时间线。
+- **验证**：`go test ./internal/report ./cmd/cann-ebpf`、`node --check` 生成页面 JS、
+  Chrome headless 截图检查；样本见 `.analysis/report-samples/report-m4.html`（6,991 spans，
+  18 TID，无 device）与 `report-final7.html`（11,859 spans，305 device intervals）。
+
 ## 4. 当前能回答和不能回答的问题
 
 ### 能回答
@@ -269,9 +290,11 @@ span_id, seq
 | `cmd/cann-ebpf/attach.go` | eBPF attach 参数、自动发现、输出、`--blocking` |
 | `cmd/cann-ebpf/trace.go` | `trace` 报告和链路树 |
 | `cmd/cann-ebpf/diagnose.go` | `diagnose` 只读定位报告 CLI |
+| `cmd/cann-ebpf/report.go` | `report` 只读性能仪表盘 CLI |
 | `cmd/cann-ebpf/preflight.go` | `preflight` 环境检查 CLI |
 | `cmd/cann-ebpf/metrics.go` | `metrics` Prometheus 导出 CLI |
 | `internal/export/` | 诊断报告到 `cann_ebpf_*` 指标的渲染 |
+| `internal/report/` | 只读派生报告数据与单文件 HTML 渲染（`template.html`） |
 | `internal/probes/functions.go` | 37 个 CANN/ACL/HCCL 函数声明 |
 | `internal/probes/bpf/cann.bpf.c` | BPF C 源码（37 组 uprobe + sched_switch/futex kprobe） |
 | `internal/probes/bpf/cann.bpf.o` | 已编译并嵌入的 BPF 对象，目标机不需要现编 |
@@ -522,6 +545,13 @@ OUT="runs/ebpf-batch-$(date -u +%Y%m%dT%H%M%SZ)"
 ```bash
 ./cann-ebpf-linux-arm64-m2 diagnose --input "$OUT"
 ./cann-ebpf-linux-arm64-m2 diagnose --input "$OUT" --pid 1452 --last 2s --json --out "$OUT/diagnose.json"
+```
+
+只读性能仪表盘（单文件 HTML，可直接离线打开）：
+
+```bash
+./cann-ebpf report --input "$OUT" --out "$OUT/report.html"
+./cann-ebpf report --input "$OUT" --out "$OUT/report.html" --slow-threshold 5ms --min-duration 100us
 ```
 
 M2 off-CPU/futex 采集（先短窗口，显式开探针）：

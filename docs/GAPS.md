@@ -77,7 +77,7 @@
 | P2-1 | vLLM 插件与 vLLM 版本兼容矩阵 | 当前 V4 镜像为 `v0.23.0rc1-nonroot`；插件已按 `NPUModelRunner.execute_model` 适配，但仍需在真实激活窗口验证，并为后续版本做 shim |
 | P2-2 | Grafana dashboard JSON | 当前只有面板清单，没有可导入 JSON |
 | P2-3 | OTLP exporter schema | M6 才做；需定义 span/metric 映射 |
-| P2-4 | 火焰图/stack folded | 目前只有 off-CPU 聚合；排障需要 folded stack |
+| P2-4 | 火焰图/stack folded | `report` 已有时间轴/散点/热力图/CDF 等延迟视图，但没有调用栈采样，仍缺按栈聚合的 folded stack |
 | P2-5 | 多卡/HCCL 拓扑视图 | 8 卡场景需要按 device 聚合，不只是单卡 |
 | P2-6 | Prometheus 指标命名规范 | `cann_ebpf_*` 前缀、label 基数、单位 |
 | P2-7 | 术语表/决策记录/备选方案对比 | 交接需要；也应说明为什么不用 bpftrace/msPTI-only |
