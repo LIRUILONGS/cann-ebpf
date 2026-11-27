@@ -11,7 +11,7 @@
 - 只读 `diagnose` 定位命令（JSON/Markdown，不 attach）；
 - 只读 `report` 性能仪表盘（单文件离线 HTML，不 attach、不联网）；
 - M2 host off-CPU/futex（`sched_switch` + futex syscall tracepoint，已在 V4 和合成锁竞争上验证）；
-- 独立 metrics 采集（`cann-ebpf sample`）与 report 多指标叠加，不改写 spans/device/hardware 原始证据；
+- 独立 metrics 采集（`cann-ebpf sample`）与 `attach` 同窗口自动采样（DCMI/npu-smi/Prometheus），report 多指标叠加，不改写 spans/device/hardware 原始证据；
 - vLLM 十视图（负载-延迟、关键路径、Summed Delay、Slack CDF、off-CPU、算子 Treemap、Roofline、A/B、变化点、服务拓扑），缺证据时明确不可用；
 - E 层 npu-smi 硬件采样（HBM/AICore/功耗/温度，已上机验证）；
 - M3 device 时间线 join 管线 + in-process msPTI collector（合成 ACL 已验证，生产注入待维护窗口）；
@@ -43,6 +43,7 @@
 | `diagnose` 只读定位命令 | 完成；JSON `cann.diagnose.report.v1` + Markdown，单测覆盖全部过滤与判定分支，并已在 V4 真实 evidence 上只读运行 |
 | M2 host off-CPU/futex | 完成并上机验证；V4 10 秒 `attached=4 failed=0`，合成锁竞争 `host_lock_contention` 1.00 |
 | 独立 metrics 采集 | 完成；`cann-ebpf sample` 支持 DCMI/npu-smi、进程、cgroup、主机 system 和 Prometheus 源，输出 `cann.metrics.v1` JSONL |
+| `attach` 自动 metrics | 完成；同一条采集命令内启动 DCMI/npu-smi、Prometheus、可选进程/cgroup/system 采样，写入同一 run 的 `metrics.jsonl`/`metrics.meta.json` 并封存为 manifest artifact |
 | 指标与可视化增强 | 完成；延迟热图、次秒偏移热图、分位带、尾 cohort、多指标小倍数；metrics-only 也支持降级报告 |
 | vLLM 十视图 | 完成代码和真实 vLLM 接入；真实 attach 与六档扫描报告见 `docs/M4-VIEWS2-VALIDATION.md`；严格关键路径、Roofline、A/B、OTel 拓扑仍按证据门禁显示 unavailable/inferred/partial |
 | E 层 npu-smi 硬件指标 | 完成并上机验证；8 设备 HBM/AICore/功耗/温度，`hbm_pressure` |
@@ -179,7 +180,9 @@ sh deploy/upgrade.sh --apply   --binary bin/cann-ebpf
 PROFILE=vllm-ascend LABEL=v4 DURATION=10s BINARY=./cann-ebpf sh scripts/m5_capture.sh
 # 或服务器自动采集（带 uprobe 残留检查）
 OUT="runs/ebpf-auto-$(date -u +%Y%m%dT%H%M%SZ)" \
-DURATION=10s sh scripts/server_auto_capture.sh
+DURATION=10s METRICS=auto REPORT=auto \
+PROMETHEUS_URL=vllm=http://127.0.0.1:8000/metrics \
+PROMETHEUS_INCLUDE='^vllm:' sh scripts/server_auto_capture.sh
 ```
 
 ## CLI
@@ -225,6 +228,76 @@ histogram 首帧是进程启动以来的累计值，报告跳过首帧，只使�
 
 真实示例和证据限制见 `docs/M4-VIEWS2-VALIDATION.md`。
 
+### 压测与报告：`sweep` 编排
+
+`sweep` 是**独立的压测编排**，不是 `report` 的一部分：
+
+1. **生产阶段**：按并发档跑固定负载 + `sample` 采 metrics，写
+   `cN/load.json`、`cN/metrics.jsonl`，最后汇总 `sweep.json`；
+2. **消费阶段**：只有显式给 `--report` 才调用 `cann-ebpf report` 出 HTML；
+   不给就只生产证据，不生成报告。
+
+```bash
+# 只生产 sweep 证据（不发报告）
+sh scripts/run_sweep.sh \
+  --workdir runs/sweep-$(date -u +%Y%m%dT%H%M%SZ) \
+  --tiers 1,2,4,8 --duration 30 --max-tokens 64 \
+  --base-url http://127.0.0.1:8905 --model deepseek-v4-flash \
+  --api-key "$VLLM_API_KEY" --bin ./cann-ebpf-linux-arm64-m3 \
+  --yes
+
+# 生产 + 消费，一条命令出报告
+sh scripts/run_sweep.sh \
+  --workdir runs/sweep-$(date -u +%Y%m%dT%H%M%SZ) \
+  --run runs/ebpf-20261127T174000Z \
+  --report runs/ebpf-20261127T174000Z/report-with-sweep.html \
+  --tiers 1,2,4,8 --duration 30 --max-tokens 64 \
+  --base-url http://127.0.0.1:8905 --model deepseek-v4-flash \
+  --api-key "$VLLM_API_KEY" --bin ./cann-ebpf-linux-arm64-m3 \
+  --yes
+```
+
+参数：
+
+| 参数 | 说明 |
+|---|---|
+| `--workdir` | sweep 证据目录，默认 `runs/sweep-<UTC>` |
+| `--run` | 已有 host run；只有 `--report` 时需要 |
+| `--report` | 可选；`auto` 表示写到 `$RUN/report.html` |
+| `--tiers` | 并发档，至少 4 档 |
+| `--duration` | 每档负载时长 |
+| `--max-tokens` | 固定输出长度 |
+| `--base-url` / `--model` / `--api-key` | 被测端点 |
+| `--yes` | 真正发负载；默认 dry-run |
+
+产物：
+
+```text
+runs/sweep-<UTC>/
+├── sweep.json
+├── c1/{metrics.jsonl,load.json}
+├── c2/{metrics.jsonl,load.json}
+├── c4/{metrics.jsonl,load.json}
+└── c8/{metrics.jsonl,load.json}
+```
+
+注意：
+
+- **不需要停 V4**，但会给 V4 加测试负载；生产环境请在低峰/授权后执行；
+- 每档必须有 `metrics.jsonl` + `load.json`，否则该档缺失；
+- 如果 `running` 高于客户端并发，报告会标 `partial`，拒绝计算容量拐点；
+- `report` 命令本身仍然只读，不会发压测；`sweep` 只在生产阶段发负载。
+
+已有 sweep 样例可直接给 `report` 用：
+
+```bash
+cann-ebpf report \
+  --input runs/live-20261127T174000Z \
+  --metrics runs/live-20261127T174000Z/metrics.jsonl \
+  --sweep .analysis/views2/sweep-real/sweep.json \
+  --out runs/live-20261127T174000Z/report-with-sweep.html
+```
+
 ### 校验 profile
 
 ```bash
@@ -254,8 +327,69 @@ OUT="runs/ebpf-$(date -u +%Y%m%dT%H%M%SZ)"
   --profile vllm-ascend \
   --profiles-dir profiles \
   --duration 10s \
-  --output "$OUT"
+  --output "$OUT" \
+  --metrics auto \
+  --prometheus vllm=http://127.0.0.1:8000/metrics \
+  --prometheus-include '^vllm:' \
+  --report auto
 ```
+
+`--report auto` 会在采集结束、teardown 和证据封存完成后，重新从磁盘读取
+`spans.jsonl` 生成 `$OUT/report.html`；同一条 `attach` 命令采集的 `metrics.jsonl` 会自动叠加。
+生成前会检查 `manifest.json` 的 `status=complete`，采集失败或 manifest 不完整时只保留
+原始证据并返回非零退出码，不会把不完整的 run 画成成功报告。
+只有报告生成失败时返回 `6`；此时 `spans.jsonl`、`manifest.json` 和 `summary.*` 仍保留，可继续用
+`cann-ebpf report` 手动重试。
+
+长时长采集会限制嵌入 HTML 的图表散点和 off-CPU ribbon 行数（默认 `--report-max-spans 20000`）；该抽样只影响
+浏览器图表，`summary`、CDF、TopN 等统计仍使用完整 `spans.jsonl`，报告会显式记录
+“图表抽样”警告。原始证据不会修改。
+
+#### 单命令指标采样
+
+`--metrics` 默认 `auto`，与 eBPF 采集使用同一个 `--duration` 和同一个 run 目录：
+
+```bash
+OUT="runs/ebpf-auto-$(date -u +%Y%m%dT%H%M%SZ)"
+./cann-ebpf-linux-arm64 attach \
+  --pid auto --profile vllm-ascend --profiles-dir profiles \
+  --duration 5m --output "$OUT" \
+  --metrics on \
+  --metrics-npu-backend auto \
+  --prometheus vllm=http://127.0.0.1:8000/metrics \
+  --prometheus-include '^vllm:' \
+  --metrics-proc --metrics-system \
+  --report auto
+```
+
+参数与行为：
+
+| 参数 | 默认 | 说明 |
+|---|---|---|
+| `--metrics` | `auto` | `auto` 探测 DCMI，失败再探测 npu-smi；`on` 要求至少有一个可用源；`off` 关闭 |
+| `--metrics-npu-backend` | `auto` | `auto`/`dcmi`/`npu-smi`/`both`/`off`；显式指定后端缺失时直接报错 |
+| `--metrics-interval` | `1s` | DCMI、进程、cgroup、system、Prometheus 的基础间隔；npu-smi 仍遵守最小 5s |
+| `--prometheus` | 无 | 可重复，格式 `[name=]http(s)://host/metrics` |
+| `--prometheus-include` | 全部 | Prometheus metric family allowlist 正则，可重复 |
+| `--metrics-proc` | 关闭 | 采集已发现目标 PID 的 CPU/RSS 等 `/proc` 指标 |
+| `--metrics-system` | 关闭 | 采集主机 CPU/load/memory/PSI/disk/net/thermal/frequency |
+| `--metrics-cgroup` | 无 | cgroup v2 路径，可重复 |
+
+输出写入同一个 run 目录：
+
+```text
+$OUT/
+  metrics.jsonl          # cann.metrics.v1，一行一个采样点
+  metrics.meta.json      # 采集窗口、series、时钟、SHA256、状态
+  spans.jsonl            # eBPF 原始证据，不被 metrics 改写
+  manifest.json          # metrics_jsonl / metrics_meta 作为 artifact 封存
+  report.html            # --report auto 生成，自动读取上述 metrics
+```
+
+如果已有同名 `metrics.jsonl` 或 `metrics.meta.json`，`attach` 在启动采集前拒绝覆盖。
+单个 metrics source 失败只写 warning，不会丢弃已经采集的 span；报告会按实际证据显示可用性，
+不会把缺失指标补成 0。`hardware.jsonl` 仍是独立的粗粒度硬件层；需要避免与 metrics 的
+npu-smi 采样重复时，使用 `--metrics-npu-backend dcmi` 或 `--hardware off`。
 
 `vllm-ascend` profile 的 `handle` 探针默认按 `1/128` 采样，避免高频
 `aclrtDestroyEvent` 淹没同步和事件 span。同步、event、memory、submit 和 HCCL
@@ -629,6 +763,9 @@ OUT="runs/ebpf-m2-$(date -u +%Y%m%dT%H%M%SZ)"
 | `--hardware-backend` | 空（默认 `npu-smi`） | 选择 `npu-smi` 或 `dcmi` | 影响 `hardware.jsonl` 和 NPU metrics 的来源 |
 | `--device-jsonl` | 空 | 导入外部 msPTI `device.jsonl` 及同名 meta/pidmap | 驱动设备四象限、设备忙率、Treemap 和关键路径 |
 | `--preflight` | `enforce`（`enforce/warn/off`） | attach 前执行环境门禁 | 决定失败时中止、告警还是跳过 |
+| `--report` | `off`（`off/auto/<path>`） | 采集成功后生成 HTML；`auto` 写到 run 目录 `report.html` | 单文件报告；不修改原始证据 |
+| `--report-title` | 空（自动标题） | 自动报告的标题覆盖 | 报告页眉 |
+| `--report-max-spans` | `20000` | 自动报告最多嵌入的散点/off-CPU 行数；`0` 不限制 | 控制 HTML/浏览器内存；统计仍基于完整 JSONL，抽样会写 warning |
 | `--json` | `false` | 输出 JSON 采集摘要 | 便于自动化读取 pids、spans、warnings 和设备导入状态 |
 
 **`report`：单文件 HTML 与其数据源**
@@ -643,6 +780,7 @@ OUT="runs/ebpf-m2-$(date -u +%Y%m%dT%H%M%SZ)"
 | `--slow-threshold` | `1ms` | slow span 阈值 | 延迟 CDF、延迟热图、slow KPI 和证据计数 |
 | `--top` | `15` | TopN 函数数量 | TopN 函数 |
 | `--max-lanes` | `64` | 时间轴最多嵌入的 TID 泳道数 | 线程时间轴；截断会写 warning |
+| `--max-spans` | `20000` | 最多嵌入的散点/off-CPU 行数；`0` 保留全部 | 控制 HTML 体积；散点抽样保留最慢调用，并在报告中标注 |
 | `--buckets` | `160` | 时间桶数量 | 时间热力图、延迟热图、次秒偏移热图、函数分位带和设备忙率 |
 | `--device-mode` | `matched`（`matched/none`） | 是否嵌入匹配的设备时间线 | 设备四象限、设备忙率和 stream 轨道 |
 | `--device-container-id` | 空 | 无 pidmap 时用容器 ID 翻译 device PID/TID | 设备 join；影响 quadrants、busy 和关键路径的匹配结果 |

@@ -15,36 +15,39 @@ TIERS=${TIERS:-1,2,4,8}
 DURATION=${DURATION:-30}
 MAX_TOKENS=${MAX_TOKENS:-64}
 RUN_DIR=${RUN_DIR:-}
-OUT=${OUT:-}
+REPORT=${REPORT:-}
 WORKDIR=${WORKDIR:-}
 MODEL_SERVED=${MODEL_SERVED:-}
 APPLY=0
 
 usage() {
   cat <<'EOF'
-usage: run_sweep.sh --run <dir> --out <report.html> [options]
+usage: run_sweep.sh --workdir <dir> [--report <report.html>] [options]
 
-  --run DIR           existing host run dir (must contain metrics.jsonl/spans)
-  --out FILE          report output path
+  --workdir DIR       sweep evidence dir (default runs/sweep-<UTC>)
+  --run DIR           existing host run dir (required only with --report)
+  --report FILE       optional: after producing sweep evidence, render report
   --tiers LIST        comma-separated concurrency tiers (>=4, default 1,2,4,8)
   --duration SEC      load duration per tier (default 30)
   --max-tokens N      fixed output length (default 64)
   --base-url URL      vLLM/Orinfer endpoint (default 127.0.0.1:8905)
   --model NAME        served model name
   --api-key KEY       bearer token (default VLLM_API_KEY)
-  --workdir DIR       sweep evidence dir (default runs/sweep-<UTC>)
   --bin PATH          cann-ebpf binary
   --yes               actually run the sweep (otherwise dry-run)
 
-Requires: sample can reach <base-url>/metrics; each tier writes metrics.jsonl
-and load.json; sweep.json is assembled from those files.
+Phases:
+  1. produce: per tier sample metrics + fixed load -> metrics.jsonl/load.json/sweep.json
+  2. consume: only if --report is given, render HTML; never sends load.
+
 EOF
 }
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --run) RUN_DIR=$2; shift ;;
-    --out) OUT=$2; shift ;;
+    --report) REPORT=$2; shift ;;
+    --out) REPORT=$2; shift ;;
     --tiers) TIERS=$2; shift ;;
     --duration) DURATION=$2; shift ;;
     --max-tokens) MAX_TOKENS=$2; shift ;;
@@ -61,23 +64,30 @@ while [ $# -gt 0 ]; do
   shift
 done
 
-[ -n "$RUN_DIR" ] || { echo "--run is required" >&2; exit 2; }
-[ -n "$OUT" ] || { echo "--out is required" >&2; exit 2; }
-[ -f "$RUN_DIR/metrics.jsonl" ] || { echo "missing $RUN_DIR/metrics.jsonl" >&2; exit 4; }
 [ -x "$BIN" ] || { echo "binary not executable: $BIN" >&2; exit 4; }
 [ -f "$LOADGEN" ] || { echo "load generator not found: $LOADGEN" >&2; exit 4; }
+if [ -n "$REPORT" ]; then
+  [ -n "$RUN_DIR" ] || { echo "--run is required with --report" >&2; exit 2; }
+  [ -f "$RUN_DIR/metrics.jsonl" ] || { echo "missing $RUN_DIR/metrics.jsonl" >&2; exit 4; }
+  [ "$REPORT" = "auto" ] && REPORT="$RUN_DIR/report.html"
+fi
 
 STAMP=$(date -u +%Y%m%dT%H%M%SZ)
 [ -n "$WORKDIR" ] || WORKDIR="runs/sweep-$STAMP"
 WORKLOAD="vllm-sweep-$STAMP"
 
-echo "run=$RUN_DIR out=$OUT workdir=$WORKDIR tiers=$TIERS duration=${DURATION}s max_tokens=$MAX_TOKENS"
+echo "run=$RUN_DIR report=$REPORT workdir=$WORKDIR tiers=$TIERS duration=${DURATION}s max_tokens=$MAX_TOKENS"
 echo "base_url=$BASE_URL model=$MODEL"
+echo "phase 1: produce sweep evidence (load + sample)"
 
 if [ "$APPLY" -ne 1 ]; then
   echo "DRY-RUN: no load, no sample, no report"
   echo "would create $WORKDIR/<cN>/{metrics.jsonl,load.json}, $WORKDIR/sweep.json"
-  echo "would run: $BIN report --input $RUN_DIR --metrics $RUN_DIR/metrics.jsonl --sweep $WORKDIR/sweep.json --out $OUT"
+  if [ -n "$REPORT" ]; then
+    echo "phase 2: consume -> $BIN report --input $RUN_DIR --metrics $RUN_DIR/metrics.jsonl --sweep $WORKDIR/sweep.json --out $REPORT"
+  else
+    echo "phase 2: skipped (no --report)"
+  fi
   exit 0
 fi
 
@@ -130,9 +140,14 @@ with open(os.path.join(workdir, 'sweep.json'), 'w', encoding='utf-8') as f:
 print(os.path.join(workdir, 'sweep.json'))
 PY
 
-"$BIN" report \
-  --input "$RUN_DIR" \
-  --metrics "$RUN_DIR/metrics.jsonl" \
-  --sweep "$WORKDIR/sweep.json" \
-  --out "$OUT"
-echo "OK report=$OUT sweep=$WORKDIR/sweep.json"
+if [ -n "$REPORT" ]; then
+  echo "phase 2: consume -> $REPORT"
+  "$BIN" report \
+    --input "$RUN_DIR" \
+    --metrics "$RUN_DIR/metrics.jsonl" \
+    --sweep "$WORKDIR/sweep.json" \
+    --out "$REPORT"
+  echo "OK report=$REPORT sweep=$WORKDIR/sweep.json"
+else
+  echo "OK sweep=$WORKDIR/sweep.json (no report requested)"
+fi
