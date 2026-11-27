@@ -1873,15 +1873,15 @@ const V2_W = 760;
 const V2_PALETTE = ['#4cc9f0', '#2ec4b6', '#ffb703', '#b388ff', '#ff6b6b', '#4895ef', '#f4a261', '#ffd166', '#7f8fa6', '#06d6a0'];
 const V2_SUBTITLES = {
   load_latency: '并发档位 → 延迟；knee_concurrency 只作为观测到的拐点标注。',
-  critical_path: 'bars = start_ms → start_ms + duration_ms；实心节点来自 critical_path[]。',
-  summed_delay: '节点总时长 / critical path / overlap；分类来自 nodes_by_category[]。',
-  slack_cdf: 'slack 累积分布；负数区域表示负 slack 节点。',
   off_cpu: 'aggregate 只画比例，exact 才画区间；两种模式不混用。',
-  operator_treemap: 'msPTI KERNEL/MEMCPY/HCCL 优先；host fallback 会显式降级。',
-  roofline: 'x = arithmetic intensity，y = achieved TFLOPS；峰值线来自显式参数。',
-  ab_diff: 'B 相对 A 的百分比差；★ 来自 significant[]，不做显著性补算。',
-  change_point: '变化点、事件标注和来源；series 无时间戳时只按样本序展示。',
+  operator_treemap: 'host span 时长占比；没有 device 证据时是 inferred，不是设备算子级。',
   service_topology: '只画契约中的节点与边；scope=process 不宣称端到端。'
+};
+const V2_READ = {
+  load_latency: '怎么看：每个点是一档并发；横轴并发/QPS，纵轴延迟。knee 是观测到的拐点，不是容量承诺；生产背景高时只能看 partial。',
+  off_cpu: '怎么看：横轴时间、纵轴 TID；空档越长=线程越久没上 CPU；futex 段=等锁。partial 表示只覆盖外层 span。',
+  operator_treemap: '怎么看：方块面积=host 耗时占比。没有 device 证据时只能说明 host 侧谁占时间，不能当设备算子级结论。',
+  service_topology: '怎么看：节点是进程/服务，边是调用关系。当前只到进程范围，没有 trace_id，不能当端到端拓扑。'
 };
 
 function v2Status(view) {
@@ -2156,6 +2156,7 @@ function renderViewsV2() {
       (reason ? '<div class="view-v2-reason">' + esc(reason) + '</div>' : '') +
       '<div class="view-v2-body">' + body + '</div>' +
       (meta.length ? '<div class="view-v2-meta">' + esc(meta.join(' · ')) + '</div>' : '') +
+      (V2_READ[key] ? '<div class="chart-note">' + esc(V2_READ[key]) + '</div>' : '') +
       '</article>';
   }).join('');
   v2BindTooltips();
