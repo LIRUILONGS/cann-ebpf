@@ -119,6 +119,33 @@ OUT="runs/ebpf-$(date -u +%Y%m%dT%H%M%SZ)"
 
 报告是**只读**的：不会再 attach、不会再采样、不会发请求。
 
+### 一条命令出报告（host span + 火焰图）
+
+`scripts/report_once.sh` 把 attach、stacks、report 串成一条命令：
+
+```bash
+PID=$(ps -eo pid,args | grep 'orinfer serve' | grep -v grep | awk '{print $1}' | head -1)
+
+sh scripts/report_once.sh \
+  --pid "$PID" \
+  --profile orinfer \
+  --profiles-dir /opt/cann-ebpf/profiles \
+  --duration 10m \
+  --bin /opt/cann-ebpf/bin/cann-ebpf-report-demo \
+  --out "/var/log/cann-ebpf/runs/report-once-$(date -u +%Y%m%dT%H%M%SZ)"
+```
+
+产物：
+
+```text
+<out>/attach/spans.jsonl
+<out>/attach/metrics.jsonl
+<out>/stacks/stacks.folded
+<out>/report.html
+```
+
+它**不发压测请求**；只做只读采集和离线报告。要压测请单独用 `scripts/run_sweep.sh`。
+
 ## 报告里有什么
 
 | 视图 | 状态 | 前提 |
