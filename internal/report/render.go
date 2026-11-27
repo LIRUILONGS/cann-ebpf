@@ -25,7 +25,12 @@ func Render(data Data) ([]byte, error) {
 	if title == "" {
 		title = "CANN eBPF 性能报告"
 	}
+	bodyClass := ""
+	if data.Metrics != nil && data.Metrics.Available && data.Summary.Spans == 0 {
+		bodyClass = "metrics-only"
+	}
 	out := strings.ReplaceAll(templateHTML, "__TITLE__", html.EscapeString(title))
+	out = strings.ReplaceAll(out, "__BODY_CLASS__", bodyClass)
 	out = strings.ReplaceAll(out, "__DATA__", payloadText)
 	return []byte(out), nil
 }
