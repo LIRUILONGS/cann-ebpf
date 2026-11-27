@@ -1,7 +1,7 @@
 # cann-ebpf 项目交接文档
 
-文档日期：2026-11-26
-适用版本：`0.6.0-m2` + M3（`diagnose`、M2 off-CPU/futex、in-process msPTI collector，均已上机验证）
+文档日期：2026-11-27
+适用版本：`0.6.0-m2` + M3 + metrics/visual（`diagnose`、M2 off-CPU/futex、in-process msPTI collector；metrics 与可视化增强为只读派生功能）
 代码状态：`main` @ 本次交接提交（`git log -1` 见提交号）
 文档性质：工程交接。本文只写已验证事实；代码完成但未上机验证的内容会单独标注。
 
@@ -16,6 +16,9 @@
 | Linux/arm64 二进制（M3 + A1/A2） | `dist/cann-ebpf-linux-arm64-m3` |
 | 二进制大小 | `13,407,163` bytes |
 | 二进制 SHA-256 | `3fe700bb4d2345e7cee459c2c9449a1478e0b720da8db5ade29fc6f4569769c3` |
+| Linux/arm64 二进制（metrics/visual） | `dist/cann-ebpf-linux-arm64-m1m2` |
+| 二进制大小 | `14,645,153` bytes |
+| 二进制 SHA-256 | `4fd7bd27ccfcc39d1111bb989698989da8c92913752a4cc15952606d40cf1f2e` |
 | collector A2 产物 | `dist/cann-mspti-a2-20261126/`（`libcannmspti.so`、`cann-mspti-selftest`、`synthetic_acl`、`SHA256SUMS.txt`） |
 | collector A2 服务器副本 | `/root/cann-ebpf/cann-mspti-a2-20261126/` |
 | 历史已验证二进制 | `dist/cann-ebpf-linux-arm64-batch`（`0.5.0-m5`，上表 SHA 已替换为 M2 构建，旧包仍保留在 dist/） |
@@ -53,6 +56,8 @@
 | 纯 eBPF vLLM batch 标准采集 | 完成 | 已并入 `spans.jsonl`/summary，真实 V4 验证通过 |
 | P0 `diagnose` 命令 | 完成 | 只读读取已有证据，JSON/Markdown，单测覆盖；不需要 NPU |
 | P1 `report` 性能仪表盘 | 完成 | 只读生成单文件离线 HTML；时间轴/散点/热力图/TopN/CDF/设备四象限，无外部依赖 |
+| 独立 metrics 采集 | 完成 | `cann-ebpf sample`；DCMI/npu-smi、进程、cgroup、Prometheus 四类源；不修改 trace 原始证据 |
+| M1/M2 可视化增强 | 完成 | 延迟热图、次秒偏移热图、函数分位带、尾 cohort、多指标小倍数；有明确空态/降级原因 |
 | M2 off-CPU/futex 归因 | 完成并上机验证 | sched_switch + syscalls futex tracepoint、`offcpu_ns`/`futex_ns`；V4 10 秒与合成锁竞争均通过 |
 | E 层 npu-smi 硬件指标 | 完成并上机验证 | `hardware.jsonl`、manifest artifact、`hbm_pressure`；8 设备/HBM/AICore/功耗/温度 |
 | `preflight` 环境检查 | 完成并上机验证 | 15 项检查；V4 pass=15 warn=0 fail=0 |
@@ -244,19 +249,38 @@ span_id, seq
   不修改原始证据。
 - **输入**：`spans.jsonl`（必需），`device.jsonl` / `hardware.jsonl`（可选）；有 pidmap 时复用
   `device.CapturePIDMaps`/`ReadPIDMap` 做容器 PID 映射，无快照时可用 `--device-container-id`。
+  `--metrics <path|dir>` 可叠加独立采集的 `metrics.jsonl`；run 目录中也有时会自动发现。
 - **输出**：单文件 HTML（`//go:embed template.html`），原生 Canvas/CSS/JS，无 CDN；数据内嵌为
   JSON，`</` 转义为 `<\/`，避免脚本提前闭合。
 - **图表**：线程时间轴（TID 泳道 + device stream 轨道，滚轮缩放/拖拽/密度条）、延迟散点
   （时间 × 对数耗时，慢阈值线，点击聚焦）、时间热力图（p95 或慢调用数）、TopN 函数
   （总耗时/p95/max/慢调用数）、延迟 CDF（p50/p95/p99）、设备四象限（host 等待 vs
-  device busy%，区分 `device_bound`/`launch_starvation`）、设备忙率（busy/kernel/memcpy/HCCL）。
+  device busy%，区分 `device_bound`/`launch_starvation`）、设备忙率（busy/kernel/memcpy/HCCL），
+  以及延迟热图、次秒偏移热图、函数分位带、尾 cohort、多指标小倍数。
 - **判定口径**：设备区间只按 `device.Join` 的匹配结果统计；busy 是区间并集，kernel/memcpy/HCCL
   是区间时长之和，可能重叠；无 device 证据时明确显示“设备证据不可用”，不补造。
 - **边界**：没有调用栈采样，不是按栈聚合的火焰图；TID 泳道只能到线程/函数级，不能回答单
-  request 延迟，也不能替代 msPTI kernel 级时间线。
+  request 延迟，也不能替代 msPTI kernel 级时间线。metrics 是周期采样，不是逐 request 关键路径；
+  只有 metrics、没有 spans 时生成 metrics-only 降级报告，函数归因和设备四象限明确不可用。
 - **验证**：`go test ./internal/report ./cmd/cann-ebpf`、`node --check` 生成页面 JS、
   Chrome headless 截图检查；样本见 `.analysis/report-samples/report-m4.html`（6,991 spans，
-  18 TID，无 device）与 `report-final7.html`（11,859 spans，305 device intervals）。
+  18 TID，无 device）与 `report-final7-m1m2.html`（11,859 spans，305 device intervals）。
+  独立 QA 记录见 `.analysis/report-samples/QA-REPORT.md`；metrics-only 样本见
+  `.analysis/report-samples/report-metrics-only.html`（42 points、7 series、无 span 证据）。
+
+### 3.15 独立 metrics 与 M1/M2 可视化增强
+
+- **采集命令**：`cann-ebpf sample --out <dir> [--dcmi|--npu-smi] [--pid <pid>] [--cgroup <path>]
+  [--prometheus name=url] [--interval 2s] [--duration 30s]`。
+- **输出契约**：`metrics.jsonl` 每行一个 `cann.metrics.v1` 点，支持 gauge/counter/histogram；
+  旁路 `metrics.meta.json` 记录 schema、interval、sources、status、warnings 和 artifact SHA-256。
+- **隔离性**：metrics 采集与 trace 采集完全独立；已有 `metrics.jsonl` 使用 `O_EXCL` 拒绝覆盖，
+  失败不会修改 `spans.jsonl`、`device.jsonl` 或 `hardware.jsonl`。
+- **报告叠加**：`report --metrics` 只对 run 窗口内的点做派生；早于起点或晚于终点的点丢弃并写 warning，
+  metrics-only 的 `HardwareAvailable` 仅在存在 `npu_*`/DCMI/npu-smi series 时为真。
+- **空态**：每个新视图都有 `available/reason`；缺 span 或样本不足时显示原因，不插值、不补造数据。
+
+详见 `docs/METRICS-SCHEMA.md`、`docs/M1-M2-DATA-CONTRACT.md` 与 `docs/VISUALIZATION-RESEARCH.md`。
 
 ## 4. 当前能回答和不能回答的问题
 
@@ -552,6 +576,13 @@ OUT="runs/ebpf-batch-$(date -u +%Y%m%dT%H%M%SZ)"
 ```bash
 ./cann-ebpf report --input "$OUT" --out "$OUT/report.html"
 ./cann-ebpf report --input "$OUT" --out "$OUT/report.html" --slow-threshold 5ms --min-duration 100us
+
+# 独立 metrics（短窗口示例）；再叠加到报告
+./cann-ebpf sample --out "$OUT/metrics" --dcmi --interval 2s --duration 10s
+./cann-ebpf report --input "$OUT" --metrics "$OUT/metrics" --out "$OUT/report-metrics.html"
+
+# metrics-only 降级报告（无 spans，函数归因会明确不可用）
+./cann-ebpf report --metrics "$OUT/metrics" --out "$OUT/report-metrics-only.html"
 ```
 
 M2 off-CPU/futex 采集（先短窗口，显式开探针）：
@@ -577,6 +608,8 @@ OUT="runs/ebpf-m2-$(date -u +%Y%m%dT%H%M%SZ)"
 ## 10. 交接检查清单
 
 - [ ] 确认本地 Git 仓库提交和 `dist/cann-ebpf-linux-arm64-m2` SHA-256。
+- [ ] 跑 `go test -count=1 ./...`、`go vet ./...`，并确认 `sample` 与 `report --metrics` 至少各有一个成功样本。
+- [ ] 用 `report --metrics-only` 检查空态文字、无 JS 异常、无造数；用 headless 浏览器确认 5 个新面板存在。
 - [ ] 确认服务器 SSH/密钥可用；最近一次曾出现 `Permission denied (publickey,password)`，不要假设一定可连。
 - [ ] 确认 V4 服务当前状态和 `/health`，不要在未授权窗口 attach 或重启。
 - [ ] 确认 `profiles/vllm-ascend.yaml` 的目标发现规则仍匹配当前容器。

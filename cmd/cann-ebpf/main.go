@@ -44,6 +44,8 @@ func run(args []string) int {
 		return cmdDiagnose(args[1:])
 	case "metrics":
 		return cmdMetrics(args[1:])
+	case "sample":
+		return cmdSample(args[1:])
 	case "report":
 		return cmdReport(args[1:])
 	case "version":
@@ -57,7 +59,7 @@ func run(args []string) int {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: cann-ebpf <validate|preflight|discover|attach|attach-tracefs|trace|diagnose|metrics|report|version> [flags]")
+	fmt.Fprintln(os.Stderr, "usage: cann-ebpf <validate|preflight|discover|attach|attach-tracefs|trace|diagnose|metrics|sample|report|version> [flags]")
 }
 
 func cmdValidate(args []string) int {

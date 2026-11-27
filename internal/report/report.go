@@ -69,8 +69,10 @@ type Data struct {
 	Timeline    TimelineData  `json:"timeline"`
 	Heatmap     HeatmapData   `json:"heatmap"`
 	CDF         []CDFPoint    `json:"cdf"`
+	Views       ReportViews   `json:"views"`
 	Device      *DeviceData   `json:"device,omitempty"`
 	Hardware    HardwareData  `json:"hardware"`
+	Metrics     *MetricsData  `json:"metrics,omitempty"`
 	Warnings    []string      `json:"warnings"`
 	Notes       []string      `json:"notes"`
 }
@@ -327,6 +329,7 @@ func Build(in *diagnose.Input, opts Options) (Data, error) {
 		},
 		Heatmap:  HeatmapData{Rows: []HeatRow{}},
 		CDF:      []CDFPoint{},
+		Views:    ReportViews{},
 		Warnings: append([]string{}, in.Warnings...),
 		Notes:    defaultNotes(),
 	}
@@ -343,6 +346,7 @@ func Build(in *diagnose.Input, opts Options) (Data, error) {
 	data.Timeline.HostRows, data.Warnings = buildHostLanes(spans, opts, data.Warnings)
 	data.Heatmap, data.Warnings = buildHeatmap(spans, startNS, windowNS, functionAgg, data.Timeline.HostRows, opts, data.Warnings)
 	data.CDF = buildCDF(durations)
+	data.Views = buildReportViews(spans, startNS, windowNS, opts)
 	data.Hardware = buildHardware(in.Hardware)
 	data.Summary.HardwareAvailable = data.Hardware.Available
 
@@ -365,6 +369,27 @@ func Build(in *diagnose.Input, opts Options) (Data, error) {
 		data.Notes = append(data.Notes, "没有嵌入设备时间线：device.jsonl 缺失，或使用了 --device-mode none。")
 	}
 	return data, nil
+}
+
+func buildReportViews(spans []runlog.Span, windowStart, windowNS int64, opts Options) ReportViews {
+	return ReportViews{
+		LatencyHeatmap: BuildLatencyHeatmap(spans, windowStart, windowNS, Heatmap2DOptions{
+			Columns:         opts.BucketCount,
+			LatencyRows:     22,
+			OffsetRows:      50,
+			SlowThresholdNS: opts.SlowThresholdNS,
+		}),
+		SubsecondHeatmap: BuildSubsecondHeatmap(spans, windowStart, windowNS, Heatmap2DOptions{
+			Columns:     opts.BucketCount,
+			LatencyRows: 22,
+			OffsetRows:  50,
+		}),
+		AggregateBands: BuildAggregateBands(spans, windowStart, windowNS, AggregateOptions{
+			BucketCount:  opts.BucketCount,
+			TopFunctions: 12,
+		}),
+		TailCohort: BuildTailCohort(spans, CohortOptions{}),
+	}
 }
 
 func defaultNotes() []string {

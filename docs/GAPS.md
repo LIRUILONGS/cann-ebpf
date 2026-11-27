@@ -2,6 +2,10 @@
 
 日期：2026-11-25
 
+> 状态更新（2026-11-27）：本文件保留历史方案缺口清单；当前交付状态以
+> `docs/HANDOFF.md` 为准。`sample`、`report --metrics`、延迟热图、次秒偏移热图、
+> 函数分位带、尾 cohort 和多指标小倍数已落地，并有单测与 Chrome 验收样本。
+
 ## 0. 结论
 
 方案已经可以进入 M0，但不是“零缺口”。本轮把会影响方案正确性的文档缺口补齐了；剩下的主要是实现期产物和必须在服务器上实测的能力，不应在文档里假装已经完成。
@@ -51,7 +55,7 @@
 | P0-3 | `discover` 输出 JSON schema | profile 选择、符号、offset、matched_rules 需要机器可校验；否则报告不可复核 | `discover --json` 通过 schema；包含 library inode、cgroup、namespace |
 | P0-4 | 预检脚本 | 文档有清单，但没有可执行检查；M0 会在真机上反复踩权限/BTF/fd | `cann-ebpf preflight` 输出 pass/fail/warn，退出码对应 4 |
 | P0-5 | 固定负载生成器 | 没有固定 prompt/并发/warmup，3% 开销数字不可复现 | 负载文件、种子、并发、max_tokens 固定；hash 写入 manifest |
-| P0-6 | 报告生成器（模板已建） | 模板已存在，但 `report` 还没有填充逻辑；实现期容易漏字段 | `cann-ebpf report` 按模板生成四份报告，空字段显式写 `unknown` |
+| P0-6 | 报告生成器（已完成） | `report` 已能从 spans/device/hardware 只读派生单文件 HTML；本轮增加 metrics 叠加和不可用原因 | `cann-ebpf report` 对缺证据的字段写明确原因；metrics-only 生成降级报告且不补造 span |
 | P0-7 | systemd 单元与安装脚本 | 文档只有片段；路径、权限、日志、重启策略未固化 | `deploy/cann-ebpf.service` + `install.sh` + `uninstall.sh` |
 | P0-8 | 升级/回滚脚本 | attach 工具升级时若不 detach，旧 uprobe 可能残留 | `upgrade.sh` 先 detach、备份配置、失败回滚；有 dry-run |
 
@@ -77,7 +81,9 @@
 | P2-1 | vLLM 插件与 vLLM 版本兼容矩阵 | 当前 V4 镜像为 `v0.23.0rc1-nonroot`；插件已按 `NPUModelRunner.execute_model` 适配，但仍需在真实激活窗口验证，并为后续版本做 shim |
 | P2-2 | Grafana dashboard JSON | 当前只有面板清单，没有可导入 JSON |
 | P2-3 | OTLP exporter schema | M6 才做；需定义 span/metric 映射 |
-| P2-4 | 火焰图/stack folded | `report` 已有时间轴/散点/热力图/CDF 等延迟视图，但没有调用栈采样，仍缺按栈聚合的 folded stack |
+| P2-4 | 火焰图/stack folded | `report` 已有时间轴/散点/热力图/CDF 及延迟热图/分位带/cohort 等视图；但工具没有调用栈采样，仍缺按栈聚合的 folded stack，不能把现有视图称为火焰图 |
+| P2-9 | 真实生产 metrics 基线 | `sample` 的采集链路与单测已完成；还需在目标 NPU 上验证 DCMI/npu-smi 的真实采样间隔、权限、覆盖率和长跑开销 |
+| P2-10 | metrics 与 request 对齐 | 当前 metrics 是周期采样，能观察资源趋势，不能证明单 request 关键路径；需要入口请求 ID/遥测配合才能做严格关联 |
 | P2-5 | 多卡/HCCL 拓扑视图 | 8 卡场景需要按 device 聚合，不只是单卡 |
 | P2-6 | Prometheus 指标命名规范 | `cann_ebpf_*` 前缀、label 基数、单位 |
 | P2-7 | 术语表/决策记录/备选方案对比 | 交接需要；也应说明为什么不用 bpftrace/msPTI-only |

@@ -60,6 +60,37 @@ canvas { display: block; }
 .bar-fill { height: 100%; border-radius: 999px; min-width: 2px; }
 .bar-stats { text-align: right; color: var(--muted); font-size: 11px; }
 .bar-stats b { display: block; color: var(--text); font-size: 12px; font-variant-numeric: tabular-nums; }
+.heat-legend { display: flex; align-items: center; gap: 5px; color: var(--muted); font-size: 10px; }
+.heat-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; background: #4cc9f0; }
+.cohort-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin: 8px 0 12px; }
+.cohort-stat { background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; }
+.cohort-stat span { display: block; color: var(--muted); font-size: 11px; }
+.cohort-stat b { display: block; margin-top: 3px; font-size: 13px; font-variant-numeric: tabular-nums; }
+.cohort-table { border-top: 1px solid var(--line); }
+.cohort-head, .cohort-row { display: grid; grid-template-columns: minmax(180px, 1.2fr) minmax(0, 1fr) minmax(0, 1fr) 70px; gap: 12px; align-items: center; padding: 7px 0; border-bottom: 1px solid rgba(36,54,83,.55); }
+.cohort-head { color: var(--dim); font-size: 10px; letter-spacing: .06em; text-transform: uppercase; }
+.cohort-label { display: flex; gap: 7px; align-items: center; min-width: 0; }
+.cohort-label .fn { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12px; }
+.cohort-cell { display: grid; grid-template-columns: minmax(0, 1fr) 58px; gap: 6px; align-items: center; }
+.cohort-track { display: block; height: 7px; overflow: hidden; border-radius: 999px; background: #0a1222; }
+.cohort-track i { display: block; height: 100%; min-width: 0; border-radius: 999px; }
+.cohort-track.slow i { background: #ff6b6b; }
+.cohort-track.typical i { background: #4cc9f0; }
+.cohort-cell b { color: var(--muted); text-align: right; font-size: 11px; font-variant-numeric: tabular-nums; }
+.cohort-delta { color: var(--muted); text-align: right; font-size: 11px; font-variant-numeric: tabular-nums; }
+.cohort-delta.up { color: #ffb703; }
+.cohort-delta.down { color: #2ec4b6; }
+.cohort-notes { margin-top: 9px; color: var(--dim); font-size: 11px; line-height: 1.5; }
+.metrics-list { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+.metric-row { display: grid; grid-template-columns: minmax(220px, 280px) minmax(0, 1fr); gap: 12px; align-items: center; padding: 7px 9px; border: 1px solid rgba(36,54,83,.55); border-radius: 8px; background: rgba(10,18,34,.45); }
+.metric-meta { min-width: 0; }
+.metric-name { display: flex; gap: 7px; align-items: center; min-width: 0; }
+.metric-name .fn { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 11px; }
+.metric-sub { margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--dim); font-size: 10px; }
+.metric-range { margin-top: 2px; color: var(--muted); font-size: 10px; font-variant-numeric: tabular-nums; }
+.metric-canvas-wrap { min-width: 0; }
+.metric-axis { height: 22px; margin-left: 292px; margin-top: 2px; }
+.metric-axis canvas { display: block; }
 .notes { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 .notes h3 { margin: 0 0 6px; font-size: 12px; color: var(--muted); font-weight: 600; }
 .notes ul { margin: 0; padding-left: 18px; color: var(--muted); }
@@ -80,6 +111,11 @@ footer { color: var(--dim); font-size: 11px; margin-top: 20px; border-top: 1px s
   .controls { justify-content: flex-start; margin-top: 8px; }
   .bar-row { grid-template-columns: 20px minmax(0, 1fr); }
   .bar-stats { grid-column: 2; text-align: left; }
+  .cohort-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .cohort-head, .cohort-row { grid-template-columns: minmax(120px, 1.2fr) minmax(0, 1fr) 58px; }
+  .cohort-head span:nth-child(4), .cohort-delta { display: none; }
+  .metric-row { grid-template-columns: 1fr; }
+  .metric-axis { margin-left: 0; }
   .notes { grid-template-columns: 1fr; }
 }
 </style>
@@ -145,6 +181,73 @@ footer { color: var(--dim); font-size: 11px; margin-top: 20px; border-top: 1px s
     </section>
   </div>
 
+  <section class="panel" id="latencyHeatmapPanel">
+    <div class="panel-head">
+      <div>
+        <h2>延迟热图</h2>
+        <p>横轴时间桶，纵轴对数延迟桶，颜色=调用次数；叠加 p50 / p95 / p99 分位线，用于识别长尾、双峰和周期性尖刺。</p>
+      </div>
+      <div class="legend">
+        <span><i style="background:#2ec4b6"></i>p50</span>
+        <span><i style="background:#ffb703"></i>p95</span>
+        <span><i style="background:#ff6b6b"></i>p99</span>
+        <span class="heat-legend"><span>低</span><i></i><span>高</span></span>
+      </div>
+    </div>
+    <div class="scroll"><canvas id="latencyHeatmap"></canvas></div>
+    <div class="empty" id="latencyHeatmapEmpty" style="display:none"></div>
+  </section>
+
+  <div class="grid2">
+    <section class="panel" id="subsecondHeatmapPanel">
+      <div class="panel-head">
+        <div>
+          <h2>次秒偏移热图</h2>
+          <p>横轴时间桶，纵轴是事件在秒内的位置；纵轴不是请求延迟，用来发现每秒/每分钟周期性抖动。</p>
+        </div>
+        <div class="heat-legend"><span>低</span><i></i><span>高</span></div>
+      </div>
+      <div class="scroll"><canvas id="subsecondHeatmap"></canvas></div>
+      <div class="empty" id="subsecondHeatmapEmpty" style="display:none"></div>
+    </section>
+    <section class="panel" id="aggregateBandsPanel">
+      <div class="panel-head">
+        <div>
+          <h2>函数分位带</h2>
+          <p>每个函数一行；p50 实线、p95 阴影、p99 虚线，共享时间轴。这里展示的是函数级聚合，不是调用栈火焰图。</p>
+        </div>
+        <div class="legend">
+          <span><i style="background:#2ec4b6"></i>p50</span>
+          <span><i style="background:#ffb703;opacity:.55"></i>p95 阴影</span>
+          <span><i style="background:#ff6b6b"></i>p99 虚线</span>
+        </div>
+      </div>
+      <div class="scroll"><canvas id="aggregateBands"></canvas></div>
+      <div class="empty" id="aggregateBandsEmpty" style="display:none"></div>
+    </section>
+  </div>
+
+  <section class="panel" id="cohortPanel">
+    <div class="panel-head">
+      <div>
+        <h2>尾 cohort 对比</h2>
+        <p>慢尾（duration ≥ p99）与典型样本（p45–p55）的函数/类别占比、off-CPU 与 futex 均值对比；占比是 cohort 内占比，不是全量占比。</p>
+      </div>
+    </div>
+    <div id="cohort"></div>
+  </section>
+
+  <section class="panel" id="metricsPanel">
+    <div class="panel-head">
+      <div>
+        <h2>多指标小倍数</h2>
+        <p>每个 series 一行，独立 Y 轴、共享 X 轴和十字光标；用于把 NPU/进程/vLLM 指标与延迟视图对齐。</p>
+      </div>
+    </div>
+    <div class="hint" id="metricsMeta"></div>
+    <div id="metricsSmallMultiples"></div>
+  </section>
+
   <div class="grid2">
     <section class="panel">
       <div class="panel-head">
@@ -204,6 +307,8 @@ const CAT_COLORS = {
   submit: '#4cc9f0', hccl: '#b388ff', batch: '#f4a261', other: '#94a3b8'
 };
 const KIND_COLORS = { KERNEL: '#ff6b6b', MEMCPY: '#4cc9f0', HCCL: '#b388ff', API: '#94a3b8' };
+const VIEWS = (DATA && DATA.views) ? DATA.views : {};
+const METRICS = (DATA && DATA.metrics) ? DATA.metrics : null;
 
 function esc(value) {
   return String(value == null ? '' : value).replace(/[&<>"']/g, (ch) => ({
@@ -1066,6 +1171,633 @@ function busyMove(ev) {
   const point = points[index];
   showTip(ev, '<b>设备忙率</b><br><span class="muted">时间</span> ' + fmtClock(point.t / 1000) + '<br><span class="muted">busy</span> ' + fmtPct(point.busy) + ' · <span class="muted">kernel</span> ' + fmtPct(point.kernel) + '<br><span class="muted">memcpy</span> ' + fmtPct(point.memcpy) + ' · <span class="muted">HCCL</span> ' + fmtPct(point.hccl) + '<br><span class="muted">区间</span> ' + point.count);
 }
+
+// ----------------------------- M1/M2 views -----------------------------
+function numeric(value, fallback) {
+  const number = Number(value);
+  return value == null || !isFinite(number) ? fallback : number;
+}
+
+function viewReason(view, fallback) {
+  if (view && view.reason) return String(view.reason);
+  return fallback;
+}
+
+function canvasState(canvasId, emptyId, message) {
+  const canvas = document.getElementById(canvasId);
+  const empty = document.getElementById(emptyId);
+  if (!canvas || !empty) return null;
+  if (message) {
+    canvas.style.display = 'none';
+    empty.style.display = 'block';
+    empty.textContent = message;
+    return null;
+  }
+  canvas.style.display = 'block';
+  empty.style.display = 'none';
+  empty.textContent = '';
+  return canvas;
+}
+
+function heatColor(count, maxCount) {
+  const value = Math.max(0, numeric(count, 0));
+  if (!value) return 'rgba(76,201,240,0)';
+  const top = Math.max(1, numeric(maxCount, 1));
+  const ratio = Math.log1p(value) / Math.log1p(top);
+  return 'rgba(76,201,240,' + (0.12 + 0.82 * ratio).toFixed(3) + ')';
+}
+
+function drawLineValues(ctx, values, xFor, yFor, color, dash, width) {
+  if (!Array.isArray(values) || !values.length) return;
+  ctx.save();
+  ctx.strokeStyle = color;
+  ctx.lineWidth = width || 1.5;
+  ctx.setLineDash(dash || []);
+  ctx.beginPath();
+  let started = false;
+  for (let index = 0; index < values.length; index++) {
+    const value = numeric(values[index], 0);
+    if (value <= 0) {
+      started = false;
+      continue;
+    }
+    const x = xFor(index);
+    const y = yFor(value);
+    if (!started) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    started = true;
+  }
+  ctx.stroke();
+  ctx.restore();
+}
+
+const latencyHeatState = { geo: null };
+
+function drawLatencyHeatmap() {
+  const view = (VIEWS && VIEWS.latency_heatmap) || {};
+  const counts = Array.isArray(view.counts) ? view.counts : [];
+  const edges = Array.isArray(view.latency_edges_ms) ? view.latency_edges_ms : [];
+  if (!view.available || !counts.length || !edges.length || edges.length < 2) {
+    canvasState('latencyHeatmap', 'latencyHeatmapEmpty', '延迟热图不可用：' + viewReason(view, '没有 span 数据'));
+    latencyHeatState.geo = null;
+    return;
+  }
+  const canvas = canvasState('latencyHeatmap', 'latencyHeatmapEmpty', '');
+  if (!canvas) return;
+  const rows = counts.length;
+  const columns = Math.max(1, Math.round(numeric(view.columns, 1)));
+  const rowH = Math.max(12, Math.min(22, Math.floor(560 / rows)));
+  const height = 18 + rows * rowH + 38;
+  const { ctx, width } = fitCanvas(canvas, height);
+  const left = 88, right = 18, top = 18, bottom = 26;
+  const plotW = Math.max(80, width - left - right);
+  const plotH = rows * rowH;
+  const bucket = numeric(view.bucket_ms, 0) > 0 ? numeric(view.bucket_ms, 0) : Math.max(0.001, DATA.window.duration_ms / columns);
+  const endTime = Math.max(0.001, bucket * columns);
+  const maxCount = Math.max(1, numeric(view.max_count, 1));
+
+  drawTimeGrid(ctx, left, top, plotW, plotH, 0, endTime, 7);
+  ctx.save();
+  ctx.font = '10px ui-monospace, SFMono-Regular, Consolas, monospace';
+  ctx.textBaseline = 'middle';
+  for (let row = 0; row < rows; row++) {
+    const y = top + (rows - row - 1) * rowH;
+    for (let column = 0; column < columns; column++) {
+      const value = numeric((counts[row] || [])[column], 0);
+      if (!value) continue;
+      ctx.fillStyle = heatColor(value, maxCount);
+      const x = left + column / columns * plotW;
+      ctx.fillRect(x + 0.5, y + 1, Math.max(1, plotW / columns - 1), rowH - 2);
+    }
+  }
+  ctx.strokeStyle = 'rgba(52,78,113,.55)';
+  for (let row = 0; row <= rows; row++) {
+    const y = top + row * rowH;
+    ctx.beginPath(); ctx.moveTo(left, y + 0.5); ctx.lineTo(left + plotW, y + 0.5); ctx.stroke();
+  }
+  const labelRows = [0, Math.floor(rows / 4), Math.floor(rows / 2), Math.floor(rows * 3 / 4), rows - 1];
+  ctx.fillStyle = '#7890ae';
+  for (const row of labelRows) {
+    const y = top + (rows - row - 0.5) * rowH;
+    ctx.fillText(fmtTime(numeric(edges[row], 0)), 4, y);
+  }
+  ctx.fillStyle = '#7890ae';
+  ctx.fillText('延迟', 4, 8);
+
+  const xFor = (index) => left + (index + 0.5) / columns * plotW;
+  const yFor = (ms) => {
+    let row = 0;
+    while (row < rows - 1 && ms >= numeric(edges[row + 1], Infinity)) row++;
+    const low = Math.max(0.000001, numeric(edges[row], 0.000001));
+    const high = Math.max(low * 1.0001, numeric(edges[row + 1], low * 10));
+    const ratio = Math.max(0, Math.min(1, (Math.log(Math.max(low, ms)) - Math.log(low)) / (Math.log(high) - Math.log(low))));
+    return top + (rows - row - 1) * rowH + rowH - ratio * rowH;
+  };
+  drawLineValues(ctx, view.p50, xFor, yFor, '#2ec4b6', [], 1.8);
+  drawLineValues(ctx, view.p95, xFor, yFor, '#ffb703', [], 1.8);
+  drawLineValues(ctx, view.p99, xFor, yFor, '#ff6b6b', [5, 4], 1.6);
+  ctx.strokeStyle = '#2f4a70';
+  ctx.strokeRect(left + 0.5, top + 0.5, plotW - 1, plotH - 1);
+  ctx.restore();
+  latencyHeatState.geo = { left, top, plotW, plotH, rowH, rows, columns, bucket, counts, edges };
+}
+
+function latencyHeatmapMove(ev) {
+  const geo = latencyHeatState.geo;
+  if (!geo) return;
+  const canvas = document.getElementById('latencyHeatmap');
+  const p = canvasPos(ev, canvas);
+  if (p.x < geo.left || p.x > geo.left + geo.plotW || p.y < geo.top || p.y > geo.top + geo.plotH) {
+    hideTip();
+    return;
+  }
+  const column = Math.max(0, Math.min(geo.columns - 1, Math.floor((p.x - geo.left) / geo.plotW * geo.columns)));
+  const row = Math.max(0, Math.min(geo.rows - 1, geo.rows - 1 - Math.floor((p.y - geo.top) / geo.rowH)));
+  const count = numeric((geo.counts[row] || [])[column], 0);
+  const start = column * geo.bucket;
+  showTip(ev, '<b>延迟热图</b><br><span class="muted">时间桶</span> ' + fmtClock(start / 1000) + ' – ' + fmtClock((start + geo.bucket) / 1000) + '<br><span class="muted">延迟范围</span> ' + fmtTime(numeric(geo.edges[row], 0)) + ' – ' + fmtTime(numeric(geo.edges[row + 1], 0)) + '<br><span class="muted">count</span> ' + fmtCount(count));
+}
+
+const subsecondHeatState = { geo: null };
+
+function drawSubsecondHeatmap() {
+  const view = (VIEWS && VIEWS.subsecond_heatmap) || {};
+  const counts = Array.isArray(view.counts) ? view.counts : [];
+  if (!view.available || !counts.length) {
+    canvasState('subsecondHeatmap', 'subsecondHeatmapEmpty', '次秒偏移热图不可用：' + viewReason(view, '没有 span 数据'));
+    subsecondHeatState.geo = null;
+    return;
+  }
+  const canvas = canvasState('subsecondHeatmap', 'subsecondHeatmapEmpty', '');
+  if (!canvas) return;
+  const rows = Math.max(1, Math.round(numeric(view.rows, counts.length)));
+  const columns = Math.max(1, Math.round(numeric(view.columns, 1)));
+  const rowH = Math.max(5, Math.min(10, Math.floor(430 / rows)));
+  const height = 18 + rows * rowH + 38;
+  const { ctx, width } = fitCanvas(canvas, height);
+  const left = 58, right = 18, top = 18, bottom = 26;
+  const plotW = Math.max(80, width - left - right);
+  const plotH = rows * rowH;
+  const bucket = numeric(view.bucket_ms, 0) > 0 ? numeric(view.bucket_ms, 0) : Math.max(0.001, DATA.window.duration_ms / columns);
+  const duration = numeric(view.duration_ms, bucket * columns) || bucket * columns;
+  const maxCount = Math.max(1, numeric(view.max_count, 1));
+  drawTimeGrid(ctx, left, top, plotW, plotH, 0, Math.max(0.001, duration), 7);
+  ctx.save();
+  for (let row = 0; row < rows; row++) {
+    const y = top + row * rowH;
+    for (let column = 0; column < columns; column++) {
+      const value = numeric((counts[row] || [])[column], 0);
+      if (!value) continue;
+      ctx.fillStyle = heatColor(value, maxCount);
+      ctx.fillRect(left + column / columns * plotW + 0.5, y + 0.5, Math.max(1, plotW / columns - 1), Math.max(1, rowH - 1));
+    }
+  }
+  ctx.fillStyle = '#7890ae';
+  ctx.font = '10px ui-monospace, SFMono-Regular, Consolas, monospace';
+  ctx.textBaseline = 'middle';
+  const totalOffset = numeric(view.offset_ms, 1000 / rows) * rows;
+  for (const fraction of [0, 0.25, 0.5, 0.75, 1]) {
+    const y = top + fraction * plotH;
+    ctx.fillText(fmtTime(fraction * totalOffset), 4, y);
+  }
+  ctx.fillText('秒内偏移', 4, 8);
+  ctx.strokeStyle = '#2f4a70';
+  ctx.strokeRect(left + 0.5, top + 0.5, plotW - 1, plotH - 1);
+  ctx.restore();
+  subsecondHeatState.geo = { left, top, plotW, plotH, rowH, rows, columns, bucket, counts, offsetMS: numeric(view.offset_ms, totalOffset / rows) };
+}
+
+function subsecondHeatmapMove(ev) {
+  const geo = subsecondHeatState.geo;
+  if (!geo) return;
+  const canvas = document.getElementById('subsecondHeatmap');
+  const p = canvasPos(ev, canvas);
+  if (p.x < geo.left || p.x > geo.left + geo.plotW || p.y < geo.top || p.y > geo.top + geo.plotH) {
+    hideTip();
+    return;
+  }
+  const column = Math.max(0, Math.min(geo.columns - 1, Math.floor((p.x - geo.left) / geo.plotW * geo.columns)));
+  const row = Math.max(0, Math.min(geo.rows - 1, Math.floor((p.y - geo.top) / geo.rowH)));
+  const count = numeric((geo.counts[row] || [])[column], 0);
+  const start = column * geo.bucket;
+  showTip(ev, '<b>次秒偏移热图</b><br><span class="muted">时间桶</span> ' + fmtClock(start / 1000) + ' – ' + fmtClock((start + geo.bucket) / 1000) + '<br><span class="muted">秒内位置（不是请求延迟）</span> ' + fmtTime(row * geo.offsetMS) + ' – ' + fmtTime((row + 1) * geo.offsetMS) + '<br><span class="muted">count</span> ' + fmtCount(count));
+}
+
+const aggregateBandState = { geo: null };
+
+function drawAggregateBands() {
+  const view = (VIEWS && VIEWS.aggregate_bands) || {};
+  const bands = Array.isArray(view.bands) ? view.bands.filter(Boolean) : [];
+  if (!view.available || !bands.length) {
+    canvasState('aggregateBands', 'aggregateBandsEmpty', '函数分位带不可用：' + viewReason(view, '没有足够的分桶样本'));
+    aggregateBandState.geo = null;
+    return;
+  }
+  const canvas = canvasState('aggregateBands', 'aggregateBandsEmpty', '');
+  if (!canvas) return;
+  const columns = Math.max(1, Math.round(numeric(view.columns, 1)));
+  const bucket = numeric(view.bucket_ms, 0) > 0 ? numeric(view.bucket_ms, 0) : Math.max(0.001, DATA.window.duration_ms / columns);
+  const endTime = Math.max(0.001, bucket * columns);
+  let maxDuration = numeric(view.max_p95_ms, 0);
+  let minDuration = Infinity;
+  for (const band of bands) {
+    for (const key of ['p50', 'p95', 'p99']) {
+      for (const value of (Array.isArray(band[key]) ? band[key] : [])) {
+        const number = numeric(value, 0);
+        if (number > 0) {
+          maxDuration = Math.max(maxDuration, number);
+          minDuration = Math.min(minDuration, number);
+        }
+      }
+    }
+  }
+  if (!isFinite(minDuration)) minDuration = 0.001;
+  minDuration = Math.max(0.001, minDuration);
+  maxDuration = Math.max(minDuration * 2, maxDuration);
+  const logMin = Math.log10(minDuration);
+  const logMax = Math.log10(maxDuration);
+  const rowH = 36;
+  const top = 24, bottom = 34, left = 220, right = 18;
+  const height = top + bands.length * rowH + bottom;
+  const { ctx, width } = fitCanvas(canvas, height);
+  const plotW = Math.max(80, width - left - right);
+  const plotH = bands.length * rowH;
+
+  ctx.save();
+  ctx.font = '10px ui-monospace, SFMono-Regular, Consolas, monospace';
+  ctx.textBaseline = 'middle';
+  for (let index = 0; index < bands.length; index++) {
+    ctx.fillStyle = index % 2 ? 'rgba(16,26,46,.34)' : 'rgba(10,18,34,.40)';
+    ctx.fillRect(0, top + index * rowH, width, rowH);
+  }
+  ctx.restore();
+  drawTimeGrid(ctx, left, top, plotW, plotH, 0, endTime, 7);
+  ctx.save();
+  ctx.font = '10px ui-monospace, SFMono-Regular, Consolas, monospace';
+  ctx.textBaseline = 'middle';
+  const xFor = (index) => left + (index + 0.5) / columns * plotW;
+  const yFor = (ms, rowTop) => {
+    const value = Math.max(minDuration, Math.min(maxDuration, numeric(ms, minDuration)));
+    return rowTop + rowH - (Math.log10(value) - logMin) / Math.max(0.0001, logMax - logMin) * (rowH - 4) - 2;
+  };
+  for (let index = 0; index < bands.length; index++) {
+    const band = bands[index];
+    const rowTop = top + index * rowH;
+    ctx.fillStyle = catColor(band.category);
+    ctx.fillRect(2, rowTop + rowH / 2 - 3, 5, 6);
+    ctx.fillStyle = '#9fb4d1';
+    ctx.font = '11px "Microsoft YaHei", Arial, sans-serif';
+    ctx.fillText(clipText(ctx, band.function || '(unknown)', left - 18), 12, rowTop + rowH / 2);
+    ctx.fillStyle = '#617b9d';
+    ctx.font = '9px ui-monospace, SFMono-Regular, Consolas, monospace';
+    ctx.fillText(clipText(ctx, band.category || '', left - 18), 12, rowTop + rowH - 7);
+    const p50 = Array.isArray(band.p50) ? band.p50 : [];
+    const p95 = Array.isArray(band.p95) ? band.p95 : [];
+    const p99 = Array.isArray(band.p99) ? band.p99 : [];
+    const counts = Array.isArray(band.count) ? band.count : [];
+    let segment = [];
+    const flush = () => {
+      if (segment.length > 1) {
+        ctx.beginPath();
+        ctx.moveTo(segment[0].x, segment[0].upper);
+        for (let i = 1; i < segment.length; i++) ctx.lineTo(segment[i].x, segment[i].upper);
+        for (let i = segment.length - 1; i >= 0; i--) ctx.lineTo(segment[i].x, segment[i].lower);
+        ctx.closePath();
+        ctx.fillStyle = 'rgba(255,183,3,.15)';
+        ctx.fill();
+      }
+      segment = [];
+    };
+    for (let column = 0; column < columns; column++) {
+      const count = numeric(counts[column], 0);
+      const lower = numeric(p50[column], 0);
+      const upper = numeric(p95[column], 0);
+      if (!count || lower <= 0 || upper <= 0) {
+        flush();
+        continue;
+      }
+      segment.push({ x: xFor(column), lower: yFor(Math.min(lower, upper), rowTop), upper: yFor(Math.max(lower, upper), rowTop) });
+    }
+    flush();
+    drawLineValues(ctx, p50, xFor, (value) => yFor(value, rowTop), '#2ec4b6', [], 1.5);
+    drawLineValues(ctx, p95, xFor, (value) => yFor(value, rowTop), 'rgba(255,183,3,.72)', [], 1.0);
+    drawLineValues(ctx, p99, xFor, (value) => yFor(value, rowTop), '#ff6b6b', [4, 3], 1.2);
+  }
+  ctx.strokeStyle = '#2f4a70';
+  ctx.strokeRect(left + 0.5, top + 0.5, plotW - 1, plotH - 1);
+  ctx.restore();
+  aggregateBandState.geo = { left, top, plotW, plotH, rowH, rows: bands.length, columns, bucket, bands };
+}
+
+function aggregateBandsMove(ev) {
+  const geo = aggregateBandState.geo;
+  if (!geo) return;
+  const canvas = document.getElementById('aggregateBands');
+  const p = canvasPos(ev, canvas);
+  if (p.x < geo.left || p.x > geo.left + geo.plotW || p.y < geo.top || p.y > geo.top + geo.plotH) {
+    hideTip();
+    return;
+  }
+  const row = Math.max(0, Math.min(geo.rows - 1, Math.floor((p.y - geo.top) / geo.rowH)));
+  const column = Math.max(0, Math.min(geo.columns - 1, Math.floor((p.x - geo.left) / geo.plotW * geo.columns)));
+  const band = geo.bands[row] || {};
+  const p50 = numeric((band.p50 || [])[column], 0);
+  const p95 = numeric((band.p95 || [])[column], 0);
+  const p99 = numeric((band.p99 || [])[column], 0);
+  const count = numeric((band.count || [])[column], 0);
+  const start = column * geo.bucket;
+  showTip(ev, '<b>' + esc(band.function || '(unknown)') + '</b><br><span class="muted">category</span> ' + esc(band.category || '--') + '<br><span class="muted">时间桶</span> ' + fmtClock(start / 1000) + ' – ' + fmtClock((start + geo.bucket) / 1000) + '<br><span class="muted">p50 / p95 / p99</span> ' + fmtTime(p50) + ' / ' + fmtTime(p95) + ' / ' + fmtTime(p99) + '<br><span class="muted">count</span> ' + fmtCount(count));
+}
+
+function renderTailCohort() {
+  const host = document.getElementById('cohort');
+  if (!host) return;
+  const view = (VIEWS && VIEWS.tail_cohort) || {};
+  const notes = Array.isArray(view.notes) ? view.notes : [];
+  const notesHtml = notes.length ? '<div class="cohort-notes">' + notes.map((note) => esc(note)).join('<br>') + '</div>' : '';
+  if (!view.available) {
+    host.innerHTML = '<div class="empty">尾 cohort 不可用：' + esc(viewReason(view, '样本不足')) + '</div>' + notesHtml;
+    return;
+  }
+  const rows = Array.isArray(view.rows) ? view.rows.filter(Boolean) : [];
+  if (!rows.length) {
+    host.innerHTML = '<div class="empty">没有显著的 cohort 差异项。</div>' + notesHtml;
+    return;
+  }
+  const summary = [
+    ['慢尾样本', fmtCount(view.slow_count), '阈值 ' + fmtTime(numeric(view.threshold_ms, 0))],
+    ['典型样本', fmtCount(view.typical_count), 'p45–p55 附近'],
+    ['平均 off-CPU', fmtTime(numeric(view.slow_offcpu_ms, 0)) + ' / ' + fmtTime(numeric(view.typical_offcpu_ms, 0)), 'slow / typical'],
+    ['平均 futex', fmtTime(numeric(view.slow_futex_ms, 0)) + ' / ' + fmtTime(numeric(view.typical_futex_ms, 0)), 'slow / typical']
+  ];
+  const summaryHtml = summary.map((item) => '<div class="cohort-stat"><span>' + esc(item[0]) + '</span><b>' + item[1] + '</b><span>' + esc(item[2]) + '</span></div>').join('');
+  const body = rows.map((row) => {
+    const slow = Math.max(0, Math.min(100, numeric(row.slow_pct, 0)));
+    const typical = Math.max(0, Math.min(100, numeric(row.typical_pct, 0)));
+    const delta = numeric(row.delta_pct, 0);
+    const deltaClass = delta > 0.0001 ? 'up' : (delta < -0.0001 ? 'down' : '');
+    const deltaText = (delta > 0 ? '+' : '') + delta.toFixed(1) + ' pp';
+    const kindColor = row.kind === 'category' ? '#b388ff' : (row.kind === 'wait' ? '#ffb703' : '#4cc9f0');
+    return '<div class="cohort-row">' +
+      '<div class="cohort-label"><span class="badge" style="color:' + kindColor + '">' + esc(row.kind || 'function') + '</span><span class="fn" title="' + esc(row.label) + '">' + esc(row.label) + '</span></div>' +
+      '<div class="cohort-cell"><span class="cohort-track slow"><i style="width:' + Math.max(slow > 0 ? 1 : 0, slow).toFixed(1) + '%"></i></span><b>' + fmtPct(slow) + '</b></div>' +
+      '<div class="cohort-cell"><span class="cohort-track typical"><i style="width:' + Math.max(typical > 0 ? 1 : 0, typical).toFixed(1) + '%"></i></span><b>' + fmtPct(typical) + '</b></div>' +
+      '<div class="cohort-delta ' + deltaClass + '">' + deltaText + '</div>' +
+      '</div>';
+  }).join('');
+  host.innerHTML = '<div class="cohort-summary">' + summaryHtml + '</div>' +
+    '<div class="cohort-table"><div class="cohort-head"><span>差异项</span><span>slow 尾占比</span><span>typical 占比</span><span>Δ</span></div>' + body + '</div>' + notesHtml;
+}
+
+const metricsState = { rows: [], minT: 0, maxT: 1, crosshair: null };
+
+function fmtMetricValue(value, unit) {
+  const number = numeric(value, 0);
+  const normalized = String(unit || '').trim();
+  const lower = normalized.toLowerCase();
+  if (lower === 'ratio' || lower === 'percent' || lower === '%') {
+    const percent = Math.abs(number) <= 1.5 ? number * 100 : number;
+    return percent.toFixed(percent < 10 ? 2 : 1) + '%';
+  }
+  if (lower === 'bytes' || lower === 'byte' || lower === 'b') {
+    const absolute = Math.abs(number);
+    if (absolute >= 1024 * 1024 * 1024) return (number / (1024 * 1024 * 1024)).toFixed(2) + ' GiB';
+    if (absolute >= 1024 * 1024) return (number / (1024 * 1024)).toFixed(1) + ' MiB';
+    if (absolute >= 1024) return (number / 1024).toFixed(1) + ' KiB';
+    return number.toFixed(0) + ' B';
+  }
+  if (lower === 'seconds' || lower === 'second' || lower === 's') return fmtTime(number * 1000);
+  if (lower === 'milliseconds' || lower === 'millisecond' || lower === 'ms') return fmtTime(number);
+  if (lower === 'watts' || lower === 'watt' || lower === 'w') return number.toFixed(1) + ' W';
+  if (lower === 'celsius' || lower === '°c' || lower === 'c') return number.toFixed(1) + ' °C';
+  if (Math.abs(number) >= 1000) return number.toLocaleString('en-US', { maximumFractionDigits: 2 });
+  if (Math.abs(number) > 0 && Math.abs(number) < 0.01) return number.toExponential(2);
+  return number.toFixed(2).replace(/\.?0+$/, '') + (normalized ? ' ' + normalized : '');
+}
+
+function metricPoints(series) {
+  const times = Array.isArray(series.t) ? series.t : [];
+  const values = Array.isArray(series.v) ? series.v : [];
+  const points = [];
+  const length = Math.min(times.length, values.length);
+  for (let index = 0; index < length; index++) {
+    const t = numeric(times[index], NaN);
+    const v = numeric(values[index], NaN);
+    if (isFinite(t) && isFinite(v)) points.push({ t, v });
+  }
+  points.sort((a, b) => a.t - b.t);
+  return points;
+}
+
+function drawMetricSeries(index, crosshairT) {
+  const row = metricsState.rows[index];
+  if (!row) return;
+  const canvas = document.getElementById('metricSeries' + index);
+  if (!canvas) return;
+  const height = 62;
+  const { ctx, width } = fitCanvas(canvas, height);
+  const left = 8, right = 8, top = 8, bottom = 14;
+  const plotW = Math.max(20, width - left - right);
+  const plotH = height - top - bottom;
+  const points = row.points;
+  if (!points.length) {
+    ctx.fillStyle = '#7890ae';
+    ctx.font = '10px "Microsoft YaHei", Arial, sans-serif';
+    ctx.fillText('没有数据点', 10, 30);
+    return;
+  }
+  const minV = row.minV;
+  const maxV = row.maxV;
+  const spanT = Math.max(0.0001, metricsState.maxT - metricsState.minT);
+  const spanV = Math.max(Math.abs(maxV) * 1e-6, maxV - minV, 1e-9);
+  const xFor = (t) => left + (t - metricsState.minT) / spanT * plotW;
+  const yFor = (v) => top + (1 - (v - minV) / spanV) * plotH;
+
+  ctx.save();
+  ctx.strokeStyle = 'rgba(52,78,113,.30)';
+  ctx.fillStyle = '#617b9d';
+  ctx.font = '9px ui-monospace, SFMono-Regular, Consolas, monospace';
+  for (const fraction of [0, 0.5, 1]) {
+    const y = top + fraction * plotH;
+    ctx.beginPath(); ctx.moveTo(left, y + 0.5); ctx.lineTo(left + plotW, y + 0.5); ctx.stroke();
+  }
+  ctx.fillText(fmtMetricValue(maxV, row.series.unit), left + 2, top + 7);
+  ctx.fillText(fmtMetricValue(minV, row.series.unit), left + 2, top + plotH - 1);
+
+  const gradient = ctx.createLinearGradient(0, top, 0, top + plotH);
+  gradient.addColorStop(0, 'rgba(76,201,240,.30)');
+  gradient.addColorStop(1, 'rgba(76,201,240,.02)');
+  ctx.beginPath();
+  ctx.moveTo(xFor(points[0].t), top + plotH);
+  for (const point of points) ctx.lineTo(xFor(point.t), yFor(point.v));
+  ctx.lineTo(xFor(points[points.length - 1].t), top + plotH);
+  ctx.closePath();
+  ctx.fillStyle = gradient;
+  ctx.fill();
+
+  ctx.beginPath();
+  for (let i = 0; i < points.length; i++) {
+    const x = xFor(points[i].t), y = yFor(points[i].v);
+    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+  }
+  ctx.strokeStyle = '#4cc9f0';
+  ctx.lineWidth = 1.4;
+  ctx.stroke();
+
+  if (crosshairT != null && crosshairT >= metricsState.minT && crosshairT <= metricsState.maxT) {
+    const x = xFor(crosshairT);
+    ctx.setLineDash([2, 2]);
+    ctx.strokeStyle = 'rgba(255,183,3,.80)';
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(x + 0.5, top); ctx.lineTo(x + 0.5, top + plotH); ctx.stroke();
+    ctx.setLineDash([]);
+    const nearest = nearestMetricPoint(points, crosshairT);
+    if (nearest) {
+      ctx.fillStyle = '#ffb703';
+      ctx.beginPath(); ctx.arc(xFor(nearest.t), yFor(nearest.v), 2.4, 0, Math.PI * 2); ctx.fill();
+    }
+  }
+  ctx.restore();
+}
+
+function nearestMetricPoint(points, t) {
+  if (!points.length) return null;
+  let low = 0, high = points.length - 1;
+  while (low < high) {
+    const mid = Math.floor((low + high) / 2);
+    if (points[mid].t < t) low = mid + 1; else high = mid;
+  }
+  const right = points[low];
+  const left = points[Math.max(0, low - 1)];
+  return Math.abs(left.t - t) <= Math.abs(right.t - t) ? left : right;
+}
+
+function drawMetricsAxis(crosshairT) {
+  const canvas = document.getElementById('metricsAxis');
+  if (!canvas) return;
+  const { ctx, width } = fitCanvas(canvas, 22);
+  const left = 8, right = 8;
+  const plotW = Math.max(20, width - left - right);
+  const span = Math.max(0.0001, metricsState.maxT - metricsState.minT);
+  ctx.save();
+  ctx.fillStyle = '#7890ae';
+  ctx.font = '10px ui-monospace, SFMono-Regular, Consolas, monospace';
+  for (let index = 0; index <= 7; index++) {
+    const t = metricsState.minT + span * index / 7;
+    const x = left + plotW * index / 7;
+    ctx.strokeStyle = 'rgba(52,78,113,.45)';
+    ctx.beginPath(); ctx.moveTo(x + 0.5, 0); ctx.lineTo(x + 0.5, 4); ctx.stroke();
+    const label = fmtClock(t / 1000);
+    const textWidth = ctx.measureText(label).width;
+    ctx.fillText(label, Math.max(left, Math.min(left + plotW - textWidth, x - textWidth / 2)), 16);
+  }
+  if (crosshairT != null && crosshairT >= metricsState.minT && crosshairT <= metricsState.maxT) {
+    const x = left + (crosshairT - metricsState.minT) / span * plotW;
+    ctx.strokeStyle = 'rgba(255,183,3,.80)';
+    ctx.beginPath(); ctx.moveTo(x + 0.5, 0); ctx.lineTo(x + 0.5, 7); ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function redrawMetricSeries(crosshairT) {
+  for (let index = 0; index < metricsState.rows.length; index++) drawMetricSeries(index, crosshairT);
+  drawMetricsAxis(crosshairT);
+}
+
+function metricsMove(ev, index) {
+  const row = metricsState.rows[index];
+  if (!row) return;
+  const canvas = document.getElementById('metricSeries' + index);
+  const p = canvasPos(ev, canvas);
+  const width = canvas.getBoundingClientRect().width;
+  const left = 8, right = 8;
+  const plotW = Math.max(20, width - left - right);
+  if (p.x < left || p.x > left + plotW) {
+    metricsState.crosshair = null;
+    redrawMetricSeries(null);
+    hideTip();
+    return;
+  }
+  const ratio = Math.max(0, Math.min(1, (p.x - left) / plotW));
+  metricsState.crosshair = metricsState.minT + ratio * (metricsState.maxT - metricsState.minT);
+  redrawMetricSeries(metricsState.crosshair);
+  const nearest = nearestMetricPoint(row.points, metricsState.crosshair);
+  if (!nearest) return;
+  showTip(ev, '<b>' + esc(row.series.name || row.series.id || 'metric') + '</b><br><span class="muted">时间</span> ' + fmtClock(nearest.t / 1000) + '<br><span class="muted">值</span> ' + fmtMetricValue(nearest.v, row.series.unit) + '<br><span class="muted">source</span> ' + esc(row.series.source || '--') + (row.series.device ? ' · <span class="muted">device</span> ' + esc(row.series.device) : ''));
+}
+
+function metricsLeave() {
+  metricsState.crosshair = null;
+  redrawMetricSeries(null);
+  hideTip();
+}
+
+function renderMetricsSmallMultiples() {
+  const host = document.getElementById('metricsSmallMultiples');
+  if (!host) return;
+  const metrics = METRICS || {};
+  const series = Array.isArray(metrics.series) ? metrics.series.filter(Boolean) : [];
+  const meta = document.getElementById('metricsMeta');
+  if (!series.length || metrics.available === false) {
+    metricsState.rows = [];
+    const reason = !series.length ? '未采集 metrics。' : '指标不可用：' + viewReason(metrics, '没有指标数据');
+    host.innerHTML = '<div class="empty">' + esc(reason) + '</div>';
+    if (meta) meta.textContent = metrics.reason ? '原因：' + metrics.reason : '';
+    return;
+  }
+  const rows = series.map((item) => {
+    const points = metricPoints(item);
+    let minV = Infinity, maxV = -Infinity;
+    for (const point of points) {
+      minV = Math.min(minV, point.v);
+      maxV = Math.max(maxV, point.v);
+    }
+    if (!isFinite(minV)) minV = 0;
+    if (!isFinite(maxV)) maxV = 1;
+    if (maxV === minV) maxV = minV + Math.max(Math.abs(minV) * 0.01, 1e-9);
+    return { series: item, points, minV, maxV };
+  });
+  let minT = Infinity, maxT = -Infinity;
+  for (const row of rows) {
+    for (const point of row.points) {
+      minT = Math.min(minT, point.t);
+      maxT = Math.max(maxT, point.t);
+    }
+  }
+  if (!isFinite(minT)) {
+    minT = 0;
+    maxT = Math.max(1, numeric(DATA.window && DATA.window.duration_ms, 1));
+  }
+  if (maxT - minT < 0.001) maxT = minT + 1;
+  metricsState.rows = rows;
+  metricsState.minT = minT;
+  metricsState.maxT = maxT;
+  metricsState.crosshair = null;
+  const labels = [];
+  if (metrics.samples) labels.push(fmtCount(metrics.samples) + ' samples');
+  if (metrics.interval_ms) labels.push('间隔 ' + fmtTime(metrics.interval_ms));
+  if (metrics.coverage != null) labels.push('覆盖 ' + fmtPct(numeric(metrics.coverage, 0) * 100));
+  if (metrics.clock_quality) labels.push('时钟 ' + metrics.clock_quality);
+  if (meta) meta.textContent = labels.join(' · ');
+  const rowsHtml = rows.map((row, index) => {
+    const item = row.series;
+    const name = item.name || item.id || 'metric';
+    const source = item.source || '--';
+    const device = item.device ? ' · ' + item.device : '';
+    const unit = item.unit ? ' · ' + item.unit : '';
+    return '<div class="metric-row"><div class="metric-meta"><div class="metric-name"><span class="fn" title="' + esc(name) + '">' + esc(name) + '</span><span class="badge" style="color:#4cc9f0">' + esc(item.kind || 'gauge') + '</span></div><div class="metric-sub" title="' + esc(source + device + unit) + '">' + esc(source + device + unit) + '</div><div class="metric-range" id="metricRange' + index + '"></div></div><div class="metric-canvas-wrap"><canvas id="metricSeries' + index + '"></canvas></div></div>';
+  }).join('');
+  host.innerHTML = '<div class="metrics-list">' + rowsHtml + '</div><div class="metric-axis"><canvas id="metricsAxis"></canvas></div>';
+  for (let index = 0; index < rows.length; index++) {
+    const range = document.getElementById('metricRange' + index);
+    if (range) range.textContent = fmtMetricValue(rows[index].minV, rows[index].series.unit) + ' – ' + fmtMetricValue(rows[index].maxV, rows[index].series.unit) + (rows[index].series.downsampled ? ' · 已降采样' : '');
+    const canvas = document.getElementById('metricSeries' + index);
+    if (canvas) {
+      canvas.addEventListener('mousemove', (function(metricIndex) { return function(ev) { metricsMove(ev, metricIndex); }; })(index));
+      canvas.addEventListener('mouseleave', metricsLeave);
+    }
+  }
+  redrawMetricSeries(null);
+}
 // ----------------------------- init -----------------------------
 function renderNotes() {
   const warnings = DATA.warnings || [];
@@ -1085,6 +1817,11 @@ function init() {
   drawCDF();
   drawQuadrant();
   drawBusy();
+  drawLatencyHeatmap();
+  drawSubsecondHeatmap();
+  drawAggregateBands();
+  renderTailCohort();
+  renderMetricsSmallMultiples();
   renderNotes();
   $('#heatMetric').addEventListener('change', drawHeatmap);
   const scatterCanvas = $('#scatter');
@@ -1100,6 +1837,15 @@ function init() {
   const busyCanvas = $('#busy');
   busyCanvas.addEventListener('mousemove', busyMove);
   busyCanvas.addEventListener('mouseleave', hideTip);
+  const latencyCanvas = $('#latencyHeatmap');
+  latencyCanvas.addEventListener('mousemove', latencyHeatmapMove);
+  latencyCanvas.addEventListener('mouseleave', hideTip);
+  const subsecondCanvas = $('#subsecondHeatmap');
+  subsecondCanvas.addEventListener('mousemove', subsecondHeatmapMove);
+  subsecondCanvas.addEventListener('mouseleave', hideTip);
+  const aggregateCanvas = $('#aggregateBands');
+  aggregateCanvas.addEventListener('mousemove', aggregateBandsMove);
+  aggregateCanvas.addEventListener('mouseleave', hideTip);
   window.addEventListener('resize', debounce(() => {
     drawScatter();
     drawHeatmap();
@@ -1107,6 +1853,11 @@ function init() {
     drawQuadrant();
     drawBusy();
     drawTimeline();
+    drawLatencyHeatmap();
+    drawSubsecondHeatmap();
+    drawAggregateBands();
+    renderTailCohort();
+    renderMetricsSmallMultiples();
   }, 140));
 }
 

@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -17,6 +18,7 @@ import (
 func cmdReport(args []string) int {
 	fs := flag.NewFlagSet("report", flag.ContinueOnError)
 	input := fs.String("input", "", "run directory or spans.jsonl path")
+	metricsPath := fs.String("metrics", "", "metrics.jsonl path or metrics run directory (optional)")
 	outPath := fs.String("out", "report.html", "write the standalone HTML report to this file")
 	title := fs.String("title", "", "report title")
 	minDuration := fs.Duration("min-duration", 50*time.Microsecond, "minimum span duration shown on the timeline")
@@ -29,8 +31,8 @@ func cmdReport(args []string) int {
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
-	if strings.TrimSpace(*input) == "" {
-		fmt.Fprintln(os.Stderr, "report: --input (run directory or spans.jsonl) is required")
+	if strings.TrimSpace(*input) == "" && strings.TrimSpace(*metricsPath) == "" {
+		fmt.Fprintln(os.Stderr, "report: --input and/or --metrics is required")
 		return 2
 	}
 	if strings.TrimSpace(*outPath) == "" {
@@ -46,12 +48,39 @@ func cmdReport(args []string) int {
 		fmt.Fprintln(os.Stderr, "report: --device-mode must be matched or none")
 		return 2
 	}
-	in, err := diagnose.Load(*input)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "report: %v\n", err)
-		return 4
+	var in *diagnose.Input
+	var err error
+	if strings.TrimSpace(*input) != "" {
+		in, err = diagnose.Load(*input)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "report: %v\n", err)
+			return 4
+		}
 	}
-	data, err := report.Build(in, report.Options{
+	path := strings.TrimSpace(*metricsPath)
+	if path == "" && strings.TrimSpace(*input) != "" {
+		candidate := *input
+		if info, statErr := os.Stat(candidate); statErr == nil && info.IsDir() {
+			candidate = filepath.Join(candidate, "metrics.jsonl")
+		} else {
+			candidate = filepath.Join(filepath.Dir(candidate), "metrics.jsonl")
+		}
+		if _, statErr := os.Stat(candidate); statErr == nil {
+			path = candidate
+		}
+	}
+	if info, statErr := os.Stat(path); statErr == nil && info.IsDir() {
+		path = filepath.Join(path, "metrics.jsonl")
+	}
+	var metricsData *report.MetricsData
+	if path != "" {
+		metricsData, err = report.LoadMetrics(path, report.MetricsOptions{})
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "report: metrics: %v\n", err)
+			return 4
+		}
+	}
+	data, err := report.BuildWithMetrics(in, metricsData, report.Options{
 		Title:             *title,
 		MinDurationNS:     int64(*minDuration),
 		SlowThresholdNS:   int64(*slowThreshold),
@@ -78,7 +107,11 @@ func cmdReport(args []string) int {
 	if data.Device != nil {
 		deviceIntervals = len(data.Device.Intervals)
 	}
-	fmt.Printf("report out=%s spans=%d device_intervals=%d bytes=%d\n",
-		*outPath, data.Summary.Spans, deviceIntervals, len(html))
+	metricSeries := 0
+	if data.Metrics != nil {
+		metricSeries = len(data.Metrics.Series)
+	}
+	fmt.Printf("report out=%s spans=%d device_intervals=%d metrics_series=%d bytes=%d\n",
+		*outPath, data.Summary.Spans, deviceIntervals, metricSeries, len(html))
 	return 0
 }

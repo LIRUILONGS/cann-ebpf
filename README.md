@@ -11,6 +11,7 @@
 - 只读 `diagnose` 定位命令（JSON/Markdown，不 attach）；
 - 只读 `report` 性能仪表盘（单文件离线 HTML，不 attach、不联网）；
 - M2 host off-CPU/futex（`sched_switch` + futex syscall tracepoint，已在 V4 和合成锁竞争上验证）；
+- 独立 metrics 采集（`cann-ebpf sample`）与 report 多指标叠加，不改写 spans/device/hardware 原始证据；
 - E 层 npu-smi 硬件采样（HBM/AICore/功耗/温度，已上机验证）；
 - M3 device 时间线 join 管线 + in-process msPTI collector（合成 ACL 已验证，生产注入待维护窗口）；
 - 采集前后健康检查、uprobe 残留检查和不覆盖旧证据的运行脚本。
@@ -36,6 +37,8 @@
 | 纯 eBPF vLLM batch 标准采集 | 完成；`attach --python-batch` 已并入 `spans.jsonl`/`summary`，真实 V4 验证 10 个 batch、6 个 request ID，类型确认为 `SchedulerOutput` |
 | `diagnose` 只读定位命令 | 完成；JSON `cann.diagnose.report.v1` + Markdown，单测覆盖全部过滤与判定分支，并已在 V4 真实 evidence 上只读运行 |
 | M2 host off-CPU/futex | 完成并上机验证；V4 10 秒 `attached=4 failed=0`，合成锁竞争 `host_lock_contention` 1.00 |
+| 独立 metrics 采集 | 完成；`cann-ebpf sample` 支持 DCMI/npu-smi、进程、cgroup 和 Prometheus 源，输出 `cann.metrics.v1` JSONL |
+| 指标与可视化增强 | 完成；延迟热图、次秒偏移热图、分位带、尾 cohort、多指标小倍数；metrics-only 也支持降级报告 |
 | E 层 npu-smi 硬件指标 | 完成并上机验证；8 设备 HBM/AICore/功耗/温度，`hbm_pressure` |
 | `preflight` 环境检查 | 完成并上机验证；V4 pass=15 warn=0 fail=0 |
 | A3/A4/A5 | attach 系统级化（V4 墙钟 ~110s→~18s）、固定负载脚本、systemd/安装/升级/release 骨架 |
@@ -62,6 +65,7 @@ go vet ./...
 $env:GOOS = "linux"
 $env:GOARCH = "arm64"
 go build -buildvcs=false -trimpath -o dist/cann-ebpf-linux-arm64-m3 ./cmd/cann-ebpf
+go build -buildvcs=false -trimpath -o dist/cann-ebpf-linux-arm64-m1m2 ./cmd/cann-ebpf
 go build -buildvcs=false -trimpath -o dist/cpy-poc-linux-arm64 ./cmd/cpy-poc
 go build -buildvcs=false -trimpath -o dist/cpy-batch-poc-linux-arm64 ./cmd/cpy-batch-poc
 Remove-Item Env:GOOS, Env:GOARCH, Env:CGO_ENABLED
@@ -71,6 +75,7 @@ Remove-Item Env:GOOS, Env:GOARCH, Env:CGO_ENABLED
 
 ```text
 cann-ebpf-linux-arm64-m3  见 dist/SHA256SUMS.txt（本次 M3 构建）
+cann-ebpf-linux-arm64-m1m2  4fd7bd27ccfcc39d1111bb989698989da8c92913752a4cc15952606d40cf1f2e
 cpy-poc-linux-arm64       08a5f05f92c15dd2d4b6475805ebbb3bfc3188b024c900745cb604a30826be53
 cpy-batch-poc-linux-arm64 见 batch POC 交付目录 SHA256SUMS
 ```
@@ -182,6 +187,7 @@ cann-ebpf attach-tracefs  tracefs 后备采集
 cann-ebpf trace           按 trace_id/parent 聚合 spans.jsonl
 cann-ebpf diagnose        只读定位报告（JSON/Markdown）
 cann-ebpf report          只读性能仪表盘（单文件 HTML）
+cann-ebpf sample          独立 metrics 采集（DCMI/npu-smi/进程/cgroup/Prometheus）
 cann-ebpf metrics         Prometheus 指标（text 或 /metrics）
 cann-ebpf version         版本和平台
 ```
@@ -295,6 +301,10 @@ V4，只读取 `SchedulerOutput.num_scheduled_tokens` 的请求 ID 键和 dict �
 # 读取一个 run 目录（spans.jsonl，可选 device.jsonl/hardware.jsonl），生成单文件 HTML
 ./cann-ebpf report --input runs/ebpf-20261126T000000Z --out report.html
 
+# 同时叠加一次独立 metrics 采集；目录或 metrics.jsonl 都支持
+./cann-ebpf sample --out runs/metrics-20261127T101500Z --dcmi --interval 2s --duration 30s
+./cann-ebpf report --input runs/ebpf-... --metrics runs/metrics-... --out report.html
+
 # 调慢阈值/最小耗时、只看某个容器里的 device 时间线
 ./cann-ebpf report --input runs/ebpf-... --out report.html \
   --slow-threshold 5ms --min-duration 100us \
@@ -304,11 +314,17 @@ V4，只读取 `SchedulerOutput.num_scheduled_tokens` 的请求 ID 键和 dict �
 报告是纯静态 HTML + 原生 Canvas，无外部 CDN/JS 依赖，可直接发给他人或用浏览器离线打开。
 内容包括：线程时间轴（TID 泳道 + device stream 轨道，滚轮缩放/拖拽/密度条）、延迟散点
 （时间 × 对数耗时，点击聚焦时间轴）、时间热力图（p95 或慢调用数）、TopN 函数、延迟 CDF、
-设备四象限（host 等待 vs device busy）与设备忙率曲线。所有图表都从既有证据只读派生，
-不修改 `spans.jsonl` / `device.jsonl` / `hardware.jsonl`。
+设备四象限（host 等待 vs device busy）、设备忙率曲线，以及 M1/M2 新增的延迟热图、
+次秒偏移热图、函数分位带、尾 cohort 和多指标小倍数。所有图表都从既有证据只读派生，
+不修改 `spans.jsonl` / `device.jsonl` / `hardware.jsonl` / `metrics.jsonl`。
 
 边界：没有调用栈采样，因此这不是按栈聚合的火焰图；线程时间轴只到 TID/函数级，不能替代
-msPTI 的 kernel 级时间线。缺 `device.jsonl` 时设备区显示不可用，不会补造数据。
+msPTI 的 kernel 级时间线。缺 `device.jsonl` 时设备区显示不可用；只有 metrics 没有 spans 时生成
+metrics-only 降级报告，函数级归因和设备四象限显示“无 span 证据”；两种情况都不会补造数据。
+`metrics.jsonl` 是采样值，不是逐 request 关键路径；`HardwareAvailable` 只在确实存在 NPU series 时为真。
+
+独立 metrics 契约与采集命令见 `docs/METRICS-SCHEMA.md`；并行开发边界见
+`docs/M1-M2-DATA-CONTRACT.md`；图表选型与论文依据见 `docs/VISUALIZATION-RESEARCH.md`。
 
 ### M2 host off-CPU/futex 采集
 
@@ -564,6 +580,9 @@ unicode dict，单次最多 64 个 key；batch span 写入标准 `spans.jsonl`�
 - `docs/PRODUCT.md`：成品说明（能力矩阵、证据文件、已验证/未验证边界）。
 - `docs/HANDOFF.md`：交接总览、已完成/未完成、下一步与硬约束。
 - `docs/DIAGNOSE.md`：`diagnose` 用法、时间窗语义、判定规则和边界。
+- `docs/METRICS-SCHEMA.md`：`sample` 命令、`cann.metrics.v1`/`cann.metrics.meta.v1` 契约与退出码。
+- `docs/M1-M2-DATA-CONTRACT.md`：metrics、热图、分位带、cohort 的并行开发数据契约。
+- `docs/VISUALIZATION-RESEARCH.md`：可视化论文调研、候选图表、分期方案和不可用边界。
 - `docs/M2-OFFCPU.md`：M2 设计、判定口径和边界。
 - `docs/M2-VALIDATION.md`：M2 上机验证数据、修复记录和证据位置。
 - `docs/M2-OVERHEAD.md`：M2 agent 开销基线与吞吐不可测说明。
