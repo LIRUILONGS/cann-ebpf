@@ -11,6 +11,8 @@ LOADGEN=${LOADGEN:-scripts/vllm_sweep_load.py}
 BASE_URL=${BASE_URL:-http://127.0.0.1:8905}
 MODEL=${MODEL:-deepseek-v4-flash}
 API_KEY=${API_KEY:-${VLLM_API_KEY:-}}
+PROM_INCLUDE=${PROM_INCLUDE:-'^(vllm:|orinfer_)'}
+STACKS_DIR=${STACKS_DIR:-}
 TIERS=${TIERS:-1,2,4,8}
 DURATION=${DURATION:-30}
 MAX_TOKENS=${MAX_TOKENS:-64}
@@ -27,6 +29,7 @@ usage: run_sweep.sh --workdir <dir> [--report <report.html>] [options]
   --workdir DIR       sweep evidence dir (default runs/sweep-<UTC>)
   --run DIR           existing host run dir (required only with --report)
   --report FILE       optional: after producing sweep evidence, render report
+  --stacks DIR        optional: include kernel-stack flamegraph from a stacks run
   --tiers LIST        comma-separated concurrency tiers (>=4, default 1,2,4,8)
   --duration SEC      load duration per tier (default 30)
   --max-tokens N      fixed output length (default 64)
@@ -47,6 +50,7 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --run) RUN_DIR=$2; shift ;;
     --report) REPORT=$2; shift ;;
+    --stacks) STACKS_DIR=$2; shift ;;
     --out) REPORT=$2; shift ;;
     --tiers) TIERS=$2; shift ;;
     --duration) DURATION=$2; shift ;;
@@ -107,7 +111,7 @@ for C in $(printf '%s' "$TIERS" | tr ',' ' '); do
   echo "=== tier c$C ==="
   "$BIN" sample \
     --prometheus "vllm=$BASE_URL/metrics" \
-    --include '^vllm:' \
+    --include "$PROM_INCLUDE" \
     --interval 1s \
     --duration "$((DURATION + 10))s" \
     --out "$T" &
@@ -142,11 +146,11 @@ PY
 
 if [ -n "$REPORT" ]; then
   echo "phase 2: consume -> $REPORT"
-  "$BIN" report \
-    --input "$RUN_DIR" \
-    --metrics "$RUN_DIR/metrics.jsonl" \
-    --sweep "$WORKDIR/sweep.json" \
-    --out "$REPORT"
+  set -- --input "$RUN_DIR" --metrics "$RUN_DIR/metrics.jsonl" --sweep "$WORKDIR/sweep.json" --out "$REPORT"
+  if [ -n "$STACKS_DIR" ] && [ -d "$STACKS_DIR" ]; then
+    set -- "$@" --stacks "$STACKS_DIR"
+  fi
+  "$BIN" report "$@"
   echo "OK report=$REPORT sweep=$WORKDIR/sweep.json"
 else
   echo "OK sweep=$WORKDIR/sweep.json (no report requested)"
