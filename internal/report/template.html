@@ -237,6 +237,12 @@ canvas { display: block; }
 .metrics-stat-value.primary { color: var(--text); font-weight: 600; }
 .metrics-stat-source { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--dim); }
 .metrics-stats-empty { padding: 12px 2px 2px; color: var(--dim); font-size: 12px; }
+.metrics-heatmap { width: 100%; border-collapse: separate; border-spacing: 3px; font-size: 11px; }
+.metrics-heatmap th { color: var(--dim); font-weight: 500; text-align: left; padding: 4px 6px; white-space: nowrap; }
+.metrics-heatmap thead th { text-align: center; }
+.metrics-heatmap tbody th { color: var(--muted); font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
+.metrics-heatmap td { padding: 7px 8px; border-radius: 4px; text-align: right; color: var(--text); font-variant-numeric: tabular-nums; background: rgba(52,78,113,.22); }
+.metrics-heatmap td.na { color: var(--dim); text-align: center; }
 .notes { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 .notes h3 { margin: 0 0 6px; font-size: 12px; color: var(--muted); font-weight: 600; }
 .notes ul { margin: 0; padding-left: 18px; color: var(--muted); }
@@ -4405,11 +4411,10 @@ function renderMetricsStats() {
   const metrics = METRICS || {};
   const series = Array.isArray(metrics.series) ? metrics.series.filter(Boolean) : [];
   const stats = Array.isArray(metrics.stats) ? metrics.stats.filter(Boolean) : [];
-  const body = document.getElementById('metricsStatsBody');
   const scroll = document.getElementById('metricsStatsScroll');
   const empty = document.getElementById('metricsStatsEmpty');
   const meta = document.getElementById('metricsStatsMeta');
-  if (!body || !scroll || !empty || !meta) return;
+  if (!scroll || !empty || !meta) return;
   let message = '';
   if (!series.length || metrics.available === false) {
     message = !series.length ? '未采集 metrics' : '指标不可用：' + viewReason(metrics, '没有指标数据');
@@ -4417,7 +4422,6 @@ function renderMetricsStats() {
     message = '暂无统计';
   }
   if (message) {
-    body.innerHTML = '';
     scroll.hidden = true;
     empty.hidden = false;
     empty.textContent = message;
@@ -4427,26 +4431,57 @@ function renderMetricsStats() {
   empty.hidden = true;
   empty.textContent = '';
   scroll.hidden = false;
-  const groupCount = metricsState.groups.length;
-  meta.textContent = fmtCount(stats.length) + ' 项' + (groupCount ? ' / ' + groupCount + ' 组' : '') +
-    ' · 统计基于未降采样点' + (metrics.samples ? '（' + fmtCount(metrics.samples) + ' 行）' : '');
-  body.innerHTML = stats.map((item) => {
-    const name = item.name || item.id || 'metric';
-    const kind = item.kind || 'gauge';
-    const sourceParts = [item.source, item.device].filter((value) => value != null && String(value).trim() !== '');
-    const source = sourceParts.length ? sourceParts.map(String).join(' · ') : '--';
-    const isCounter = String(kind).toLowerCase() === 'counter';
-    const valueHtml = (value) => esc(fmtMetricStatValue(value, item.unit));
-    return '<tr>' +
-      '<td class="metrics-stat-name" title="' + esc(name) + '"><div class="metrics-stat-name-line"><span class="metrics-stat-label">' + esc(name) + '</span><span class="badge">' + esc(kind) + '</span></div></td>' +
-      '<td class="metrics-stat-value primary">' + valueHtml(item.last) + '</td>' +
-      '<td class="metrics-stat-value">' + valueHtml(item.mean) + '</td>' +
-      '<td class="metrics-stat-value">' + valueHtml(item.p95) + '</td>' +
-      '<td class="metrics-stat-value">' + valueHtml(item.max) + '</td>' +
-      '<td class="metrics-stat-value">' + (isCounter ? esc(fmtMetricRateValue(item.rate_last, item.unit)) : '--') + '</td>' +
-      '<td class="metrics-stat-source" title="' + esc(source) + '">' + esc(source) + '</td>' +
-      '</tr>';
-  }).join('');
+
+  const wanted = [
+    { name: 'npu_aicore_utilization_ratio', label: 'AICore' },
+    { name: 'npu_hbm_used_ratio', label: 'HBM used' },
+    { name: 'npu_power_watts', label: 'Power' },
+    { name: 'npu_temperature_celsius', label: 'Temp' }
+  ];
+  const devices = [...new Set(stats.map((item) => String(item.device || '').trim()).filter(Boolean))]
+    .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+  const byKey = new Map();
+  stats.forEach((item) => byKey.set(String(item.name) + '|' + String(item.device || ''), item));
+  const columns = wanted.map((col) => {
+    const values = devices
+      .map((device) => byKey.get(col.name + '|' + device))
+      .filter(Boolean)
+      .map((item) => Number(item.last))
+      .filter((value) => Number.isFinite(value));
+    const min = values.length ? Math.min(...values) : 0;
+    const max = values.length ? Math.max(...values) : 1;
+    return { ...col, min, max };
+  });
+  if (!devices.length) {
+    scroll.innerHTML = '<div class="metrics-stats-empty">没有设备维度指标；请看上方指标矩阵。</div>';
+    meta.textContent = fmtCount(stats.length) + ' 项 / ' + fmtCount(metricsState.groups.length) + ' 组';
+    return;
+  }
+  meta.textContent = devices.length + ' 设备 × ' + columns.length + ' 关键指标 · 颜色为同列设备间对比';
+  let html = '<table class="metrics-heatmap"><thead><tr><th>设备</th>' +
+    columns.map((col) => '<th>' + esc(col.label) + '</th>').join('') + '</tr></thead><tbody>';
+  devices.forEach((device) => {
+    html += '<tr><th>' + esc(device) + '</th>';
+    columns.forEach((col) => {
+      const item = byKey.get(col.name + '|' + device);
+      if (!item) {
+        html += '<td class="na">--</td>';
+        return;
+      }
+      const value = Number(item.last);
+      const span = Math.max(1e-9, col.max - col.min);
+      const alpha = 0.14 + 0.72 * Math.max(0, Math.min(1, (value - col.min) / span));
+      const title = '当前 ' + fmtMetricStatValue(item.last, item.unit) +
+        ' · 均值 ' + fmtMetricStatValue(item.mean, item.unit) +
+        ' · p95 ' + fmtMetricStatValue(item.p95, item.unit) +
+        ' · 最大 ' + fmtMetricStatValue(item.max, item.unit);
+      html += '<td title="' + esc(title) + '" style="background:rgba(76,201,240,' + alpha.toFixed(2) + ')">' +
+        esc(fmtMetricStatValue(item.last, item.unit)) + '</td>';
+    });
+    html += '</tr>';
+  });
+  html += '</tbody></table><div class="chart-note"><b>怎么看：</b>同一列颜色越深=该指标在这 8 张卡里越高；只做设备间对比，不是绝对阈值。鼠标悬停可看当前/均值/p95/最大。</div>';
+  scroll.innerHTML = html;
 }
 // ----------------------------- flamegraph -----------------------------
 const fgState = {
