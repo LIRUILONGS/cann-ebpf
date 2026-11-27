@@ -19,7 +19,8 @@ func TestLoadMetricsProjectsSeriesAndHistogramP95(t *testing.T) {
 		`{"schema":"cann.metrics.v1","mono_ns":3000,"wall_ns":3000,"source":"dcmi","device":"NPU-0","name":"npu_aicore_utilization_ratio","kind":"gauge","value":0.5,"unit":"ratio"}` + "\n" +
 		`{"schema":"cann.metrics.v1","mono_ns":1000,"wall_ns":1000,"source":"prometheus:vllm","name":"vllm_requests_running","kind":"counter","value":7,"unit":"count"}` + "\n" +
 		`{"schema":"cann.metrics.v1","mono_ns":2000,"wall_ns":2000,"source":"prometheus:vllm","name":"vllm_requests_running","kind":"counter","value":9,"unit":"count"}` + "\n" +
-		`{"schema":"cann.metrics.v1","mono_ns":1000,"wall_ns":1000,"source":"prometheus:vllm","name":"vllm_e2e_latency_seconds","kind":"histogram","buckets":[0.1,0.5,1],"counts":[5,9,10],"sum":3.2,"count":10,"cumulative":true,"unit":"seconds"}` + "\n"
+		`{"schema":"cann.metrics.v1","mono_ns":1000,"wall_ns":1000,"source":"prometheus:vllm","name":"vllm_e2e_latency_seconds","kind":"histogram","buckets":[0.1,0.5,1],"counts":[5,9,10],"sum":3.2,"count":10,"cumulative":true,"unit":"seconds"}` + "\n" +
+		`{"schema":"cann.metrics.v1","mono_ns":2000,"wall_ns":2000,"source":"prometheus:vllm","name":"vllm_e2e_latency_seconds","kind":"histogram","buckets":[0.1,0.5,1],"counts":[15,29,30],"sum":26.2,"count":30,"cumulative":true,"unit":"seconds"}` + "\n"
 	if err := os.WriteFile(path, []byte(lines), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -32,18 +33,18 @@ func TestLoadMetricsProjectsSeriesAndHistogramP95(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !data.Available || data.Samples != 6 {
+	if !data.Available || data.Samples != 7 {
 		t.Fatalf("metrics = %+v", data)
 	}
 	if data.IntervalMS != 1000 || data.ClockQuality != "mono" {
 		t.Fatalf("interval/clock = %v/%s", data.IntervalMS, data.ClockQuality)
 	}
-	if len(data.Series) != 3 {
+	if len(data.Series) != 5 {
 		t.Fatalf("series = %+v", data.Series)
 	}
 	var hist *MetricSeries
 	for i := range data.Series {
-		if data.Series[i].Kind == "histogram" {
+		if data.Series[i].Name == "vllm_e2e_latency_seconds:p95" {
 			hist = &data.Series[i]
 			break
 		}
@@ -51,7 +52,7 @@ func TestLoadMetricsProjectsSeriesAndHistogramP95(t *testing.T) {
 	if hist == nil || hist.Name != "vllm_e2e_latency_seconds:p95" {
 		t.Fatalf("histogram series = %+v", hist)
 	}
-	if len(hist.V) != 1 || hist.V[0] < 0.7 || hist.V[0] > 0.8 {
+	if len(hist.V) != 1 || hist.V[0] < 0.45 || hist.V[0] > 0.47 {
 		t.Fatalf("p95 = %v", hist.V)
 	}
 }
@@ -118,16 +119,16 @@ func TestLoadMetricsStatsGaugeCounterHistogram(t *testing.T) {
 		{Schema: metrics.SchemaV1, MonoNS: 2_000_000_000, WallNS: 2_000_000_000, Source: "prometheus:vllm", Name: "vllm_requests_total", Kind: metrics.KindCounter, Value: metrics.Float(160), Unit: "count"},
 		{Schema: metrics.SchemaV1, MonoNS: 3_000_000_000, WallNS: 3_000_000_000, Source: "prometheus:vllm", Name: "vllm_requests_total", Kind: metrics.KindCounter, Value: metrics.Float(20), Unit: "count"},
 		{Schema: metrics.SchemaV1, MonoNS: 4_000_000_000, WallNS: 4_000_000_000, Source: "prometheus:vllm", Name: "vllm_requests_total", Kind: metrics.KindCounter, Value: metrics.Float(70), Unit: "count"},
-		{Schema: metrics.SchemaV1, MonoNS: 1_000_000_000, WallNS: 1_000_000_000, Source: "prometheus:vllm", Name: "vllm_e2e_latency_seconds", Kind: metrics.KindHistogram, Unit: "seconds", Histogram: &metrics.Histogram{Buckets: []float64{0.1, 0.5, 1}, Counts: []int64{10, 10, 10}, Sum: 2.0, Count: 10, Cumulative: true}},
-		{Schema: metrics.SchemaV1, MonoNS: 2_000_000_000, WallNS: 2_000_000_000, Source: "prometheus:vllm", Name: "vllm_e2e_latency_seconds", Kind: metrics.KindHistogram, Unit: "seconds", Histogram: &metrics.Histogram{Buckets: []float64{0.1, 0.5, 1}, Counts: []int64{9, 10, 10}, Sum: 2.0, Count: 10, Cumulative: true}},
-		{Schema: metrics.SchemaV1, MonoNS: 3_000_000_000, WallNS: 3_000_000_000, Source: "prometheus:vllm", Name: "vllm_e2e_latency_seconds", Kind: metrics.KindHistogram, Unit: "seconds", Histogram: &metrics.Histogram{Buckets: []float64{0.1, 0.5, 1}, Counts: []int64{5, 9, 10}, Sum: 2.0, Count: 10, Cumulative: true}},
+		{Schema: metrics.SchemaV1, MonoNS: 1_000_000_000, WallNS: 1_000_000_000, Source: "prometheus:vllm", Name: "vllm_e2e_latency_seconds", Kind: metrics.KindHistogram, Unit: "seconds", Histogram: &metrics.Histogram{Buckets: []float64{0.1, 0.5, 1}, Counts: []int64{1, 6, 10}, Sum: 2.0, Count: 10, Cumulative: true}},
+		{Schema: metrics.SchemaV1, MonoNS: 2_000_000_000, WallNS: 2_000_000_000, Source: "prometheus:vllm", Name: "vllm_e2e_latency_seconds", Kind: metrics.KindHistogram, Unit: "seconds", Histogram: &metrics.Histogram{Buckets: []float64{0.1, 0.5, 1}, Counts: []int64{2, 16, 22}, Sum: 5.0, Count: 22, Cumulative: true}},
+		{Schema: metrics.SchemaV1, MonoNS: 3_000_000_000, WallNS: 3_000_000_000, Source: "prometheus:vllm", Name: "vllm_e2e_latency_seconds", Kind: metrics.KindHistogram, Unit: "seconds", Histogram: &metrics.Histogram{Buckets: []float64{0.1, 0.5, 1}, Counts: []int64{3, 24, 32}, Sum: 8.0, Count: 32, Cumulative: true}},
 	})
 
 	data, err := LoadMetrics(path, MetricsOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(data.Series) != 3 || len(data.Stats) != len(data.Series) {
+	if len(data.Series) != 5 || len(data.Stats) != len(data.Series) {
 		t.Fatalf("series/stats = %d/%d (%+v)", len(data.Series), len(data.Stats), data.Stats)
 	}
 	for i := range data.Series {
@@ -176,18 +177,32 @@ func TestLoadMetricsStatsGaugeCounterHistogram(t *testing.T) {
 	if histogram == nil {
 		t.Fatalf("missing histogram stat: %+v", data.Stats)
 	}
-	if histogram.Kind != "histogram" || histogram.Points != 3 || histogram.First != 0.095 || histogram.Last != 0.75 {
+	if histogram.Kind != "histogram" || histogram.Points != 2 {
 		t.Fatalf("histogram identity/span = %+v", histogram)
 	}
-	assertClose(t, histogram.Min, 0.095)
-	assertClose(t, histogram.Max, 0.75)
-	assertClose(t, histogram.Mean, (0.095+0.3+0.75)/3)
-	assertClose(t, histogram.P50, 0.3)
-	assertClose(t, histogram.P95, 0.75)
-	assertClose(t, histogram.P99, 0.75)
+	assertClose(t, histogram.First, 0.85)
+	assertClose(t, histogram.Last, 0.875)
+	assertClose(t, histogram.Min, 0.85)
+	assertClose(t, histogram.Max, 0.875)
+	assertClose(t, histogram.Mean, 0.8625)
+	assertClose(t, histogram.P50, 0.85)
+	assertClose(t, histogram.P95, 0.875)
+	assertClose(t, histogram.P99, 0.875)
 	if histogram.RateLast != 0 || histogram.RateMean != 0 {
 		t.Fatalf("histogram rates should be zero: %+v", histogram)
 	}
+	p50 := findMetricStat(data.Stats, "vllm_e2e_latency_seconds:p50")
+	if p50 == nil {
+		t.Fatalf("missing histogram p50 stat: %+v", data.Stats)
+	}
+	assertClose(t, p50.First, 0.32222222222222224)
+	assertClose(t, p50.Last, 0.32857142857142857)
+	p99 := findMetricStat(data.Stats, "vllm_e2e_latency_seconds:p99")
+	if p99 == nil {
+		t.Fatalf("missing histogram p99 stat: %+v", data.Stats)
+	}
+	assertClose(t, p99.First, 0.9699999999999998)
+	assertClose(t, p99.Last, 0.9750000000000001)
 }
 
 func TestLoadMetricsStatsEmptyAndSinglePoint(t *testing.T) {
@@ -352,6 +367,23 @@ func TestMetricPriorityKeepsOrinferCriticalSeries(t *testing.T) {
 	}
 }
 
+func TestMetricPriorityKeepsVLLMColonSeries(t *testing.T) {
+	generic := metricPriority("process_cpu_seconds_total")
+	for _, name := range []string{
+		"vllm:num_requests_running",
+		"vllm:num_requests_waiting",
+		"vllm:kv_cache_usage_perc",
+		"vllm:time_to_first_token_seconds:p95",
+		"vllm:e2e_request_latency_seconds:p95",
+		"vllm:request_prompt_tokens",
+		"vllm:request_generation_tokens",
+	} {
+		if metricPriority(name) >= generic {
+			t.Fatalf("metricPriority(%q) = %d, want < %d", name, metricPriority(name), generic)
+		}
+	}
+}
+
 func TestLoadMetricsHistogramUsesWindowDelta(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "metrics.jsonl")
@@ -366,19 +398,19 @@ func TestLoadMetricsHistogramUsesWindowDelta(t *testing.T) {
 	}
 	var hist *MetricSeries
 	for i := range data.Series {
-		if data.Series[i].Kind == "histogram" {
+		if data.Series[i].Name == "vllm_e2e_latency_seconds:p95" {
 			hist = &data.Series[i]
 			break
 		}
 	}
-	if hist == nil || len(hist.V) != 2 {
+	if hist == nil || len(hist.V) != 1 {
 		t.Fatalf("histogram series = %+v", hist)
 	}
-	if hist.V[0] < 0.09 || hist.V[0] > 0.1 {
-		t.Fatalf("first cumulative p95 = %v", hist.V[0])
+	if hist.T[0] != 1000 {
+		t.Fatalf("window timestamp = %v, want 1000", hist.T[0])
 	}
-	if hist.V[1] < 0.45 || hist.V[1] > 0.5 {
-		t.Fatalf("window delta p95 = %v", hist.V[1])
+	if hist.V[0] < 0.47 || hist.V[0] > 0.49 {
+		t.Fatalf("window delta p95 = %v", hist.V[0])
 	}
 }
 

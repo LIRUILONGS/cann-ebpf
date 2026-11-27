@@ -73,9 +73,11 @@ type MetricStat struct {
 // MetricsOptions controls the report-side metrics projection. Raw JSONL is
 // never modified; downsampling only affects the embedded HTML payload.
 type MetricsOptions struct {
-	WindowStartNS int64
-	MaxPoints     int
-	MaxSeries     int
+	WindowStartNS     int64
+	WindowStartWallNS int64
+	WindowEndWallNS   int64
+	MaxPoints         int
+	MaxSeries         int
 }
 
 func (o *MetricsOptions) normalize() {
@@ -93,8 +95,9 @@ type metricPoint struct {
 }
 
 type metricSeriesAgg struct {
-	point  metrics.Point
-	points []metricPoint
+	point      metrics.Point
+	percentile float64
+	points     []metricPoint
 }
 
 // LoadMetrics reads metrics.jsonl plus an optional metrics.meta.json sidecar
@@ -155,33 +158,53 @@ func LoadMetrics(path string, opts MetricsOptions) (*MetricsData, error) {
 	prevHistogram := map[string]*metrics.Histogram{}
 	for _, point := range points {
 		key := metrics.SeriesKey(point)
-		agg := bySeries[key]
-		if agg == nil {
-			agg = &metricSeriesAgg{point: point}
-			bySeries[key] = agg
-		}
 		t := float64(point.MonoNS-baseNS) / 1e6
 		if t < 0 {
 			t = 0
 		}
+		inWindow := metricPointInWindow(point, opts)
 		switch point.Kind {
 		case metrics.KindGauge, metrics.KindCounter:
+			if !inWindow {
+				continue
+			}
+			agg := bySeries[key]
+			if agg == nil {
+				agg = &metricSeriesAgg{point: point}
+				bySeries[key] = agg
+			}
 			if point.Value == nil || math.IsNaN(*point.Value) || math.IsInf(*point.Value, 0) {
 				continue
 			}
 			agg.points = append(agg.points, metricPoint{T: t, V: *point.Value})
 		case metrics.KindHistogram:
-			histogram := point.Histogram
-			if previous := prevHistogram[key]; previous != nil {
-				if delta, ok := subtractHistogram(histogram, previous); ok {
-					histogram = delta
-				}
-			}
+			previous := prevHistogram[key]
 			prevHistogram[key] = point.Histogram
-			if histogram == nil || histogram.Count <= 0 {
+			// Prometheus histograms are cumulative since process start. The
+			// first snapshot has no preceding boundary, so it cannot describe
+			// a request window. Emit only deltas between two snapshots; a
+			// reset/layout change also yields no window value.
+			if previous == nil {
 				continue
 			}
-			if value, ok := histogramP95(histogram); ok {
+			if !inWindow {
+				continue
+			}
+			histogram, ok := subtractHistogram(point.Histogram, previous)
+			if !ok || histogram == nil || histogram.Count <= 0 {
+				continue
+			}
+			for _, percentile := range []float64{0.50, 0.95, 0.99} {
+				value, ok := histogramQuantile(histogram, percentile)
+				if !ok {
+					continue
+				}
+				aggKey := histogramSeriesKey(key, percentile)
+				agg := bySeries[aggKey]
+				if agg == nil {
+					agg = &metricSeriesAgg{point: point, percentile: percentile}
+					bySeries[aggKey] = agg
+				}
 				agg.points = append(agg.points, metricPoint{T: t, V: value})
 			}
 		}
@@ -221,7 +244,7 @@ func LoadMetrics(path string, opts MetricsOptions) (*MetricsData, error) {
 			Count:          len(agg.points),
 		}
 		if agg.point.Kind == metrics.KindHistogram {
-			series.Name += ":p95"
+			series.Name += histogramPercentileSuffix(agg.percentile)
 		}
 		stat := computeMetricStat(series, agg.points)
 		pointsOut, downsampled := downsampleMetricPoints(agg.points, opts.MaxPoints)
@@ -255,6 +278,16 @@ func LoadMetrics(path string, opts MetricsOptions) (*MetricsData, error) {
 	return data, nil
 }
 
+func metricPointInWindow(point metrics.Point, opts MetricsOptions) bool {
+	if opts.WindowStartWallNS > 0 && point.WallNS < opts.WindowStartWallNS {
+		return false
+	}
+	if opts.WindowEndWallNS > 0 && point.WallNS > opts.WindowEndWallNS {
+		return false
+	}
+	return true
+}
+
 func readMetricsMeta(path string) (metrics.Meta, error) {
 	var meta metrics.Meta
 	raw, err := os.ReadFile(path)
@@ -270,8 +303,28 @@ func readMetricsMeta(path string) (metrics.Meta, error) {
 	return meta, nil
 }
 
-func histogramP95(h *metrics.Histogram) (float64, bool) {
+func histogramSeriesKey(base string, percentile float64) string {
+	return base + "|" + histogramPercentileSuffix(percentile)
+}
+
+func histogramPercentileSuffix(percentile float64) string {
+	switch percentile {
+	case 0.50:
+		return ":p50"
+	case 0.95:
+		return ":p95"
+	case 0.99:
+		return ":p99"
+	default:
+		return fmt.Sprintf(":p%g", percentile*100)
+	}
+}
+
+func histogramQuantile(h *metrics.Histogram, percentile float64) (float64, bool) {
 	if h == nil || h.Count <= 0 || len(h.Buckets) == 0 || len(h.Counts) == 0 {
+		return 0, false
+	}
+	if percentile <= 0 || percentile >= 1 {
 		return 0, false
 	}
 	counts := make([]int64, len(h.Counts))
@@ -284,7 +337,7 @@ func histogramP95(h *metrics.Histogram) (float64, bool) {
 			counts[i] = running
 		}
 	}
-	target := 0.95 * float64(h.Count)
+	target := percentile * float64(h.Count)
 	prevBound, prevCount := 0.0, int64(0)
 	for i, bound := range h.Buckets {
 		count := counts[i]
@@ -472,6 +525,10 @@ func metricPriority(name string) int {
 		"orinfer_generated_tokens", "orinfer_prompt_tokens",
 		"npu_aicore", "npu_hbm", "npu_power", "npu_temperature",
 		"vllm_requests_running", "vllm_requests_waiting", "vllm_kv_cache", "vllm_gpu_cache",
+		"vllm:num_requests_running", "vllm:num_requests_waiting",
+		"vllm:kv_cache_usage_perc", "vllm:gpu_cache_usage_perc",
+		"vllm:time_to_first_token_seconds", "vllm:e2e_request_latency_seconds",
+		"vllm:request_prompt_tokens", "vllm:request_generation_tokens",
 		"cann_p95", "cann_latency",
 	}
 	for i, prefix := range prefixes {

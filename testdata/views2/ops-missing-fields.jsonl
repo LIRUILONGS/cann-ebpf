@@ -1,0 +1,2 @@
+{"run_id":"synthetic-qa","op":"MissingFlops","category":"synthetic","duration_ns":1000000,"bytes":1000000,"dtype":"bf16"}
+{"run_id":"synthetic-qa","op":"MissingDuration","category":"synthetic","flops":1000000,"bytes":1000000,"dtype":"bf16"}

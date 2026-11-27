@@ -12,6 +12,7 @@
 - 只读 `report` 性能仪表盘（单文件离线 HTML，不 attach、不联网）；
 - M2 host off-CPU/futex（`sched_switch` + futex syscall tracepoint，已在 V4 和合成锁竞争上验证）；
 - 独立 metrics 采集（`cann-ebpf sample`）与 report 多指标叠加，不改写 spans/device/hardware 原始证据；
+- vLLM 十视图（负载-延迟、关键路径、Summed Delay、Slack CDF、off-CPU、算子 Treemap、Roofline、A/B、变化点、服务拓扑），缺证据时明确不可用；
 - E 层 npu-smi 硬件采样（HBM/AICore/功耗/温度，已上机验证）；
 - M3 device 时间线 join 管线 + in-process msPTI collector（合成 ACL 已验证，生产注入待维护窗口）；
 - 采集前后健康检查、uprobe 残留检查和不覆盖旧证据的运行脚本。
@@ -39,6 +40,7 @@
 | M2 host off-CPU/futex | 完成并上机验证；V4 10 秒 `attached=4 failed=0`，合成锁竞争 `host_lock_contention` 1.00 |
 | 独立 metrics 采集 | 完成；`cann-ebpf sample` 支持 DCMI/npu-smi、进程、cgroup、主机 system 和 Prometheus 源，输出 `cann.metrics.v1` JSONL |
 | 指标与可视化增强 | 完成；延迟热图、次秒偏移热图、分位带、尾 cohort、多指标小倍数；metrics-only 也支持降级报告 |
+| vLLM 十视图 | 完成代码和真实 vLLM 接入；真实 attach 与六档扫描报告见 `docs/M4-VIEWS2-VALIDATION.md`；严格关键路径、Roofline、A/B、OTel 拓扑仍按证据门禁显示 unavailable/inferred/partial |
 | E 层 npu-smi 硬件指标 | 完成并上机验证；8 设备 HBM/AICore/功耗/温度，`hbm_pressure` |
 | `preflight` 环境检查 | 完成并上机验证；V4 pass=15 warn=0 fail=0 |
 | A3/A4/A5 | attach 系统级化（V4 墙钟 ~110s→~18s）、固定负载脚本、systemd/安装/升级/release 骨架 |
@@ -191,6 +193,31 @@ cann-ebpf sample          独立 metrics 采集（DCMI/npu-smi/进程/cgroup/sys
 cann-ebpf metrics         Prometheus 指标（text 或 /metrics）
 cann-ebpf version         版本和平台
 ```
+
+### vLLM 十视图报告
+
+十视图并存于原有仪表盘 `views_v2` 字段，报告只读原始证据。常用参数：
+
+```bash
+./cann-ebpf report --input "$OUT" \
+  --metrics "$OUT/metrics.jsonl" \
+  --sweep "$OUT/sweep.json" \
+  --ops "$OUT/ops.jsonl" \
+  --events "$OUT/events.jsonl" \
+  --offcpu "$OUT/offcpu.jsonl" \
+  --otel "$OUT/otel.jsonl" \
+  --ab-a runs/a --ab-b runs/b --ab-workload-id fixed-workload \
+  --roofline-peak-tflops 0 --roofline-peak-gbps 0 \
+  --out "$OUT/report.html"
+```
+
+`sweep.json` 的每档 run 目录应包含 `metrics.jsonl` 和 `load.json`；`load.json` 的
+真实起止窗口用于过滤服务端 histogram，窗口前的最后一个累计快照只作基线。
+当 `vllm:num_requests_running` 高于客户端并发时，报告标记背景负载并拒绝计算容量拐点。
+histogram 首帧是进程启动以来的累计值，报告跳过首帧，只使用相邻累计差值生成
+`:p50/:p95/:p99`，不把 `_created` 时间戳当延迟，也不补造缺失点。
+
+真实示例和证据限制见 `docs/M4-VIEWS2-VALIDATION.md`。
 
 ### 校验 profile
 

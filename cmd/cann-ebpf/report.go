@@ -29,6 +29,18 @@ func cmdReport(args []string) int {
 	deviceMode := fs.String("device-mode", "matched", "device embedding: matched or none")
 	deviceContainerID := fs.String("device-container-id", "", "container id used to translate device pid/tid when pidmap.json is absent")
 	maxSeries := fs.Int("max-series", 256, "maximum number of metric series embedded in the report")
+	sweepPath := fs.String("sweep", "", "sweep.json manifest for the load-latency view (optional)")
+	opsPath := fs.String("ops", "", "ops.jsonl with per-op FLOPs/bytes evidence for Roofline (optional)")
+	eventsPath := fs.String("events", "", "events.jsonl with deployment/change annotations (optional)")
+	offCPUPath := fs.String("offcpu", "", "offcpu.jsonl with exact off-CPU intervals (optional)")
+	otelPath := fs.String("otel", "", "otel.jsonl with cross-service trace spans (optional)")
+	abAPath := fs.String("ab-a", "", "run directory for A/B side A (optional)")
+	abBPath := fs.String("ab-b", "", "run directory for A/B side B (optional)")
+	abWorkloadID := fs.String("ab-workload-id", "", "fixed workload id shared by A/B runs")
+	rooflinePeakTFLOPS := fs.Float64("roofline-peak-tflops", 0, "verified reference peak TFLOPS for Roofline")
+	rooflinePeakGBPS := fs.Float64("roofline-peak-gbps", 0, "verified reference peak GB/s for Roofline")
+	rooflineDType := fs.String("roofline-dtype", "", "dtype associated with the Roofline peak values")
+	topologyRootService := fs.String("topology-root-service", "", "optional observed root service for topology")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -42,6 +54,14 @@ func cmdReport(args []string) int {
 	}
 	if *minDuration < 0 || *slowThreshold < 0 || *topN <= 0 || *maxLanes <= 0 || *bucketCount <= 0 || *maxSeries <= 0 {
 		fmt.Fprintln(os.Stderr, "report: durations must be non-negative and counts must be positive")
+		return 2
+	}
+	if *rooflinePeakTFLOPS < 0 || *rooflinePeakGBPS < 0 {
+		fmt.Fprintln(os.Stderr, "report: roofline peak values must be non-negative")
+		return 2
+	}
+	if (strings.TrimSpace(*abAPath) == "") != (strings.TrimSpace(*abBPath) == "") {
+		fmt.Fprintln(os.Stderr, "report: --ab-a and --ab-b must be provided together")
 		return 2
 	}
 	mode := strings.ToLower(strings.TrimSpace(*deviceMode))
@@ -82,14 +102,26 @@ func cmdReport(args []string) int {
 		}
 	}
 	data, err := report.BuildWithMetrics(in, metricsData, report.Options{
-		Title:             *title,
-		MinDurationNS:     int64(*minDuration),
-		SlowThresholdNS:   int64(*slowThreshold),
-		BucketCount:       *bucketCount,
-		TopN:              *topN,
-		MaxLanes:          *maxLanes,
-		DeviceMode:        mode,
-		DeviceContainerID: *deviceContainerID,
+		Title:               *title,
+		MinDurationNS:       int64(*minDuration),
+		SlowThresholdNS:     int64(*slowThreshold),
+		BucketCount:         *bucketCount,
+		TopN:                *topN,
+		MaxLanes:            *maxLanes,
+		DeviceMode:          mode,
+		DeviceContainerID:   *deviceContainerID,
+		SweepPath:           *sweepPath,
+		OpsPath:             *opsPath,
+		EventsPath:          *eventsPath,
+		OffCPUPath:          *offCPUPath,
+		OTelPath:            *otelPath,
+		ABAPath:             *abAPath,
+		ABBRunPath:          *abBPath,
+		ABWorkloadID:        *abWorkloadID,
+		RooflinePeakTFLOPS:  *rooflinePeakTFLOPS,
+		RooflinePeakGBPS:    *rooflinePeakGBPS,
+		RooflineDType:       *rooflineDType,
+		TopologyRootService: *topologyRootService,
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "report: %v\n", err)

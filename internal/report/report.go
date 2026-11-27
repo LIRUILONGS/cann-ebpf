@@ -20,15 +20,27 @@ const SchemaV1 = "cann.report.html.v1"
 
 // Options controls how much data is embedded in the standalone report.
 type Options struct {
-	Title             string
-	MinDurationNS     int64
-	SlowThresholdNS   int64
-	BucketCount       int
-	TopN              int
-	MaxLanes          int
-	MaxHeatmapRows    int
-	DeviceMode        string
-	DeviceContainerID string
+	Title               string
+	MinDurationNS       int64
+	SlowThresholdNS     int64
+	BucketCount         int
+	TopN                int
+	MaxLanes            int
+	MaxHeatmapRows      int
+	DeviceMode          string
+	DeviceContainerID   string
+	SweepPath           string
+	OpsPath             string
+	EventsPath          string
+	OffCPUPath          string
+	OTelPath            string
+	ABAPath             string
+	ABBRunPath          string
+	ABWorkloadID        string
+	RooflinePeakTFLOPS  float64
+	RooflinePeakGBPS    float64
+	RooflineDType       string
+	TopologyRootService string
 }
 
 func (o *Options) normalize() {
@@ -70,6 +82,7 @@ type Data struct {
 	Heatmap     HeatmapData   `json:"heatmap"`
 	CDF         []CDFPoint    `json:"cdf"`
 	Views       ReportViews   `json:"views"`
+	ViewsV2     ReportViewsV2 `json:"views_v2"`
 	Device      *DeviceData   `json:"device,omitempty"`
 	Hardware    HardwareData  `json:"hardware"`
 	Metrics     *MetricsData  `json:"metrics,omitempty"`
@@ -368,6 +381,7 @@ func Build(in *diagnose.Input, opts Options) (Data, error) {
 	if data.Device == nil {
 		data.Notes = append(data.Notes, "没有嵌入设备时间线：device.jsonl 缺失，或使用了 --device-mode none。")
 	}
+	data.ViewsV2 = buildViewsV2ForData(&data, in, nil, opts)
 	return data, nil
 }
 

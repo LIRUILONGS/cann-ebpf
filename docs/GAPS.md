@@ -4,7 +4,7 @@
 
 > 状态更新（2026-11-27）：本文件保留历史方案缺口清单；当前交付状态以
 > `docs/HANDOFF.md` 为准。`sample`、`report --metrics`、延迟热图、次秒偏移热图、
-> 函数分位带、尾 cohort 和多指标小倍数已落地，并有单测与 Chrome 验收样本。
+> 函数分位带、尾 cohort、多指标小倍数和 vLLM 十视图已落地，并有单测与 Chrome 验收样本。
 
 ## 0. 结论
 
@@ -84,6 +84,9 @@
 | P2-4 | 火焰图/stack folded | `report` 已有时间轴/散点/热力图/CDF 及延迟热图/分位带/cohort 等视图；但工具没有调用栈采样，仍缺按栈聚合的 folded stack，不能把现有视图称为火焰图 |
 | P2-9 | 真实生产 metrics 基线 | `sample` 的采集链路与单测已完成；还需在目标 NPU 上验证 DCMI/npu-smi 的真实采样间隔、权限、覆盖率和长跑开销 |
 | P2-10 | metrics 与 request 对齐 | 当前 metrics 是周期采样，能观察资源趋势，不能证明单 request 关键路径；需要入口请求 ID/遥测配合才能做严格关联 |
+| P2-11 | vLLM 十视图严格证据 | 已接入真实 attach/metrics；严格关键路径仍缺 msPTI device 区间，Roofline 缺 per-op FLOPs/bytes，A/B 缺同 workload 双 run，服务拓扑缺 OTel trace；缺证据必须保持 unavailable |
+| P2-12 | 干净容量扫描 | 真实六档扫描受到活动背景负载影响；只能保留曲线并标记 partial，不能计算 knee；需在 `running=0` 窗口重跑 |
+| P2-13 | histogram 窗口语义 | 已跳过首帧、排除 `_created`、窗口内输出 P50/P95/P99；后续需要把 reset/layout 变更和 scrape gap 的 warning 暴露到报告 |
 | P2-5 | 多卡/HCCL 拓扑视图 | 8 卡场景需要按 device 聚合，不只是单卡 |
 | P2-6 | Prometheus 指标命名规范 | `cann_ebpf_*` 前缀、label 基数、单位 |
 | P2-7 | 术语表/决策记录/备选方案对比 | 交接需要；也应说明为什么不用 bpftrace/msPTI-only |

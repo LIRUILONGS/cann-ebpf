@@ -1,0 +1,2 @@
+{"trace_id":"trace-qa","span_id":"root","service":"litellm","name":"chat.completions","kind":"server","status":"OK","start_ns":1000,"end_ns":5000}
+{"trace_id":"trace-qa","span_id":"child","parent_span_id":"root","service":"vllm","name":"generate","kind":"client","status":"OK","start_ns":1500,"end_ns":4500}

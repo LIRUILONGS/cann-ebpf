@@ -29,6 +29,7 @@ func BuildWithMetrics(in *diagnose.Input, m *MetricsData, opts Options) (Data, e
 			}
 			data.Metrics = m
 			data.Warnings = append(data.Warnings, m.Warnings...)
+			data.ViewsV2 = buildViewsV2ForData(&data, in, m, opts)
 		}
 		return data, nil
 	}
@@ -82,6 +83,7 @@ func BuildWithMetrics(in *diagnose.Input, m *MetricsData, opts Options) (Data, e
 		"指标值与采样间隔来自 metrics.jsonl / metrics.meta.json；缺失区间不插值。",
 		"histogram 的 p95 按相邻采样点的增量计算；首个采样点为累计快照，无新增请求的区间不绘制。",
 	)
+	data.ViewsV2 = buildViewsV2ForData(&data, nil, m, opts)
 	return data, nil
 }
 

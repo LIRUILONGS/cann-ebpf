@@ -49,6 +49,81 @@ button:hover { border-color: var(--accent); color: #fff; }
 canvas { display: block; }
 .grid2 { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, .85fr); gap: 12px; }
 .grid2 > .panel { margin: 12px 0; }
+.views-v2-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-top: 12px; align-items: start; }
+.view-v2-card { min-width: 0; border: 1px solid rgba(36,54,83,.7); border-radius: 9px; background: rgba(10,18,34,.45); padding: 12px 13px 13px; min-height: 104px; display: flex; flex-direction: column; }
+.view-v2-card.available { border-color: rgba(46,196,182,.55); }
+.view-v2-card.available.confidence-exact { border-color: rgba(46,196,182,.62); }
+.view-v2-card.available.confidence-inferred { border-color: rgba(255,183,3,.72); border-style: dashed; }
+.view-v2-card.available.confidence-partial { border-color: rgba(179,136,255,.72); }
+.view-v2-card.available.confidence-unknown { border-color: rgba(143,166,196,.7); }
+.view-v2-card.unavailable { background: rgba(10,18,34,.58); }
+.view-v2-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.view-v2-heading { display: flex; align-items: baseline; gap: 7px; min-width: 0; }
+.view-v2-head b { font-size: 13px; letter-spacing: -.01em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.view-v2-index { color: var(--dim); font: 10px ui-monospace, SFMono-Regular, Consolas, monospace; }
+.view-v2-badges { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; justify-content: flex-end; }
+.view-v2-card.unavailable .badge.v2-available { color: #ffb703; }
+.view-v2-card.available .badge.v2-available { color: #2ec4b6; }
+.badge.v2-conf-exact { color: #2ec4b6; }
+.badge.v2-conf-inferred { color: #ffb703; }
+.badge.v2-conf-partial { color: #b388ff; }
+.badge.v2-conf-unknown { color: #8fa6c4; }
+.view-v2-sub { margin-top: 4px; color: var(--dim); font-size: 10.5px; }
+.view-v2-status { margin-top: 7px; color: var(--muted); font-size: 11px; }
+.view-v2-card.available .view-v2-status { color: #2ec4b6; }
+.view-v2-card.confidence-inferred .view-v2-status { color: #ffb703; }
+.view-v2-card.confidence-partial .view-v2-status { color: #b388ff; }
+.view-v2-reason { margin-top: 5px; color: #a9bdd8; font-size: 11px; line-height: 1.4; }
+.view-v2-body { margin-top: 9px; min-width: 0; }
+.view-v2-meta { margin-top: 9px; color: var(--muted); font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 10px; word-break: break-word; }
+.v2-chart { margin: 3px 0 0; border: 1px solid rgba(36,54,83,.48); border-radius: 7px; background: rgba(7,13,25,.38); overflow: hidden; }
+.v2-svg { display: block; width: 100%; height: auto; }
+.v2-svg text { pointer-events: none; }
+.v2-svg .v2-grid-line { stroke: rgba(52,78,113,.42); stroke-width: 1; }
+.v2-svg .v2-axis-line { stroke: rgba(96,124,160,.7); stroke-width: 1; }
+.v2-svg .v2-zero-line { stroke: rgba(232,238,251,.42); stroke-width: 1; stroke-dasharray: 3 3; }
+.v2-svg .v2-tick { fill: #7890ae; font: 9.5px ui-monospace, SFMono-Regular, Consolas, monospace; }
+.v2-svg .v2-axis-label { fill: #95abc8; font: 10px ui-monospace, SFMono-Regular, Consolas, monospace; }
+.v2-svg .v2-bar-label { fill: #cfe0f8; font: 10.5px -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", Arial, sans-serif; }
+.v2-svg .v2-bar-sub { fill: #7890ae; font: 9px ui-monospace, SFMono-Regular, Consolas, monospace; }
+.v2-svg .v2-value-label { fill: #b9cbe4; font: 9.5px ui-monospace, SFMono-Regular, Consolas, monospace; }
+.v2-svg .v2-hover-target { cursor: crosshair; }
+.v2-svg .v2-hover-target:hover { filter: brightness(1.22); }
+.v2-svg .v2-point { stroke: #07101f; stroke-width: 1; }
+.v2-svg .v2-band { pointer-events: none; }
+.v2-svg .v2-edge { fill: none; stroke: #7890ae; }
+.v2-svg .v2-edge-label { fill: #a9bdd8; font: 9px ui-monospace, SFMono-Regular, Consolas, monospace; paint-order: stroke; stroke: #0a1222; stroke-width: 3px; }
+.v2-svg .v2-node-label { fill: #e8eefb; font: 10.5px -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", Arial, sans-serif; }
+.v2-svg .v2-node-sub { fill: #7890ae; font: 8.5px ui-monospace, SFMono-Regular, Consolas, monospace; }
+.v2-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(118px, 1fr)); gap: 6px; margin: 9px 0 8px; }
+.v2-stat { min-width: 0; background: rgba(9,17,31,.7); border: 1px solid rgba(36,54,83,.5); border-radius: 6px; padding: 6px 7px; }
+.v2-stat-label { display: block; color: var(--dim); font-size: 9.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.v2-stat b { display: block; margin-top: 2px; color: var(--text); font: 11px ui-monospace, SFMono-Regular, Consolas, monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.v2-stat-sub { display: block; margin-top: 1px; color: var(--muted); font-size: 9px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.v2-legend { margin: 5px 0 4px; gap: 10px; }
+.v2-legend i.v2-dash { background: transparent !important; border-top: 2px dashed currentColor; height: 0; }
+.v2-provenance { display: flex; flex-wrap: wrap; gap: 5px 12px; margin-top: 4px; color: var(--dim); font-size: 9.5px; }
+.v2-provenance code { color: #b9cbe4; font: 9.5px ui-monospace, SFMono-Regular, Consolas, monospace; }
+.v2-provenance .v2-conf-exact code { color: #2ec4b6; }
+.v2-provenance .v2-conf-inferred code { color: #ffb703; }
+.v2-provenance .v2-conf-partial code { color: #b388ff; }
+.v2-provenance .v2-conf-unknown code { color: #8fa6c4; }
+.v2-empty { border: 1px dashed rgba(95,118,150,.5); border-radius: 7px; background: rgba(9,17,31,.45); padding: 16px 13px; color: var(--muted); font-size: 11.5px; line-height: 1.5; }
+.v2-empty b { display: block; margin-bottom: 3px; color: #d7e5fa; font-size: 12px; }
+.v2-empty.unavailable { border-color: rgba(255,183,3,.38); }
+.v2-empty span { display: block; }
+.v2-notice { border-left: 3px solid #ffb703; background: rgba(255,183,3,.08); border-radius: 0 6px 6px 0; padding: 6px 8px; margin: 0 0 7px; color: #e3d0a2; font-size: 10.5px; line-height: 1.45; }
+.v2-notice.info { border-left-color: var(--accent); background: rgba(76,201,240,.07); color: #b9d9ea; }
+.v2-spark-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; margin-top: 8px; }
+.v2-spark { min-width: 0; border: 1px solid rgba(36,54,83,.5); border-radius: 6px; background: rgba(9,17,31,.55); padding: 6px 7px; }
+.v2-spark-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; color: var(--muted); font-size: 9.5px; }
+.v2-spark-head .fn { color: #cfe0f8; font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.v2-spark-svg { display: block; width: 100%; height: 40px; margin-top: 3px; }
+.v2-kpi-inline { display: inline-flex; align-items: center; gap: 4px; color: var(--muted); font: 9.5px ui-monospace, SFMono-Regular, Consolas, monospace; }
+.v2-flag { color: #ffb703; }
+.v2-flag.partial { color: #b388ff; }
+.v2-flag.exact { color: #2ec4b6; }
+.v2-table-note { margin-top: 5px; color: var(--dim); font-size: 9.5px; }
 .empty { color: var(--dim); padding: 18px 4px; font-size: 12px; }
 .legend { display: flex; flex-wrap: wrap; gap: 12px; color: var(--muted); font-size: 11px; margin: 4px 0 6px; }
 .legend i { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 5px; vertical-align: 1px; }
@@ -125,9 +200,15 @@ footer { color: var(--dim); font-size: 11px; margin-top: 20px; border-top: 1px s
 #tooltip { position: fixed; z-index: 99; display: none; max-width: 440px; background: rgba(8,13,25,.96); border: 1px solid #3a557c; border-radius: 8px; padding: 8px 10px; color: var(--text); font-size: 12px; box-shadow: 0 12px 32px rgba(0,0,0,.35); pointer-events: none; }
 #tooltip b { color: #fff; }
 #tooltip .muted { color: var(--muted); }
+#tooltip .tip-meta { display: flex; flex-wrap: wrap; gap: 3px 10px; margin-top: 6px; padding-top: 5px; border-top: 1px solid rgba(58,85,124,.65); color: #8fa6c4; font: 9.5px ui-monospace, SFMono-Regular, Consolas, monospace; }
+#tooltip .tip-conf-exact { color: #2ec4b6; }
+#tooltip .tip-conf-inferred { color: #ffb703; }
+#tooltip .tip-conf-partial { color: #b388ff; }
+#tooltip .tip-conf-unknown { color: #8fa6c4; }
 @media (max-width: 1100px) {
   .kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .grid2 { grid-template-columns: 1fr; }
+  .views-v2-grid { grid-template-columns: 1fr; }
 }
 @media (max-width: 700px) {
   .page { padding: 14px 12px 30px; }
@@ -142,6 +223,9 @@ footer { color: var(--dim); font-size: 11px; margin-top: 20px; border-top: 1px s
   .metric-row { grid-template-columns: 1fr; }
   .metric-axis { margin-left: 0; }
   .notes { grid-template-columns: 1fr; }
+  .views-v2-grid { grid-template-columns: 1fr; }
+  .v2-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .v2-spark-grid { grid-template-columns: 1fr; }
 }
 </style>
 </head>
@@ -154,6 +238,16 @@ footer { color: var(--dim); font-size: 11px; margin-top: 20px; border-top: 1px s
   </header>
 
   <section class="kpis" id="kpis"></section>
+
+  <section class="panel" id="viewsV2Panel">
+    <div class="panel-head">
+      <div>
+        <h2>vLLM 十视图</h2>
+        <p>负载与关键路径、阻塞与算子、Roofline、A/B、变化点和服务拓扑。没有证据时明确显示不可用原因，不画空坐标轴。</p>
+      </div>
+    </div>
+    <div class="views-v2-grid" id="viewsV2Grid"></div>
+  </section>
 
   <div class="trace-only">
   <section class="panel" id="timelinePanel">
@@ -358,6 +452,19 @@ const CAT_COLORS = {
 };
 const KIND_COLORS = { KERNEL: '#ff6b6b', MEMCPY: '#4cc9f0', HCCL: '#b388ff', API: '#94a3b8' };
 const VIEWS = (DATA && DATA.views) ? DATA.views : {};
+const VIEWS_V2 = (DATA && DATA.views_v2) ? DATA.views_v2 : {};
+const VIEWS_V2_LABELS = [
+  ['load_latency', '负载-延迟拐点'],
+  ['critical_path', '关键路径瀑布'],
+  ['summed_delay', 'Summed Delay vs Critical Path'],
+  ['slack_cdf', 'Slack CDF'],
+  ['off_cpu', 'off-CPU ribbon'],
+  ['operator_treemap', '算子 Treemap'],
+  ['roofline', 'Roofline'],
+  ['ab_diff', 'A/B 差分'],
+  ['change_point', '变化点 / 异常带'],
+  ['service_topology', '服务拓扑']
+];
 const METRICS = (DATA && DATA.metrics) ? DATA.metrics : null;
 
 function esc(value) {
@@ -1598,6 +1705,1556 @@ function renderTailCohort() {
     '<div class="cohort-table"><div class="cohort-head"><span>差异项</span><span>slow 尾占比</span><span>typical 占比</span><span>Δ</span></div>' + body + '</div>' + notesHtml;
 }
 
+const V2_W = 760;
+const V2_PALETTE = ['#4cc9f0', '#2ec4b6', '#ffb703', '#b388ff', '#ff6b6b', '#4895ef', '#f4a261', '#ffd166', '#7f8fa6', '#06d6a0'];
+const V2_SUBTITLES = {
+  load_latency: '并发档位 → 延迟；knee_concurrency 只作为观测到的拐点标注。',
+  critical_path: 'bars = start_ms → start_ms + duration_ms；实心节点来自 critical_path[]。',
+  summed_delay: '节点总时长 / critical path / overlap；分类来自 nodes_by_category[]。',
+  slack_cdf: 'slack 累积分布；负数区域表示负 slack 节点。',
+  off_cpu: 'aggregate 只画比例，exact 才画区间；两种模式不混用。',
+  operator_treemap: 'msPTI KERNEL/MEMCPY/HCCL 优先；host fallback 会显式降级。',
+  roofline: 'x = arithmetic intensity，y = achieved TFLOPS；峰值线来自显式参数。',
+  ab_diff: 'B 相对 A 的百分比差；★ 来自 significant[]，不做显著性补算。',
+  change_point: '变化点、事件标注和来源；series 无时间戳时只按样本序展示。',
+  service_topology: '只画契约中的节点与边；scope=process 不宣称端到端。'
+};
+
+function v2Status(view) {
+  const raw = (view && view.status) ? view.status : {};
+  let confidence = String(raw.confidence == null ? '' : raw.confidence).trim().toLowerCase();
+  if (confidence !== 'exact' && confidence !== 'inferred' && confidence !== 'partial') confidence = '';
+  return {
+    available: raw.available === true,
+    reason: String(raw.reason == null ? '' : raw.reason).trim(),
+    source: String(raw.source == null ? '' : raw.source).trim(),
+    confidence: confidence
+  };
+}
+
+function v2ConfidenceClass(confidence) {
+  const normalized = String(confidence == null ? '' : confidence).trim().toLowerCase();
+  if (normalized === 'exact' || normalized === 'inferred' || normalized === 'partial') return normalized;
+  return 'unknown';
+}
+
+function v2Num(value) {
+  if (value == null || value === '') return null;
+  const number = Number(value);
+  return isFinite(number) ? number : null;
+}
+
+function v2Positive(value) {
+  const number = v2Num(value);
+  return number != null && number > 0;
+}
+
+function v2Sum(values) {
+  return (values || []).reduce((total, value) => total + (v2Num(value) || 0), 0);
+}
+
+function v2FormatCoverage(value) {
+  const number = v2Num(value);
+  if (number == null) return '--';
+  return fmtPct(number >= 0 && number <= 1 ? number * 100 : number);
+}
+
+function v2FormatAxisNumber(value) {
+  const number = v2Num(value);
+  if (number == null) return '--';
+  const absolute = Math.abs(number);
+  if (absolute >= 1e12) return (number / 1e12).toFixed(2) + 'T';
+  if (absolute >= 1e9) return (number / 1e9).toFixed(2) + 'G';
+  if (absolute >= 1e6) return (number / 1e6).toFixed(2) + 'M';
+  if (absolute >= 1e3) return (number / 1e3).toFixed(1) + 'k';
+  if (absolute >= 100) return number.toFixed(0);
+  if (absolute >= 10) return number.toFixed(1);
+  if (absolute >= 1) return number.toFixed(2);
+  if (absolute >= 0.01) return number.toFixed(3);
+  if (absolute === 0) return '0';
+  return number.toExponential(2);
+}
+
+function v2FormatSignedPct(value) {
+  const number = v2Num(value);
+  if (number == null) return '--';
+  const sign = number > 0 ? '+' : '';
+  return sign + number.toFixed(Math.abs(number) < 10 ? 2 : 1) + '%';
+}
+
+function v2ClipText(value, limit) {
+  const text = String(value == null ? '' : value);
+  return text.length > limit ? text.slice(0, Math.max(1, limit - 1)) + '…' : text;
+}
+
+function v2Color(key, index) {
+  const normalized = String(key == null ? '' : key).trim().toLowerCase();
+  if (CAT_COLORS[normalized]) return CAT_COLORS[normalized];
+  return V2_PALETTE[Math.abs(index || 0) % V2_PALETTE.length];
+}
+
+function v2TipHtml(title, rows, status) {
+  let html = '<b>' + esc(title) + '</b>';
+  for (const row of rows || []) {
+    if (!row || row[1] == null || String(row[1]).trim() === '') continue;
+    html += '<br><span class="muted">' + esc(row[0]) + '</span> ' + esc(row[1]);
+  }
+  const confidence = (status && status.confidence) ? status.confidence : 'not specified';
+  html += '<div class="tip-meta"><span>source ' + esc((status && status.source) || 'none') +
+    '</span><span class="tip-conf ' + v2ConfidenceClass(confidence) + '">confidence ' + esc(confidence) + '</span></div>';
+  return html;
+}
+
+function v2TipAttr(html) {
+  return 'data-v2-tip="' + esc(String(html == null ? '' : html).replace(/\s+/g, ' ')) + '"';
+}
+
+function v2Provenance(status, note) {
+  const confidence = status.confidence || 'not specified';
+  return '<div class="v2-provenance">' +
+    '<span>source <code>' + esc(status.source || 'none') + '</code></span>' +
+    (status.available ? '<span class="v2-conf-' + v2ConfidenceClass(confidence) + '">confidence <code>' + esc(confidence) + '</code></span>' : '') +
+    (note ? '<span>' + esc(note) + '</span>' : '') +
+    '</div>';
+}
+
+function v2Legend(items, status, note) {
+  const clean = (items || []).filter(Boolean);
+  let html = '';
+  if (clean.length) {
+    html += '<div class="legend v2-legend">' + clean.map((item) => {
+      const color = item[0] || '#94a3b8';
+      return '<span><i class="' + (item[2] ? 'v2-dash' : '') + '" style="background:' + color + ';color:' + color + '"></i>' + esc(item[1]) + '</span>';
+    }).join('') + '</div>';
+  }
+  return html + v2Provenance(status, note);
+}
+
+function v2Stats(items) {
+  const clean = (items || []).filter((item) => item && item[1] != null && String(item[1]).trim() !== '');
+  if (!clean.length) return '';
+  return '<div class="v2-stats">' + clean.map((item) =>
+    '<div class="v2-stat" title="' + esc(item[2] || '') + '">' +
+      '<span class="v2-stat-label">' + esc(item[0]) + '</span>' +
+      '<b>' + esc(item[1]) + '</b>' +
+      (item[2] ? '<span class="v2-stat-sub">' + esc(item[2]) + '</span>' : '') +
+    '</div>'
+  ).join('') + '</div>';
+}
+
+function v2Notice(text, kind) {
+  return '<div class="v2-notice ' + (kind || '') + '">' + esc(text) + '</div>';
+}
+
+function v2UnavailableBody(status) {
+  return '<div class="v2-empty unavailable"><b>未绘图</b><span>' +
+    esc(status.reason || '没有证据；未创建坐标轴或示意数据。') +
+    '</span></div>' + v2Provenance(status);
+}
+
+function v2IncompleteBody(message, status) {
+  return '<div class="v2-empty"><b>数据不完整</b><span>' + esc(message) +
+    '</span></div>' + v2Provenance(status);
+}
+
+function v2Svg(height, content, ariaLabel) {
+  return '<div class="v2-chart"><svg class="v2-svg" viewBox="0 0 ' + V2_W + ' ' + height +
+    '" role="img" aria-label="' + esc(ariaLabel) + '" preserveAspectRatio="xMidYMid meet">' + content + '</svg></div>';
+}
+
+function v2LinearScale(domainMin, domainMax, rangeMin, rangeMax) {
+  const span = domainMax - domainMin;
+  const safeSpan = span === 0 ? 1 : span;
+  return (value) => rangeMin + (Number(value) - domainMin) / safeSpan * (rangeMax - rangeMin);
+}
+
+function v2LogScale(domainMin, domainMax, rangeMin, rangeMax) {
+  const min = Math.max(1e-12, domainMin);
+  const max = Math.max(min * 1.000001, domainMax);
+  const logMin = Math.log10(min);
+  const logMax = Math.log10(max);
+  return (value) => {
+    const clamped = Math.max(min, Math.min(max, Number(value)));
+    return rangeMin + (Math.log10(clamped) - logMin) / (logMax - logMin) * (rangeMax - rangeMin);
+  };
+}
+
+function v2Ticks(min, max, count) {
+  if (!isFinite(min) || !isFinite(max)) return [];
+  if (min === max) return [min];
+  const ticks = [];
+  const steps = Math.max(1, count || 4);
+  for (let index = 0; index <= steps; index++) ticks.push(min + (max - min) * index / steps);
+  return ticks;
+}
+
+function v2LogTicks(min, max, limit) {
+  if (!(min > 0) || !(max > 0)) return [];
+  const candidates = [];
+  const first = Math.floor(Math.log10(min));
+  const last = Math.ceil(Math.log10(max));
+  for (let exponent = first; exponent <= last; exponent++) {
+    for (const mantissa of [1, 2, 5]) {
+      const value = mantissa * Math.pow(10, exponent);
+      if (value >= min * 0.999999 && value <= max * 1.000001) candidates.push(value);
+    }
+  }
+  if (!candidates.length) return [min, max];
+  const cap = limit || 8;
+  if (candidates.length <= cap) return candidates;
+  const stride = Math.ceil(candidates.length / cap);
+  return candidates.filter((value, index) => index % stride === 0 || index === candidates.length - 1);
+}
+
+function v2LinePath(vertices) {
+  let path = '';
+  let open = false;
+  for (const vertex of vertices || []) {
+    if (!vertex || !isFinite(vertex.x) || !isFinite(vertex.y)) {
+      open = false;
+      continue;
+    }
+    path += (open ? ' L ' : ' M ') + vertex.x.toFixed(2) + ' ' + vertex.y.toFixed(2);
+    open = true;
+  }
+  return path;
+}
+
+function v2RenderViewBody(key, view, status) {
+  if (key === 'load_latency') return v2RenderLoadLatency(view, status);
+  if (key === 'critical_path') return v2RenderCriticalPath(view, status);
+  if (key === 'summed_delay') return v2RenderSummedDelay(view, status);
+  if (key === 'slack_cdf') return v2RenderSlackCDF(view, status);
+  if (key === 'off_cpu') return v2RenderOffCPU(view, status);
+  if (key === 'operator_treemap') return v2RenderTreemap(view, status);
+  if (key === 'roofline') return v2RenderRoofline(view, status);
+  if (key === 'ab_diff') return v2RenderABDiff(view, status);
+  if (key === 'change_point') return v2RenderChangePoint(view, status);
+  if (key === 'service_topology') return v2RenderServiceTopology(view, status);
+  return v2IncompleteBody('没有对应的前端渲染器。', status);
+}
+
+function v2BindTooltips() {
+  const host = document.getElementById('viewsV2Grid');
+  if (!host || host.dataset.v2TipsBound === '1') return;
+  host.dataset.v2TipsBound = '1';
+  host.addEventListener('pointermove', (ev) => {
+    const target = ev.target && ev.target.closest ? ev.target.closest('[data-v2-tip]') : null;
+    if (!target || !host.contains(target)) {
+      hideTip();
+      return;
+    }
+    showTip(ev, target.getAttribute('data-v2-tip') || '');
+  });
+  host.addEventListener('pointerleave', hideTip);
+  host.addEventListener('pointerdown', hideTip);
+}
+
+function renderViewsV2() {
+  const host = document.getElementById('viewsV2Grid');
+  if (!host) return;
+  host.innerHTML = VIEWS_V2_LABELS.map(([key, label], index) => {
+    const view = VIEWS_V2[key] || {};
+    const status = v2Status(view);
+    const confidenceClass = v2ConfidenceClass(status.confidence);
+    const reason = status.reason || (status.available ? '' : '没有数据');
+    let body = '';
+    if (status.available) {
+      try {
+        body = v2RenderViewBody(key, view, status);
+      } catch (error) {
+        body = v2IncompleteBody('图表渲染失败：' + (error && error.message ? error.message : String(error)), status);
+        if (window.console && console.error) console.error('views_v2 ' + key, error);
+      }
+    } else {
+      body = v2UnavailableBody(status);
+    }
+    const meta = [];
+    if (status.source) meta.push('source ' + status.source);
+    if (status.available) meta.push('confidence ' + (status.confidence || 'not specified'));
+    return '<article id="v2Card_' + esc(key) + '" class="view-v2-card ' + (status.available ? 'available' : 'unavailable') +
+      ' confidence-' + confidenceClass + '" data-view="' + esc(key) + '" data-confidence="' + confidenceClass + '" aria-labelledby="v2Title_' + esc(key) + '">' +
+      '<div class="view-v2-head"><div class="view-v2-heading"><span class="view-v2-index">' + String(index + 1).padStart(2, '0') + '</span>' +
+      '<b id="v2Title_' + esc(key) + '">' + esc(label) + '</b></div><div class="view-v2-badges">' +
+      '<span class="badge v2-available">' + (status.available ? 'available' : 'unavailable') + '</span>' +
+      (status.available ? '<span class="badge v2-conf-' + confidenceClass + '">' + esc(status.confidence || 'conf n/a') + '</span>' : '') +
+      '</div></div>' +
+      '<div class="view-v2-sub">' + esc(V2_SUBTITLES[key] || '') + '</div>' +
+      '<div class="view-v2-status">' + (status.available ? '视图可渲染' : '暂无可用证据') + '</div>' +
+      (reason ? '<div class="view-v2-reason">' + esc(reason) + '</div>' : '') +
+      '<div class="view-v2-body">' + body + '</div>' +
+      (meta.length ? '<div class="view-v2-meta">' + esc(meta.join(' · ')) + '</div>' : '') +
+      '</article>';
+  }).join('');
+  v2BindTooltips();
+}
+
+function v2RenderLoadLatency(view, status) {
+  const points = (Array.isArray(view.points) ? view.points : [])
+    .map((point) => Object.assign({}, point, { _concurrency: v2Num(point && point.concurrency) }))
+    .filter((point) => point._concurrency != null && point._concurrency > 0)
+    .sort((left, right) => left._concurrency - right._concurrency);
+  if (!points.length) return v2IncompleteBody('points[] 为空；未绘制负载曲线或空坐标轴。', status);
+
+  const latencySeries = [
+    { key: 'latency_p50_ms', label: 'latency p50', color: '#4cc9f0' },
+    { key: 'latency_p95_ms', label: 'latency p95', color: '#ffb703' },
+    { key: 'latency_p99_ms', label: 'latency p99', color: '#ff6b6b' }
+  ];
+  let series = latencySeries.filter((item) => points.some((point) => v2Positive(point[item.key])));
+  let usesTTFT = false;
+  if (!series.length) {
+    usesTTFT = true;
+    series = [
+      { key: 'ttft_p50_ms', label: 'TTFT p50', color: '#4cc9f0' },
+      { key: 'ttft_p95_ms', label: 'TTFT p95', color: '#ffb703' }
+    ].filter((item) => points.some((point) => v2Positive(point[item.key])));
+  }
+  if (!series.length) return v2IncompleteBody('没有正的 latency/TTFT 测量值；不绘制空坐标轴。', status);
+
+  const measured = [];
+  for (const item of series) {
+    for (const point of points) {
+      const value = v2Num(point[item.key]);
+      if (value != null && value > 0) measured.push(value);
+    }
+  }
+  const minY = Math.min(...measured);
+  const maxY = Math.max(...measured);
+  const logY = minY > 0 && maxY / minY >= 10;
+  let yMin;
+  let yMax;
+  if (logY) {
+    yMin = Math.pow(10, Math.floor(Math.log10(minY)));
+    yMax = Math.pow(10, Math.ceil(Math.log10(maxY)));
+  } else {
+    const span = Math.max(maxY - minY, Math.max(maxY * 0.05, 0.001));
+    yMin = Math.max(0, minY - span * 0.12);
+    yMax = maxY + span * 0.2;
+  }
+  if (!(yMax > yMin)) yMax = yMin + 1;
+
+  let xMin = points[0]._concurrency;
+  let xMax = points[points.length - 1]._concurrency;
+  if (xMin === xMax) {
+    xMin = Math.max(0.5, xMin * 0.82);
+    xMax = xMax * 1.18;
+  }
+  const logX = xMin > 0 && xMax / xMin >= 6;
+  const left = 62;
+  const right = 58;
+  const top = 27;
+  const bottom = 39;
+  const plotW = V2_W - left - right;
+  const plotH = 196;
+  const height = top + plotH + bottom + 6;
+  const xScale = logX
+    ? v2LogScale(xMin, xMax, left, left + plotW)
+    : v2LinearScale(xMin, xMax, left, left + plotW);
+  const yScale = logY
+    ? v2LogScale(yMin, yMax, top + plotH, top)
+    : v2LinearScale(yMin, yMax, top + plotH, top);
+
+  const qpsPoints = points.filter((point) => v2Positive(point.qps));
+  const qpsMax = qpsPoints.length ? Math.max(...qpsPoints.map((point) => v2Num(point.qps))) : 0;
+  const qpsScale = qpsMax > 0 ? v2LinearScale(0, qpsMax * 1.12, top + plotH, top) : null;
+  let content = '<rect x="' + left + '" y="' + top + '" width="' + plotW + '" height="' + plotH + '" rx="3" fill="rgba(8,14,26,.34)"/>';
+
+  const yTicks = logY ? v2LogTicks(yMin, yMax, 6) : v2Ticks(yMin, yMax, 4);
+  for (const tick of yTicks) {
+    const y = yScale(tick);
+    content += '<line class="v2-grid-line" x1="' + left + '" x2="' + (left + plotW) + '" y1="' + y.toFixed(2) + '" y2="' + y.toFixed(2) + '"/>';
+    content += '<text class="v2-tick" x="' + (left - 8) + '" y="' + (y + 3).toFixed(2) + '" text-anchor="end">' + esc(fmtTime(tick)) + '</text>';
+  }
+  let xTicks = points;
+  if (points.length > 9) {
+    const stride = Math.ceil(points.length / 9);
+    xTicks = points.filter((point, index) => index % stride === 0 || index === points.length - 1);
+  }
+  for (const point of xTicks) {
+    const x = xScale(point._concurrency);
+    content += '<line class="v2-grid-line" x1="' + x.toFixed(2) + '" x2="' + x.toFixed(2) + '" y1="' + top + '" y2="' + (top + plotH) + '"/>';
+    content += '<text class="v2-tick" x="' + x.toFixed(2) + '" y="' + (top + plotH + 17) + '" text-anchor="middle">c' + esc(point._concurrency) + '</text>';
+  }
+  content += '<line class="v2-axis-line" x1="' + left + '" x2="' + (left + plotW) + '" y1="' + (top + plotH) + '" y2="' + (top + plotH) + '"/>';
+  content += '<text class="v2-axis-label" x="' + left + '" y="14">' + esc(usesTTFT ? 'TTFT (ms)' : 'latency (ms)') + (logY ? ' · log' : '') + '</text>';
+  content += '<text class="v2-axis-label" x="' + (left + plotW) + '" y="14" text-anchor="end">concurrency' + (logX ? ' · log' : '') + '</text>';
+
+  if (qpsPoints.length >= 2 && qpsScale) {
+    content += '<path d="' + v2LinePath(qpsPoints.map((point) => ({ x: xScale(point._concurrency), y: qpsScale(v2Num(point.qps)) }))) +
+      '" fill="none" stroke="#f4a261" stroke-width="1.4" stroke-dasharray="4 4" opacity=".8"/>';
+    for (const tick of [0, qpsMax / 2, qpsMax]) {
+      const y = qpsScale(tick);
+      content += '<text class="v2-tick" x="' + (left + plotW + 7) + '" y="' + (y + 3).toFixed(2) + '">' + esc(v2FormatAxisNumber(tick)) + '</text>';
+    }
+    content += '<text class="v2-axis-label" x="' + (V2_W - 8) + '" y="14" text-anchor="end">QPS · right</text>';
+  }
+
+  const knee = v2Num(view.knee_concurrency);
+  let kneePoint = null;
+  if (knee != null && knee > 0) {
+    kneePoint = points.slice().sort((leftPoint, rightPoint) => Math.abs(leftPoint._concurrency - knee) - Math.abs(rightPoint._concurrency - knee))[0] || null;
+    const kneeX = xScale(knee);
+    if (kneeX >= left - 1 && kneeX <= left + plotW + 1) {
+      const bandTip = v2TipHtml('load-latency knee', [
+        ['knee concurrency', String(knee)],
+        ['workload_id', view.workload_id || '--'],
+        ['measured tiers', String(points.length)]
+      ], status);
+      content += '<rect class="v2-band v2-hover-target" x="' + (kneeX - 5).toFixed(2) + '" y="' + top + '" width="10" height="' + plotH +
+        '" fill="rgba(255,183,3,.10)" ' + v2TipAttr(bandTip) + '/>';
+      content += '<line class="v2-band" x1="' + kneeX.toFixed(2) + '" x2="' + kneeX.toFixed(2) + '" y1="' + top + '" y2="' + (top + plotH) +
+        '" stroke="#ffb703" stroke-width="1.3" stroke-dasharray="4 3"/>';
+      content += '<text class="v2-tick" x="' + kneeX.toFixed(2) + '" y="' + (top - 8) + '" text-anchor="middle" fill="#ffb703">knee</text>';
+    }
+  }
+
+  for (const item of series) {
+    const vertices = points
+      .map((point) => ({ x: xScale(point._concurrency), y: v2Positive(point[item.key]) ? yScale(v2Num(point[item.key])) : NaN }))
+      .filter((vertex) => isFinite(vertex.y));
+    if (vertices.length) {
+      content += '<path d="' + v2LinePath(vertices) + '" fill="none" stroke="' + item.color +
+        '" stroke-width="1.9" stroke-linejoin="round" stroke-linecap="round" opacity=".92"/>';
+    }
+    for (const point of points) {
+      if (!v2Positive(point[item.key])) continue;
+      const pointRows = [
+        ['concurrency', String(point._concurrency)],
+        ['qps', v2Positive(point.qps) ? v2Num(point.qps).toFixed(2) : '--']
+      ];
+      const ttft50 = v2Num(point.ttft_p50_ms);
+      const ttft95 = v2Num(point.ttft_p95_ms);
+      if (ttft50 != null || ttft95 != null) {
+        pointRows.push(['TTFT p50 / p95', (ttft50 != null ? fmtTime(ttft50) : '--') + ' / ' + (ttft95 != null ? fmtTime(ttft95) : '--')]);
+      }
+      const latency50 = v2Num(point.latency_p50_ms);
+      const latency95 = v2Num(point.latency_p95_ms);
+      const latency99 = v2Num(point.latency_p99_ms);
+      if (latency50 != null || latency95 != null || latency99 != null) {
+        pointRows.push(['latency p50 / p95 / p99', (latency50 != null ? fmtTime(latency50) : '--') + ' / ' +
+          (latency95 != null ? fmtTime(latency95) : '--') + ' / ' + (latency99 != null ? fmtTime(latency99) : '--')]);
+      }
+      const running = v2Num(point.running_max);
+      const waiting = v2Num(point.waiting_max);
+      if (running != null || waiting != null) pointRows.push(['running_max / waiting_max', (running != null ? running : '--') + ' / ' + (waiting != null ? waiting : '--')]);
+      const kvCache = v2Num(point.kv_cache_max);
+      const aicore = v2Num(point.npu_aicore_mean);
+      if (kvCache != null || aicore != null) pointRows.push(['kv_cache_max / npu_aicore_mean', (kvCache != null ? v2FormatAxisNumber(kvCache) : '--') + ' / ' + (aicore != null ? v2FormatAxisNumber(aicore) : '--')]);
+      const pointTip = v2TipHtml('load-latency c=' + point._concurrency, pointRows, status);
+      const x = xScale(point._concurrency);
+      const y = yScale(v2Num(point[item.key]));
+      content += '<circle class="v2-point" cx="' + x.toFixed(2) + '" cy="' + y.toFixed(2) + '" r="3.6" fill="' + item.color + '"/>';
+      content += '<circle class="v2-hover-target" cx="' + x.toFixed(2) + '" cy="' + y.toFixed(2) + '" r="9" fill="rgba(0,0,0,0)" ' + v2TipAttr(pointTip) + '/>';
+    }
+  }
+
+  const at = kneePoint || points[points.length - 1];
+  const stats = v2Stats([
+    ['workload_id', v2ClipText(view.workload_id || '--', 26), 'sweep workload'],
+    ['knee concurrency', knee != null && knee > 0 ? String(knee) : 'not detected', kneePoint ? 'nearest measured tier' : ''],
+    ['QPS @ focus tier', at && v2Positive(at.qps) ? v2Num(at.qps).toFixed(2) : '--', at ? 'c=' + at._concurrency : ''],
+    ['running / waiting max', at ? ((v2Num(at.running_max) != null ? v2Num(at.running_max) : '--') + ' / ' + (v2Num(at.waiting_max) != null ? v2Num(at.waiting_max) : '--')) : '--', ''],
+    ['KV cache / AICore mean', at ? ((v2Num(at.kv_cache_max) != null ? v2FormatAxisNumber(at.kv_cache_max) : '--') + ' / ' + (v2Num(at.npu_aicore_mean) != null ? v2FormatAxisNumber(at.npu_aicore_mean) : '--')) : '--', 'raw contract values'],
+    ['measured tiers', String(points.length), usesTTFT ? 'latency fields absent; TTFT used' : 'latency p50/p95/p99']
+  ]);
+  const legend = [
+    ...series.map((item) => [item.color, item.label]),
+    ...(qpsPoints.length >= 2 ? [['#f4a261', 'QPS (right axis)', true]] : []),
+    ...(knee != null && knee > 0 ? [['#ffb703', 'knee marker', true]] : [])
+  ];
+  return v2Svg(height, content, 'load latency knee plot') + stats +
+    v2Legend(legend, status, usesTTFT ? 'TTFT fallback: latency fields not positive' : 'measured sweep tiers only');
+}
+
+function v2RenderCriticalPath(view, status) {
+  const nodes = (Array.isArray(view.nodes) ? view.nodes : [])
+    .filter((node) => node && node.id != null)
+    .map((node, index) => ({
+      raw: node,
+      id: String(node.id),
+      label: String(node.label || node.id || 'node'),
+      start: v2Num(node.start_ms),
+      duration: v2Num(node.duration_ms),
+      category: String(node.category || node.kind || 'other'),
+      index
+    }))
+    .filter((node) => node.start != null && node.duration != null && node.duration >= 0)
+    .sort((left, right) => left.start - right.start || left.index - right.index);
+  if (!nodes.length) return v2IncompleteBody('nodes[] 没有带 start_ms/duration_ms 的节点；未绘制空瀑布。', status);
+
+  const byId = new Map();
+  for (const node of nodes) if (!byId.has(node.id)) byId.set(node.id, node);
+  const chainIds = Array.isArray(view.critical_path) ? view.critical_path.map((id) => String(id)) : [];
+  const chain = [];
+  let missingChainIds = 0;
+  for (const id of chainIds) {
+    const node = byId.get(id);
+    if (node) chain.push(node); else missingChainIds++;
+  }
+  const hasChain = chain.length > 0;
+  const sourceRows = hasChain ? chain : nodes.slice();
+  const total = v2Num(view.total_ms);
+  const axisMax = Math.max(total != null && total > 0 ? total : 0,
+    ...nodes.map((node) => node.start + node.duration), 0.000001);
+  const maxRows = 16;
+  const visible = sourceRows.slice(0, maxRows);
+  const omitted = sourceRows.length - visible.length;
+  const left = 198;
+  const right = 72;
+  const top = 22;
+  const rowH = 24;
+  const bottom = 35;
+  const plotW = V2_W - left - right;
+  const plotH = visible.length * rowH;
+  const height = top + plotH + bottom;
+  const xScale = v2LinearScale(0, axisMax, left, left + plotW);
+  let content = '<rect x="' + left + '" y="' + top + '" width="' + plotW + '" height="' + plotH + '" rx="3" fill="rgba(8,14,26,.34)"/>';
+
+  for (const tick of v2Ticks(0, axisMax, 5)) {
+    const x = xScale(tick);
+    content += '<line class="v2-grid-line" x1="' + x.toFixed(2) + '" x2="' + x.toFixed(2) + '" y1="' + top + '" y2="' + (top + plotH) + '"/>';
+    content += '<text class="v2-tick" x="' + x.toFixed(2) + '" y="' + (top + plotH + 16) + '" text-anchor="middle">' + esc(fmtTime(tick)) + '</text>';
+  }
+  content += '<text class="v2-axis-label" x="' + left + '" y="13">batch timeline · start_ms</text>';
+
+  visible.forEach((node, index) => {
+    const y = top + index * rowH;
+    const x = xScale(node.start);
+    const width = Math.max(2, node.duration / axisMax * plotW);
+    const color = v2Color(node.category, index);
+    const nodeConfidence = String(node.raw.confidence || '').trim().toLowerCase();
+    const dash = nodeConfidence === 'inferred' ? ' stroke-dasharray="5 3"' : (nodeConfidence === 'partial' ? ' stroke-dasharray="2 2"' : '');
+    const rows = [
+      ['critical path rank', hasChain ? String(index + 1) : 'not claimed'],
+      ['node id', node.id],
+      ['category / kind', node.category + ' / ' + String(node.raw.kind || '--')],
+      ['start', fmtTime(node.start)],
+      ['duration', fmtTime(node.duration)],
+      ['end', fmtTime(node.start + node.duration)],
+      ['device', node.raw.device || '--'],
+      ['parent', node.raw.parent || '--'],
+      ['node confidence', nodeConfidence || 'not specified']
+    ];
+    const tip = v2TipHtml(node.label, rows, status);
+    if (index % 2 === 0) content += '<rect x="' + left + '" y="' + y + '" width="' + plotW + '" height="' + rowH + '" fill="rgba(36,54,83,.12)"/>';
+    content += '<text class="v2-bar-sub" x="12" y="' + (y + rowH / 2 + 3) + '">' + String(index + 1).padStart(2, '0') + '</text>';
+    content += '<text class="v2-bar-label" x="30" y="' + (y + 11) + '">' + esc(v2ClipText(node.label, 24)) + '</text>';
+    content += '<text class="v2-bar-sub" x="30" y="' + (y + 20) + '">' + esc(v2ClipText(node.category + (hasChain ? ' · critical' : ' · measured'), 27)) + '</text>';
+    content += '<rect class="v2-hover-target" x="' + x.toFixed(2) + '" y="' + (y + 5) + '" width="' + width.toFixed(2) + '" height="' + (rowH - 10) +
+      '" rx="2.5" fill="' + color + '" fill-opacity="' + (hasChain ? '.92' : '.58') + '" stroke="' + color + '"' + dash + ' ' + v2TipAttr(tip) + '/>';
+    content += '<text class="v2-value-label" x="' + (V2_W - 8) + '" y="' + (y + 15) + '" text-anchor="end">' + esc(fmtTime(node.duration)) + '</text>';
+  });
+  content += '<line class="v2-axis-line" x1="' + left + '" x2="' + (left + plotW) + '" y1="' + (top + plotH) + '" y2="' + (top + plotH) + '"/>';
+
+  let notices = '';
+  if (!hasChain) {
+    notices += v2Notice(chainIds.length
+      ? 'critical_path[] 中的 id 均未匹配到 nodes[]；仅按 start_ms 展示 measured nodes，不宣称关键链。'
+      : 'critical_path[] 为空；仅按 start_ms 展示 measured nodes，不宣称关键链。', 'warn');
+  } else if (missingChainIds > 0) {
+    notices += v2Notice(missingChainIds + ' 个 critical_path id 未在 nodes[] 中找到；其余节点仍按链条顺序展示。', 'warn');
+  }
+  if (omitted > 0) notices += v2Notice('图中显示前 ' + visible.length + ' 个节点，另有 ' + omitted + ' 个节点未绘制。', 'info');
+
+  const stats = v2Stats([
+    ['batch_id', v2ClipText(view.batch_id || '--', 24), ''],
+    ['request / trace', v2ClipText(view.request_id || '--', 16) + ' / ' + v2ClipText(view.trace_id || '--', 16), ''],
+    ['total_ms', fmtTime(total != null && total > 0 ? total : axisMax), total != null && total > 0 ? 'contract total' : 'derived axis max'],
+    ['coverage', v2FormatCoverage(view.coverage), ''],
+    ['nodes / critical_path', String(nodes.length) + ' / ' + String(chain.length), missingChainIds ? missingChainIds + ' missing ids' : '']
+  ]);
+  const categoryColors = [];
+  const seenCategories = new Set();
+  for (const node of visible) {
+    if (seenCategories.has(node.category)) continue;
+    seenCategories.add(node.category);
+    categoryColors.push([v2Color(node.category, categoryColors.length), node.category]);
+  }
+  return notices + v2Svg(height, content, 'critical path waterfall') + stats +
+    v2Legend(categoryColors.slice(0, 6), status, hasChain ? 'critical_path[] order' : 'measured node order only');
+}
+
+function v2RenderSummedDelay(view, status) {
+  const sumMS = v2Num(view.sum_ms);
+  const criticalMS = v2Num(view.critical_path_ms);
+  const overlapMS = v2Num(view.overlap_ms);
+  const categories = (Array.isArray(view.nodes_by_category) ? view.nodes_by_category : [])
+    .map((item, index) => ({
+      category: String((item && item.category) || 'other'),
+      total: Math.max(0, v2Num(item && item.total_ms) || 0),
+      count: v2Num(item && item.count),
+      index
+    }))
+    .filter((item) => item.total > 0)
+    .sort((left, right) => right.total - left.total);
+  const positive = [sumMS, criticalMS, overlapMS].some((value) => value != null && value > 0) || categories.length > 0;
+  if (!positive) return v2IncompleteBody('sum_ms / critical_path_ms / overlap_ms / nodes_by_category[] 没有正的测量值。', status);
+
+  let stack = categories;
+  let stackTotal = v2Sum(stack.map((item) => item.total));
+  if (!stack.length && sumMS != null && sumMS > 0) {
+    stack = [{ category: 'all measured delay', total: sumMS, count: null, index: 0 }];
+    stackTotal = sumMS;
+  }
+  const axisMax = Math.max(stackTotal, sumMS || 0, criticalMS || 0, overlapMS || 0, 0.000001) * 1.04;
+  const left = 128;
+  const right = 28;
+  const top = 30;
+  const bottom = 36;
+  const plotW = V2_W - left - right;
+  const barH = 22;
+  const rowGap = 18;
+  const height = top + 3 * barH + 2 * rowGap + bottom;
+  const xScale = v2LinearScale(0, axisMax, left, left + plotW);
+  let content = '<rect x="' + left + '" y="' + (top - 8) + '" width="' + plotW + '" height="' + (3 * barH + 2 * rowGap + 8) + '" rx="3" fill="rgba(8,14,26,.34)"/>';
+  for (const tick of v2Ticks(0, axisMax, 5)) {
+    const x = xScale(tick);
+    content += '<line class="v2-grid-line" x1="' + x.toFixed(2) + '" x2="' + x.toFixed(2) + '" y1="' + (top - 8) + '" y2="' + (top + 3 * barH + 2 * rowGap) + '"/>';
+    content += '<text class="v2-tick" x="' + x.toFixed(2) + '" y="' + (top + 3 * barH + 2 * rowGap + 18) + '" text-anchor="middle">' + esc(fmtTime(tick)) + '</text>';
+  }
+  content += '<text class="v2-axis-label" x="' + left + '" y="14">duration (ms)</text>';
+
+  const firstY = top;
+  content += '<text class="v2-bar-label" x="' + (left - 9) + '" y="' + (firstY + 15) + '" text-anchor="end">Σ node delay</text>';
+  let cursor = 0;
+  let stackIndex = 0;
+  for (const item of stack) {
+    const width = item.total / axisMax * plotW;
+    const x = xScale(cursor);
+    const color = v2Color(item.category, stackIndex++);
+    const tip = v2TipHtml(item.category + ' delay', [
+      ['total_ms', fmtTime(item.total)],
+      ['count', item.count != null ? fmtCount(item.count) : '--'],
+      ['share of category stack', stackTotal > 0 ? fmtPct(item.total / stackTotal * 100) : '--']
+    ], status);
+    content += '<rect class="v2-hover-target" x="' + x.toFixed(2) + '" y="' + firstY + '" width="' + Math.max(1, width - 0.6).toFixed(2) +
+      '" height="' + barH + '" fill="' + color + '" fill-opacity=".82" ' + v2TipAttr(tip) + '/>';
+    if (width > 54) content += '<text class="v2-value-label" x="' + (x + width / 2).toFixed(2) + '" y="' + (firstY + 15) + '" text-anchor="middle" fill="#07101f">' + esc(fmtTime(item.total)) + '</text>';
+    cursor += item.total;
+  }
+
+  const cpY = firstY + barH + rowGap;
+  content += '<text class="v2-bar-label" x="' + (left - 9) + '" y="' + (cpY + 15) + '" text-anchor="end">critical path</text>';
+  if (criticalMS != null && criticalMS >= 0) {
+    const cpTip = v2TipHtml('critical path', [['critical_path_ms', fmtTime(criticalMS)]], status);
+    content += '<rect class="v2-hover-target" x="' + left + '" y="' + cpY + '" width="' + Math.max(1, criticalMS / axisMax * plotW).toFixed(2) +
+      '" height="' + barH + '" fill="#2ec4b6" ' + v2TipAttr(cpTip) + '/>';
+  }
+
+  const overlapY = cpY + barH + rowGap;
+  content += '<text class="v2-bar-label" x="' + (left - 9) + '" y="' + (overlapY + 15) + '" text-anchor="end">overlap</text>';
+  if (overlapMS != null && overlapMS >= 0) {
+    const overlapTip = v2TipHtml('overlap', [['overlap_ms', fmtTime(overlapMS)]], status);
+    content += '<rect class="v2-hover-target" x="' + left + '" y="' + overlapY + '" width="' + Math.max(1, overlapMS / axisMax * plotW).toFixed(2) +
+      '" height="' + barH + '" fill="#ffb703" fill-opacity=".86" ' + v2TipAttr(overlapTip) + '/>';
+  }
+  content += '<line class="v2-axis-line" x1="' + left + '" x2="' + (left + plotW) + '" y1="' + (overlapY + barH) + '" y2="' + (overlapY + barH) + '"/>';
+
+  const stats = v2Stats([
+    ['sum_ms', sumMS != null ? fmtTime(sumMS) : '--', 'contract total'],
+    ['critical_path_ms', criticalMS != null ? fmtTime(criticalMS) : '--', ''],
+    ['overlap_ms', overlapMS != null ? fmtTime(overlapMS) : '--', ''],
+    ['parallelism', v2Num(view.parallelism) != null ? v2FormatAxisNumber(view.parallelism) + '×' : '--', ''],
+    ['categories', String(categories.length), categories.length ? 'nodes_by_category[]' : 'single aggregate bar']
+  ]);
+  const legend = categories.slice(0, 7).map((item, index) => [v2Color(item.category, index), item.category]);
+  if (!legend.length) legend.push(['#94a3b8', 'all measured delay']);
+  legend.push(['#2ec4b6', 'critical path'], ['#ffb703', 'overlap']);
+  const note = categories.length
+    ? 'category stack sums measured nodes; compare against critical_path_ms'
+    : 'nodes_by_category[] empty; only a single summed-delay bar is shown';
+  return v2Svg(height, content, 'summed delay versus critical path') + stats + v2Legend(legend, status, note);
+}
+
+function v2RenderSlackCDF(view, status) {
+  const source = (Array.isArray(view.points) ? view.points : [])
+    .map((point) => ({
+      slack: v2Num(point && point.slack_ms),
+      count: v2Num(point && point.count),
+      cumulative: v2Num(point && point.cumulative)
+    }))
+    .filter((point) => point.slack != null)
+    .sort((left, right) => left.slack - right.slack);
+  if (!source.length) return v2IncompleteBody('points[] 为空；未绘制空 CDF 坐标轴。', status);
+
+  let running = 0;
+  let lastCumulative = 0;
+  const points = source.map((point, index) => {
+    if (point.count != null && point.count > 0) running += point.count;
+    if (point.cumulative != null && point.cumulative > 0) lastCumulative = point.cumulative;
+    return Object.assign({ index }, point, {
+      cumulativeValue: point.cumulative != null && point.cumulative > 0 ? point.cumulative : running
+    });
+  });
+  const total = lastCumulative > 0 ? lastCumulative : running;
+  if (!(total > 0)) return v2IncompleteBody('points[] 没有 count/cumulative，无法形成 CDF。', status);
+
+  const p50 = v2Num(view.p50_ms);
+  const p95 = v2Num(view.p95_ms);
+  const minSlack = v2Num(view.min_ms);
+  const candidates = [0, ...points.map((point) => point.slack)];
+  if (p50 != null) candidates.push(p50);
+  if (p95 != null) candidates.push(p95);
+  if (minSlack != null) candidates.push(minSlack);
+  let xMin = Math.min(...candidates);
+  let xMax = Math.max(...candidates);
+  if (xMin === xMax) {
+    xMin -= 1;
+    xMax += 1;
+  } else {
+    const pad = (xMax - xMin) * 0.035;
+    xMin -= pad;
+    xMax += pad;
+  }
+  const left = 62;
+  const right = 24;
+  const top = 25;
+  const bottom = 38;
+  const plotW = V2_W - left - right;
+  const plotH = 196;
+  const height = top + plotH + bottom;
+  const xScale = v2LinearScale(xMin, xMax, left, left + plotW);
+  const yScale = v2LinearScale(0, total, top + plotH, top);
+  const baseY = top + plotH;
+  let content = '<rect x="' + left + '" y="' + top + '" width="' + plotW + '" height="' + plotH + '" rx="3" fill="rgba(8,14,26,.34)"/>';
+
+  if (xMin < 0) {
+    const negativeX = xScale(0);
+    content += '<rect class="v2-band" x="' + left + '" y="' + top + '" width="' + Math.max(0, negativeX - left).toFixed(2) + '" height="' + plotH + '" fill="rgba(255,107,107,.10)"/>';
+    content += '<text class="v2-tick" x="' + ((left + negativeX) / 2).toFixed(2) + '" y="' + (top + 13) + '" text-anchor="middle" fill="#ff8f8f">negative slack</text>';
+  }
+  for (const tick of v2Ticks(0, total, 4)) {
+    const y = yScale(tick);
+    content += '<line class="v2-grid-line" x1="' + left + '" x2="' + (left + plotW) + '" y1="' + y.toFixed(2) + '" y2="' + y.toFixed(2) + '"/>';
+    content += '<text class="v2-tick" x="' + (left - 8) + '" y="' + (y + 3).toFixed(2) + '" text-anchor="end">' + esc(fmtPct(tick / total * 100)) + '</text>';
+  }
+  for (const tick of v2Ticks(xMin, xMax, 5)) {
+    const x = xScale(tick);
+    content += '<line class="v2-grid-line" x1="' + x.toFixed(2) + '" x2="' + x.toFixed(2) + '" y1="' + top + '" y2="' + baseY + '"/>';
+    content += '<text class="v2-tick" x="' + x.toFixed(2) + '" y="' + (baseY + 17) + '" text-anchor="middle">' + esc(fmtTime(tick)) + '</text>';
+  }
+  const zeroX = xScale(0);
+  if (zeroX >= left && zeroX <= left + plotW) content += '<line class="v2-zero-line" x1="' + zeroX.toFixed(2) + '" x2="' + zeroX.toFixed(2) + '" y1="' + top + '" y2="' + baseY + '"/>';
+  content += '<line class="v2-axis-line" x1="' + left + '" x2="' + (left + plotW) + '" y1="' + baseY + '" y2="' + baseY + '"/>';
+  content += '<text class="v2-axis-label" x="' + left + '" y="14">CDF of slack</text>';
+  content += '<text class="v2-axis-label" x="' + (left + plotW) + '" y="14" text-anchor="end">slack_ms</text>';
+
+  let stepPath = 'M ' + xScale(xMin).toFixed(2) + ' ' + baseY.toFixed(2);
+  let previousY = baseY;
+  for (const point of points) {
+    const x = xScale(point.slack);
+    const y = yScale(Math.min(total, point.cumulativeValue));
+    stepPath += ' L ' + x.toFixed(2) + ' ' + previousY.toFixed(2) + ' L ' + x.toFixed(2) + ' ' + y.toFixed(2);
+    previousY = y;
+  }
+  stepPath += ' L ' + xScale(xMax).toFixed(2) + ' ' + previousY.toFixed(2);
+  content += '<path d="' + stepPath + ' L ' + xScale(xMax).toFixed(2) + ' ' + baseY.toFixed(2) + ' Z" fill="rgba(76,201,240,.10)"/>';
+  content += '<path d="' + stepPath + '" fill="none" stroke="#4cc9f0" stroke-width="1.9"/>';
+
+  for (const marker of [[p50, 'p50', '#ffb703'], [p95, 'p95', '#ff6b6b']]) {
+    const value = marker[0];
+    if (value == null || value < xMin || value > xMax) continue;
+    const x = xScale(value);
+    content += '<line x1="' + x.toFixed(2) + '" x2="' + x.toFixed(2) + '" y1="' + top + '" y2="' + baseY + '" stroke="' + marker[2] + '" stroke-dasharray="4 3" opacity=".8"/>';
+    content += '<text class="v2-tick" x="' + x.toFixed(2) + '" y="' + (top - 8) + '" text-anchor="middle" fill="' + marker[2] + '">' + marker[1] + ' ' + esc(fmtTime(value)) + '</text>';
+  }
+
+  for (const point of points) {
+    const x = xScale(point.slack);
+    const y = yScale(Math.min(total, point.cumulativeValue));
+    const tip = v2TipHtml('slack CDF point', [
+      ['slack_ms', fmtTime(point.slack)],
+      ['count', point.count != null ? fmtCount(point.count) : '--'],
+      ['cumulative', fmtCount(point.cumulativeValue)],
+      ['percentile', fmtPct(point.cumulativeValue / total * 100)]
+    ], status);
+    content += '<circle class="v2-point" cx="' + x.toFixed(2) + '" cy="' + y.toFixed(2) + '" r="2.8" fill="#4cc9f0"/>';
+    content += '<circle class="v2-hover-target" cx="' + x.toFixed(2) + '" cy="' + y.toFixed(2) + '" r="8" fill="rgba(0,0,0,0)" ' + v2TipAttr(tip) + '/>';
+  }
+
+  const stats = v2Stats([
+    ['min_ms', minSlack != null ? fmtTime(minSlack) : fmtTime(points[0].slack), ''],
+    ['p50_ms', p50 != null ? fmtTime(p50) : '--', ''],
+    ['p95_ms', p95 != null ? fmtTime(p95) : '--', ''],
+    ['negative_count', v2Num(view.negative_count) != null ? fmtCount(view.negative_count) : '--', ''],
+    ['samples', fmtCount(total), 'maximum cumulative']
+  ]);
+  return v2Svg(height, content, 'slack cumulative distribution') + stats +
+    v2Legend([['#4cc9f0', 'slack CDF'], ['#ff6b6b', 'negative slack'], ['#ffb703', 'p50 / p95', true]], status, 'step CDF from contract cumulative counts');
+}
+
+function v2RenderOffCPU(view, status) {
+  const mode = String(view.mode == null ? '' : view.mode).trim().toLowerCase();
+  if (mode !== 'aggregate' && mode !== 'exact') {
+    return v2IncompleteBody('off_cpu.mode 缺失或不是 aggregate/exact；拒绝猜测时间线语义。', status);
+  }
+  const rows = (Array.isArray(view.rows) ? view.rows : [])
+    .map((row) => ({
+      lane: String((row && row.lane) || '(unknown lane)'),
+      start: v2Num(row && row.start_ms),
+      end: v2Num(row && row.end_ms),
+      onCPU: v2Num(row && row.on_cpu_ms),
+      offCPU: v2Num(row && row.off_cpu_ms),
+      futex: v2Num(row && row.futex_ms),
+      segments: (Array.isArray(row && row.segments) ? row.segments : [])
+        .map((segment) => ({
+          start: v2Num(segment && segment.start_ms),
+          end: v2Num(segment && segment.end_ms),
+          kind: String((segment && segment.kind) || 'offcpu').toLowerCase()
+        }))
+        .filter((segment) => segment.start != null && segment.end != null && segment.end > segment.start)
+    }))
+    .filter((row) => row.start != null && row.end != null && row.end > row.start)
+    .sort((left, right) => left.start - right.start || left.lane.localeCompare(right.lane));
+  if (!rows.length) return v2IncompleteBody('rows[] 没有正时长的 lane；未绘制空 ribbon。', status);
+  if (mode === 'exact' && !rows.some((row) => row.segments.length)) {
+    return v2IncompleteBody('mode=exact 但 rows[].segments[] 没有有效区间；不降级为 aggregate 或伪造区间。', status);
+  }
+
+  const maxRows = 14;
+  const visible = rows.slice(0, maxRows);
+  const omitted = rows.length - visible.length;
+  const left = 190;
+  const right = 86;
+  const top = 26;
+  const rowH = 24;
+  const bottom = 37;
+  const plotW = V2_W - left - right;
+  const plotH = visible.length * rowH;
+  const height = top + plotH + bottom;
+  let content = '<rect x="' + left + '" y="' + top + '" width="' + plotW + '" height="' + plotH + '" rx="3" fill="rgba(8,14,26,.34)"/>';
+  let xScale;
+  if (mode === 'aggregate') {
+    xScale = (value) => left + Math.max(0, Math.min(100, value)) / 100 * plotW;
+    for (const tick of [0, 25, 50, 75, 100]) {
+      const x = xScale(tick);
+      content += '<line class="v2-grid-line" x1="' + x.toFixed(2) + '" x2="' + x.toFixed(2) + '" y1="' + top + '" y2="' + (top + plotH) + '"/>';
+      content += '<text class="v2-tick" x="' + x.toFixed(2) + '" y="' + (top + plotH + 17) + '" text-anchor="middle">' + tick + '%</text>';
+    }
+    content += '<text class="v2-axis-label" x="' + left + '" y="14">share of observed span duration</text>';
+  } else {
+    const xMin = Math.min(...visible.map((row) => row.start));
+    const xMax = Math.max(...visible.map((row) => row.end), ...visible.flatMap((row) => row.segments.map((segment) => segment.end)));
+    xScale = v2LinearScale(xMin, xMax, left, left + plotW);
+    for (const tick of v2Ticks(xMin, xMax, 5)) {
+      const x = xScale(tick);
+      content += '<line class="v2-grid-line" x1="' + x.toFixed(2) + '" x2="' + x.toFixed(2) + '" y1="' + top + '" y2="' + (top + plotH) + '"/>';
+      content += '<text class="v2-tick" x="' + x.toFixed(2) + '" y="' + (top + plotH + 17) + '" text-anchor="middle">' + esc(fmtTime(tick)) + '</text>';
+    }
+    content += '<text class="v2-axis-label" x="' + left + '" y="14">time since anchor · exact segments</text>';
+  }
+
+  visible.forEach((row, index) => {
+    const y = top + index * rowH;
+    if (index % 2 === 0) content += '<rect x="' + left + '" y="' + y + '" width="' + plotW + '" height="' + rowH + '" fill="rgba(36,54,83,.12)"/>';
+    content += '<text class="v2-bar-label" x="12" y="' + (y + 14) + '">' + esc(v2ClipText(row.lane, 29)) + '</text>';
+    const span = row.end - row.start;
+    const offText = row.offCPU != null ? fmtTime(row.offCPU) : '--';
+    const futexText = row.futex != null ? fmtTime(row.futex) : '--';
+    content += '<text class="v2-bar-sub" x="12" y="' + (y + 23) + '">span ' + esc(fmtTime(span)) + ' · futex ' + esc(futexText) + '</text>';
+    if (mode === 'aggregate') {
+      const onPct = span > 0 && row.onCPU != null ? Math.max(0, Math.min(100, row.onCPU / span * 100)) : 0;
+      const offPct = span > 0 && row.offCPU != null ? Math.max(0, Math.min(100, row.offCPU / span * 100)) : 0;
+      const futexPct = span > 0 && row.futex != null ? Math.max(0, Math.min(100, row.futex / span * 100)) : 0;
+      const tip = v2TipHtml(row.lane, [
+        ['mode', 'aggregate (proportions only)'],
+        ['span', fmtTime(span)],
+        ['on_cpu_ms', row.onCPU != null ? fmtTime(row.onCPU) : '--'],
+        ['off_cpu_ms', offText],
+        ['futex_ms', futexText],
+        ['timeline placement', 'not available in aggregate mode']
+      ], status);
+      content += '<rect class="v2-hover-target" x="' + left + '" y="' + (y + 7) + '" width="' + plotW + '" height="' + (rowH - 14) + '" rx="2" fill="#13233d" ' + v2TipAttr(tip) + '/>';
+      content += '<rect class="v2-hover-target" x="' + xScale(0).toFixed(2) + '" y="' + (y + 7) + '" width="' + xScale(onPct).toFixed(2) +
+        '" height="' + (rowH - 14) + '" fill="#2ec4b6" fill-opacity=".82" ' + v2TipAttr(tip) + '/>';
+      const offX = xScale(onPct);
+      content += '<rect class="v2-hover-target" x="' + offX.toFixed(2) + '" y="' + (y + 7) + '" width="' + (xScale(onPct + offPct) - offX).toFixed(2) +
+        '" height="' + (rowH - 14) + '" fill="#ffb703" fill-opacity=".82" ' + v2TipAttr(tip) + '/>';
+      if (futexPct > 0) content += '<rect x="' + offX.toFixed(2) + '" y="' + (y + rowH - 13) + '" width="' + xScale(Math.min(100, onPct + futexPct)).toFixed(2) +
+        '" height="3" fill="#ff6b6b"/>';
+    } else {
+      const rowTip = v2TipHtml(row.lane, [
+        ['mode', 'exact'],
+        ['span', fmtTime(span)],
+        ['on_cpu_ms', row.onCPU != null ? fmtTime(row.onCPU) : '--'],
+        ['off_cpu_ms', offText],
+        ['futex_ms', futexText]
+      ], status);
+      content += '<rect class="v2-hover-target" x="' + xScale(row.start).toFixed(2) + '" y="' + (y + 7) + '" width="' + Math.max(1, xScale(row.end) - xScale(row.start)).toFixed(2) +
+        '" height="' + (rowH - 14) + '" fill="#13233d" ' + v2TipAttr(rowTip) + '/>';
+      for (const segment of row.segments) {
+        const color = segment.kind === 'futex' ? '#ff6b6b' : (segment.kind === 'offcpu' ? '#ffb703' : '#b388ff');
+        const segTip = v2TipHtml(segment.kind + ' interval', [
+          ['lane', row.lane],
+          ['start_ms', fmtTime(segment.start)],
+          ['end_ms', fmtTime(segment.end)],
+          ['duration', fmtTime(segment.end - segment.start)]
+        ], status);
+        content += '<rect class="v2-hover-target" x="' + xScale(segment.start).toFixed(2) + '" y="' + (y + 7) + '" width="' + Math.max(1, xScale(segment.end) - xScale(segment.start)).toFixed(2) +
+          '" height="' + (rowH - 14) + '" fill="' + color + '" ' + v2TipAttr(segTip) + '/>';
+      }
+    }
+    content += '<text class="v2-value-label" x="' + (V2_W - 8) + '" y="' + (y + 15) + '" text-anchor="end">off ' + esc(offText) + '</text>';
+  });
+  content += '<line class="v2-axis-line" x1="' + left + '" x2="' + (left + plotW) + '" y1="' + (top + plotH) + '" y2="' + (top + plotH) + '"/>';
+
+  const totalOff = v2Sum(rows.map((row) => row.offCPU));
+  const totalFutex = v2Sum(rows.map((row) => row.futex));
+  const notices = mode === 'aggregate'
+    ? v2Notice('aggregate 模式只展示每个 span 的 on/off-CPU 比例；off-CPU 在 span 内的真实位置不可知，因此不画精确区间。', 'warn')
+    : v2Notice('exact 模式只画 rows[].segments[] 提供的真实区间；on-CPU 位置不以推断补齐。', 'info');
+  const omittedNote = omitted > 0 ? v2Notice('显示前 ' + visible.length + ' 条 lane，另有 ' + omitted + ' 条未绘制。', 'info') : '';
+  const stats = v2Stats([
+    ['mode', mode, ''],
+    ['lanes', String(rows.length), omitted ? visible.length + ' drawn' : ''],
+    ['total off-CPU', fmtTime(totalOff), 'sum of rows'],
+    ['total futex', fmtTime(totalFutex), 'subset of off-CPU'],
+    ['segments', mode === 'exact' ? fmtCount(rows.reduce((total, row) => total + row.segments.length, 0)) : 'n/a', mode === 'aggregate' ? 'aggregate only' : 'exact intervals']
+  ]);
+  const legend = mode === 'aggregate'
+    ? [['#2ec4b6', 'on-CPU share'], ['#ffb703', 'off-CPU share'], ['#ff6b6b', 'futex subset']]
+    : [['#ffb703', 'off-CPU interval'], ['#ff6b6b', 'futex interval'], ['#b388ff', 'other interval']];
+  return notices + omittedNote + v2Svg(height, content, 'off-CPU ribbon') + stats + v2Legend(legend, status, mode + ' mode');
+}
+
+function v2TreemapLayout(items, x, y, width, height) {
+  const total = v2Sum(items.map((item) => item.value));
+  if (!(total > 0) || !items.length) return [];
+  const horizontal = width >= height;
+  const gap = 1.5;
+  let cursor = horizontal ? x : y;
+  return items.map((item, index) => {
+    const fraction = item.value / total;
+    const rawSize = horizontal ? width * fraction : height * fraction;
+    const size = Math.max(2, rawSize - (index < items.length - 1 ? gap : 0));
+    const rect = horizontal
+      ? { x: cursor, y, width: size, height }
+      : { x, y: cursor, width, height: size };
+    cursor += rawSize;
+    return { item, rect };
+  });
+}
+
+function v2RenderTreemap(view, status) {
+  const root = view && view.root;
+  if (!root || typeof root !== 'object') return v2IncompleteBody('operator_treemap.root 缺失；未绘制空 treemap。', status);
+  const hostFallback = String(status.source || '').trim().toLowerCase() === 'host';
+  const normalize = (node, depth) => {
+    if (!node || typeof node !== 'object') return null;
+    const duration = v2Num(node.duration_ms);
+    const children = depth < 1 && Array.isArray(node.children)
+      ? node.children.map((child) => normalize(child, depth + 1)).filter((child) => child && child.value > 0)
+        .sort((left, right) => right.value - left.value).slice(0, 24)
+      : [];
+    const value = Math.max(duration != null && duration > 0 ? duration : 0, v2Sum(children.map((child) => child.value)));
+    return {
+      name: String(node.name || '(unnamed)'),
+      category: String(node.category || '').trim(),
+      kind: String(node.kind || '').trim(),
+      device: node.device == null ? '' : String(node.device),
+      stream: node.stream == null ? '' : String(node.stream),
+      count: v2Num(node.count),
+      duration,
+      children,
+      value
+    };
+  };
+  const normalizedRoot = normalize(root, 0);
+  if (!normalizedRoot || !(normalizedRoot.value > 0)) {
+    return v2IncompleteBody('root 没有正的 duration_ms/count 聚合；不生成示意矩形。', status);
+  }
+  let topNodes = normalizedRoot.children.length ? normalizedRoot.children : [Object.assign({}, normalizedRoot, { children: [] })];
+  topNodes = topNodes.slice(0, 24);
+  const total = Math.max(normalizedRoot.value, v2Sum(topNodes.map((node) => node.value)));
+  const left = 5;
+  const top = 5;
+  const width = V2_W - 10;
+  const heightPx = 272;
+  const plotH = heightPx - 10;
+  const topRects = v2TreemapLayout(topNodes.map((node, index) => ({ node, index, value: node.value })), left, top, width, plotH);
+  let content = '<rect x="' + left + '" y="' + top + '" width="' + width + '" height="' + plotH + '" rx="4" fill="rgba(8,14,26,.34)"/>';
+  let rendered = 0;
+  const categorySet = new Map();
+  const nodeTip = (node, depth, share) => v2TipHtml(node.name, [
+    ['hierarchy', depth === 0 ? 'root child' : 'sub-operator'],
+    ['category', node.category || '--'],
+    ['kind', node.kind || '--'],
+    ['device / stream', (node.device || '--') + ' / ' + (node.stream || '--')],
+    ['duration_ms', node.duration != null ? fmtTime(node.duration) : 'aggregated'],
+    ['count', node.count != null ? fmtCount(node.count) : '--'],
+    ['share of root', fmtPct(share * 100)],
+    ['source class', hostFallback ? 'host function fallback; not msPTI operator time' : 'msPTI device operator aggregation']
+  ], status);
+  topRects.forEach((entry, index) => {
+    const node = entry.item.node;
+    const rect = entry.rect;
+    const key = hostFallback ? (node.category || node.name) : (node.kind || node.category || node.name);
+    const color = v2Color(key, index);
+    if (!categorySet.has(key)) categorySet.set(key, color);
+    const share = total > 0 ? node.value / total : 0;
+    content += '<rect class="v2-hover-target" x="' + rect.x.toFixed(2) + '" y="' + rect.y.toFixed(2) + '" width="' + Math.max(1, rect.width).toFixed(2) +
+      '" height="' + Math.max(1, rect.height).toFixed(2) + '" rx="2" fill="' + color + '" fill-opacity=".74" stroke="#07101f" stroke-width="1" ' +
+      v2TipAttr(nodeTip(node, 0, share)) + '/>';
+    rendered++;
+    if (rect.width > 48 && rect.height > 18) {
+      content += '<text class="v2-bar-label" x="' + (rect.x + 5).toFixed(2) + '" y="' + (rect.y + 14).toFixed(2) + '">' + esc(v2ClipText(node.name, Math.max(4, Math.floor(rect.width / 6.2)))) + '</text>';
+      if (rect.height > 32) content += '<text class="v2-bar-sub" x="' + (rect.x + 5).toFixed(2) + '" y="' + (rect.y + 25).toFixed(2) + '">' + esc(fmtPct(share * 100)) + '</text>';
+    }
+    if (node.children.length && rect.width > 90 && rect.height > 58) {
+      const innerX = rect.x + 3;
+      const innerY = rect.y + 29;
+      const innerW = rect.width - 6;
+      const innerH = rect.height - 33;
+      const children = node.children.slice(0, 10);
+      const childTotal = v2Sum(children.map((child) => child.value));
+      const childRects = v2TreemapLayout(children.map((child, childIndex) => ({ node: child, index: childIndex, value: child.value })), innerX, innerY, innerW, innerH);
+      for (const childEntry of childRects) {
+        if (childEntry.rect.width < 1 || childEntry.rect.height < 1) continue;
+        const child = childEntry.item.node;
+        const childShare = childTotal > 0 ? child.value / childTotal : 0;
+        content += '<rect class="v2-hover-target" x="' + childEntry.rect.x.toFixed(2) + '" y="' + childEntry.rect.y.toFixed(2) + '" width="' + Math.max(1, childEntry.rect.width).toFixed(2) +
+          '" height="' + Math.max(1, childEntry.rect.height).toFixed(2) + '" rx="1.5" fill="' + color + '" fill-opacity=".38" stroke="rgba(7,16,31,.9)" ' +
+          v2TipAttr(nodeTip(child, 1, share * childShare)) + '/>';
+        rendered++;
+        if (childEntry.rect.width > 42 && childEntry.rect.height > 16) {
+          content += '<text class="v2-bar-sub" x="' + (childEntry.rect.x + 3).toFixed(2) + '" y="' + (childEntry.rect.y + 12).toFixed(2) + '">' +
+            esc(v2ClipText(child.name, Math.max(3, Math.floor(childEntry.rect.width / 5.8)))) + '</text>';
+        }
+      }
+    }
+  });
+  const stats = v2Stats([
+    ['root', v2ClipText(root.name || '--', 22), ''],
+    ['duration_ms', normalizedRoot.duration != null ? fmtTime(normalizedRoot.duration) : fmtTime(normalizedRoot.value), ''],
+    ['calls', normalizedRoot.count != null ? fmtCount(normalizedRoot.count) : '--', ''],
+    ['top nodes', String(topNodes.length), rendered + ' rectangles drawn'],
+    ['source class', hostFallback ? 'host fallback' : 'msPTI device', hostFallback ? 'not operator-level' : 'KERNEL/MEMCPY/HCCL']
+  ]);
+  const legend = Array.from(categorySet.entries()).slice(0, 7).map(([label, color]) => [color, label]);
+  const notices = hostFallback ? v2Notice('source=host：这是 host 函数/类别聚合，不是 msPTI 算子执行时间，不能按“算子 Treemap”解读。', 'warn') : '';
+  return notices + v2Svg(heightPx, content, 'operator treemap') + stats +
+    v2Legend(legend, status, hostFallback ? 'host fallback · not operator-level' : 'msPTI operator aggregation');
+}
+
+function v2RenderRoofline(view, status) {
+  const peakTFLOPS = v2Num(view.peak_tflops);
+  const peakGBPS = v2Num(view.peak_gbps);
+  if (!(peakTFLOPS > 0) || !(peakGBPS > 0)) {
+    return v2IncompleteBody('peak_tflops / peak_gbps 缺失或非正；没有显式峰值就不画假 roofline。', status);
+  }
+  const points = (Array.isArray(view.points) ? view.points : [])
+    .map((point) => ({
+      raw: point,
+      op: String((point && point.op) || '(unnamed op)'),
+      category: String((point && point.category) || ''),
+      intensity: v2Num(point && point.arithmetic_intensity),
+      tflops: v2Num(point && point.achieved_tflops),
+      gbps: v2Num(point && point.achieved_gbps),
+      duration: v2Num(point && point.duration_ms),
+      flops: v2Num(point && point.flops),
+      bytes: v2Num(point && point.bytes),
+      bound: String((point && point.bound) || '').toLowerCase()
+    }))
+    .filter((point) => point.intensity > 0 && point.tflops > 0)
+    .sort((left, right) => left.intensity - right.intensity);
+  if (!points.length) return v2IncompleteBody('points[] 没有正的 arithmetic_intensity 与 achieved_tflops；不补理论点。', status);
+
+  const ridge = peakTFLOPS * 1000 / peakGBPS;
+  const xValues = points.map((point) => point.intensity).concat([ridge]);
+  const yValues = points.map((point) => point.tflops).concat([peakTFLOPS]);
+  let xMin = Math.min(...xValues);
+  let xMax = Math.max(...xValues);
+  let yMin = Math.min(...yValues);
+  let yMax = Math.max(...yValues);
+  xMin = Math.pow(10, Math.floor(Math.log10(Math.max(1e-12, xMin * 0.8))));
+  xMax = Math.pow(10, Math.ceil(Math.log10(Math.max(xMin * 1.1, xMax * 1.25))));
+  yMin = Math.pow(10, Math.floor(Math.log10(Math.max(1e-12, yMin * 0.8))));
+  yMax = Math.pow(10, Math.ceil(Math.log10(Math.max(yMin * 1.1, yMax * 1.25))));
+  const left = 66;
+  const right = 24;
+  const top = 27;
+  const bottom = 42;
+  const plotW = V2_W - left - right;
+  const plotH = 206;
+  const height = top + plotH + bottom;
+  const xScale = v2LogScale(xMin, xMax, left, left + plotW);
+  const yScale = v2LogScale(yMin, yMax, top + plotH, top);
+  let content = '<rect x="' + left + '" y="' + top + '" width="' + plotW + '" height="' + plotH + '" rx="3" fill="rgba(8,14,26,.34)"/>';
+
+  for (const tick of v2LogTicks(xMin, xMax, 9)) {
+    const x = xScale(tick);
+    content += '<line class="v2-grid-line" x1="' + x.toFixed(2) + '" x2="' + x.toFixed(2) + '" y1="' + top + '" y2="' + (top + plotH) + '"/>';
+    content += '<text class="v2-tick" x="' + x.toFixed(2) + '" y="' + (top + plotH + 17) + '" text-anchor="middle">' + esc(v2FormatAxisNumber(tick)) + '</text>';
+  }
+  for (const tick of v2LogTicks(yMin, yMax, 9)) {
+    const y = yScale(tick);
+    content += '<line class="v2-grid-line" x1="' + left + '" x2="' + (left + plotW) + '" y1="' + y.toFixed(2) + '" y2="' + y.toFixed(2) + '"/>';
+    content += '<text class="v2-tick" x="' + (left - 8) + '" y="' + (y + 3).toFixed(2) + '" text-anchor="end">' + esc(v2FormatAxisNumber(tick)) + '</text>';
+  }
+  content += '<line class="v2-axis-line" x1="' + left + '" x2="' + (left + plotW) + '" y1="' + (top + plotH) + '" y2="' + (top + plotH) + '"/>';
+  content += '<text class="v2-axis-label" x="' + left + '" y="14">achieved TFLOPS · log</text>';
+  content += '<text class="v2-axis-label" x="' + (left + plotW) + '" y="' + (top + plotH + 34) + '" text-anchor="end">arithmetic intensity (FLOP/byte) · log</text>';
+
+  const memoryStart = Math.max(xMin, yMin * 1000 / peakGBPS);
+  const memoryEnd = Math.min(xMax, ridge);
+  if (memoryEnd > memoryStart) {
+    const vertices = [];
+    for (let index = 0; index <= 50; index++) {
+      const ratio = index / 50;
+      const x = Math.pow(10, Math.log10(memoryStart) + (Math.log10(memoryEnd) - Math.log10(memoryStart)) * ratio);
+      const y = Math.min(peakTFLOPS, x * peakGBPS / 1000);
+      if (y >= yMin && y <= yMax) vertices.push({ x: xScale(x), y: yScale(y) });
+    }
+    if (vertices.length) content += '<path d="' + v2LinePath(vertices) + '" fill="none" stroke="#4cc9f0" stroke-width="1.8" stroke-dasharray="6 4" opacity=".9"/>';
+  }
+  if (ridge >= xMin && ridge <= xMax) {
+    const computeEnd = xMax;
+    const ridgeX = xScale(Math.max(ridge, xMin));
+    content += '<line x1="' + ridgeX.toFixed(2) + '" x2="' + xScale(computeEnd).toFixed(2) + '" y1="' + yScale(peakTFLOPS).toFixed(2) +
+      '" y2="' + yScale(peakTFLOPS).toFixed(2) + '" stroke="#ffb703" stroke-width="1.8" stroke-dasharray="6 4" opacity=".9"/>';
+    content += '<line class="v2-zero-line" x1="' + ridgeX.toFixed(2) + '" x2="' + ridgeX.toFixed(2) + '" y1="' + top + '" y2="' + (top + plotH) + '"/>';
+    content += '<text class="v2-tick" x="' + (ridgeX + 4).toFixed(2) + '" y="' + (top + 11) + '" fill="#ffb703">ridge</text>';
+  }
+
+  points.forEach((point, index) => {
+    const color = point.bound === 'compute' ? '#ffb703' : (point.bound === 'memory' ? '#4cc9f0' : '#b388ff');
+    const x = xScale(point.intensity);
+    const y = yScale(point.tflops);
+    const tip = v2TipHtml(point.op, [
+      ['category', point.category || '--'],
+      ['duration_ms', point.duration != null ? fmtTime(point.duration) : '--'],
+      ['arithmetic_intensity', v2FormatAxisNumber(point.intensity) + ' FLOP/byte'],
+      ['achieved_tflops', v2FormatAxisNumber(point.tflops) + ' TFLOPS'],
+      ['achieved_gbps', point.gbps != null ? v2FormatAxisNumber(point.gbps) + ' GB/s' : '--'],
+      ['flops / bytes', (point.flops != null ? v2FormatAxisNumber(point.flops) : '--') + ' / ' + (point.bytes != null ? v2FormatAxisNumber(point.bytes) : '--')],
+      ['bound (contract)', point.bound || '--']
+    ], status);
+    content += '<circle class="v2-point" cx="' + x.toFixed(2) + '" cy="' + y.toFixed(2) + '" r="4.2" fill="' + color + '"/>';
+    content += '<circle class="v2-hover-target" cx="' + x.toFixed(2) + '" cy="' + y.toFixed(2) + '" r="10" fill="rgba(0,0,0,0)" ' + v2TipAttr(tip) + '/>';
+    if (index < 5) {
+      content += '<text class="v2-bar-sub" x="' + (x + 7).toFixed(2) + '" y="' + (y - 5).toFixed(2) + '">' + esc(v2ClipText(point.op, 18)) + '</text>';
+    }
+  });
+
+  const stats = v2Stats([
+    ['peak_tflops', v2FormatAxisNumber(peakTFLOPS), 'explicit ceiling'],
+    ['peak_gbps', v2FormatAxisNumber(peakGBPS), 'explicit ceiling'],
+    ['dtype', view.dtype || '--', ''],
+    ['ridge intensity', v2FormatAxisNumber(ridge), 'peak_tflops × 1000 / peak_gbps'],
+    ['measured ops', String(points.length), 'only complete per-op points']
+  ]);
+  return v2Svg(height, content, 'roofline plot') + stats +
+    v2Legend([['#4cc9f0', 'memory roof'], ['#ffb703', 'compute roof'], ['#b388ff', 'measured bound unspecified']], status,
+      'roof lines use explicit peaks; dots are measured per-op evidence only');
+}
+
+function v2RenderABDiff(view, status) {
+  const significant = new Set((Array.isArray(view.significant) ? view.significant : []).map((name) => String(name)));
+  const rows = [];
+  const append = (items, kind) => {
+    for (const item of Array.isArray(items) ? items : []) {
+      const name = String((item && (item.name || item.function)) || '').trim();
+      const bDelta = v2Num(item && item.b_delta_pct);
+      if (!name || bDelta == null) continue;
+      rows.push({
+        kind,
+        name,
+        aDelta: v2Num(item.a_delta_pct),
+        bDelta,
+        difference: v2Num(item.difference),
+        isSignificant: significant.has(name)
+      });
+    }
+  };
+  append(view.metrics, 'metric');
+  append(view.functions, 'function');
+  if (!rows.length) return v2IncompleteBody('metrics[] / functions[] 没有可绘制的 b_delta_pct；不生成空差分轴。', status);
+  rows.sort((left, right) => Number(right.isSignificant) - Number(left.isSignificant) || Math.abs(right.bDelta) - Math.abs(left.bDelta));
+  const maxRows = 12;
+  const visible = rows.slice(0, maxRows);
+  const omitted = rows.length - visible.length;
+  const maxAbs = Math.max(5, ...visible.map((row) => Math.abs(row.bDelta)));
+  const left = 236;
+  const right = 52;
+  const top = 28;
+  const rowH = 23;
+  const bottom = 36;
+  const plotW = V2_W - left - right;
+  const plotH = visible.length * rowH;
+  const height = top + plotH + bottom;
+  const zeroX = left + plotW / 2;
+  const xScale = v2LinearScale(-maxAbs, maxAbs, left, left + plotW);
+  let content = '<rect x="' + left + '" y="' + top + '" width="' + plotW + '" height="' + plotH + '" rx="3" fill="rgba(8,14,26,.34)"/>';
+  for (const tick of v2Ticks(-maxAbs, maxAbs, 4)) {
+    const x = xScale(tick);
+    content += '<line class="v2-grid-line" x1="' + x.toFixed(2) + '" x2="' + x.toFixed(2) + '" y1="' + top + '" y2="' + (top + plotH) + '"/>';
+    content += '<text class="v2-tick" x="' + x.toFixed(2) + '" y="' + (top + plotH + 17) + '" text-anchor="middle">' + esc(v2FormatSignedPct(tick)) + '</text>';
+  }
+  content += '<line class="v2-zero-line" x1="' + zeroX.toFixed(2) + '" x2="' + zeroX.toFixed(2) + '" y1="' + top + '" y2="' + (top + plotH) + '"/>';
+  content += '<text class="v2-axis-label" x="' + left + '" y="14">B vs A · percent change</text>';
+
+  visible.forEach((row, index) => {
+    const y = top + index * rowH;
+    if (index % 2 === 0) content += '<rect x="' + left + '" y="' + y + '" width="' + plotW + '" height="' + rowH + '" fill="rgba(36,54,83,.12)"/>';
+    const kindColor = row.kind === 'metric' ? '#4cc9f0' : '#b388ff';
+    content += '<text class="v2-bar-sub" x="10" y="' + (y + 15) + '" fill="' + kindColor + '">' + esc(row.kind) + '</text>';
+    content += '<text class="v2-bar-label" x="68" y="' + (y + 15) + '">' + esc(v2ClipText((row.isSignificant ? '★ ' : '') + row.name, 27)) + '</text>';
+    const x2 = xScale(row.bDelta);
+    const barX = Math.min(zeroX, x2);
+    const barW = Math.max(1, Math.abs(x2 - zeroX));
+    const color = row.bDelta >= 0 ? '#ffb703' : '#4cc9f0';
+    const tip = v2TipHtml(row.name, [
+      ['kind', row.kind],
+      ['B vs A', v2FormatSignedPct(row.bDelta)],
+      ['A vs B', row.aDelta != null ? v2FormatSignedPct(row.aDelta) : '--'],
+      ['difference (B-A)', row.difference != null ? v2FormatAxisNumber(row.difference) : '--'],
+      ['significant[]', row.isSignificant ? 'yes' : 'no']
+    ], status);
+    content += '<rect class="v2-hover-target" x="' + barX.toFixed(2) + '" y="' + (y + 5) + '" width="' + barW.toFixed(2) + '" height="' + (rowH - 10) + '" rx="2" fill="' + color + '" fill-opacity=".82" ' + v2TipAttr(tip) + '/>';
+    content += '<text class="v2-value-label" x="' + (V2_W - 7) + '" y="' + (y + 15) + '" text-anchor="end">' + esc(v2FormatSignedPct(row.bDelta)) + '</text>';
+  });
+  content += '<line class="v2-axis-line" x1="' + left + '" x2="' + (left + plotW) + '" y1="' + (top + plotH) + '" y2="' + (top + plotH) + '"/>';
+  const notices = omitted > 0 ? v2Notice('按显著性与绝对差排序，显示前 ' + visible.length + ' 行，另有 ' + omitted + ' 行未绘制。', 'info') : '';
+  const stats = v2Stats([
+    ['A run', v2ClipText(view.a_run || '--', 22), ''],
+    ['B run', v2ClipText(view.b_run || '--', 22), ''],
+    ['workload_id', v2ClipText(view.workload_id || '--', 24), ''],
+    ['rows', String(rows.length), visible.length + ' drawn'],
+    ['significant[]', String(significant.size), 'from contract, not recomputed']
+  ]);
+  return notices + v2Svg(height, content, 'A B differential') + stats +
+    v2Legend([['#ffb703', 'B > A'], ['#4cc9f0', 'B < A'], ['#ffd166', '★ significant', false]], status, 'values use b_delta_pct; significance is contract-provided');
+}
+
+function v2RenderChangePoint(view, status) {
+  const points = (Array.isArray(view.points) ? view.points : [])
+    .map((point) => ({
+      time: v2Num(point && point.time_ms),
+      metric: String((point && point.metric) || 'metric'),
+      before: v2Num(point && point.before),
+      after: v2Num(point && point.after),
+      delta: v2Num(point && point.delta_pct),
+      score: v2Num(point && point.score),
+      method: String((point && point.method) || view.method || '')
+    }))
+    .filter((point) => point.time != null && point.delta != null)
+    .sort((left, right) => left.time - right.time);
+  const events = (Array.isArray(view.events) ? view.events : [])
+    .map((event) => ({
+      time: v2Num(event && event.time_ms),
+      label: String((event && event.label) || 'event'),
+      source: String((event && event.source) || '')
+    }))
+    .filter((event) => event.time != null)
+    .sort((left, right) => left.time - right.time);
+  const series = (Array.isArray(view.series) ? view.series : [])
+    .map((item, index) => ({
+      index,
+      name: String((item && item.name) || ('series ' + (index + 1))),
+      values: (Array.isArray(item && item.values) ? item.values : []).map(v2Num).filter((value) => value != null)
+    }))
+    .filter((item) => item.values.length > 0);
+  if (!points.length && !events.length && !series.length) {
+    return v2IncompleteBody('series[] / points[] / events[] 均为空；未绘制空变化点时间轴。', status);
+  }
+
+  const metrics = Array.from(new Set(points.map((point) => point.metric)));
+  const metricColor = new Map(metrics.map((name, index) => [name, v2Color(name, index + 3)]));
+  let timelineHtml = '';
+  let timelineHeight = 0;
+  const times = points.map((point) => point.time).concat(events.map((event) => event.time));
+  if (times.length) {
+    let xMin = Math.min(...times);
+    let xMax = Math.max(...times);
+    if (xMin === xMax) {
+      const pad = Math.max(1000, Math.abs(xMin) * 0.05);
+      xMin -= pad;
+      xMax += pad;
+    } else {
+      const pad = (xMax - xMin) * 0.035;
+      xMin -= pad;
+      xMax += pad;
+    }
+    const left = 62;
+    const right = 24;
+    const top = points.length ? 25 : 20;
+    const bottom = 34;
+    const plotW = V2_W - left - right;
+    const plotH = points.length ? 154 : 54;
+    timelineHeight = top + plotH + bottom;
+    const xScale = v2LinearScale(xMin, xMax, left, left + plotW);
+    let content = '<rect x="' + left + '" y="' + top + '" width="' + plotW + '" height="' + plotH + '" rx="3" fill="rgba(8,14,26,.34)"/>';
+    for (const tick of v2Ticks(xMin, xMax, 5)) {
+      const x = xScale(tick);
+      content += '<line class="v2-grid-line" x1="' + x.toFixed(2) + '" x2="' + x.toFixed(2) + '" y1="' + top + '" y2="' + (top + plotH) + '"/>';
+      content += '<text class="v2-tick" x="' + x.toFixed(2) + '" y="' + (top + plotH + 17) + '" text-anchor="middle">' + esc(fmtTime(tick)) + '</text>';
+    }
+    let yScale = null;
+    let zeroY = top + plotH / 2;
+    if (points.length) {
+      let deltaMin = Math.min(0, ...points.map((point) => point.delta));
+      let deltaMax = Math.max(0, ...points.map((point) => point.delta));
+      if (deltaMin === deltaMax) {
+        deltaMin -= 1;
+        deltaMax += 1;
+      } else {
+        const pad = (deltaMax - deltaMin) * 0.12;
+        deltaMin -= pad;
+        deltaMax += pad;
+      }
+      yScale = v2LinearScale(deltaMin, deltaMax, top + plotH, top);
+      zeroY = yScale(0);
+      for (const tick of v2Ticks(deltaMin, deltaMax, 4)) {
+        const y = yScale(tick);
+        content += '<line class="v2-grid-line" x1="' + left + '" x2="' + (left + plotW) + '" y1="' + y.toFixed(2) + '" y2="' + y.toFixed(2) + '"/>';
+        content += '<text class="v2-tick" x="' + (left - 8) + '" y="' + (y + 3).toFixed(2) + '" text-anchor="end">' + esc(v2FormatSignedPct(tick)) + '</text>';
+      }
+      content += '<line class="v2-zero-line" x1="' + left + '" x2="' + (left + plotW) + '" y1="' + zeroY.toFixed(2) + '" y2="' + zeroY.toFixed(2) + '"/>';
+    }
+    content += '<line class="v2-axis-line" x1="' + left + '" x2="' + (left + plotW) + '" y1="' + (top + plotH) + '" y2="' + (top + plotH) + '"/>';
+    content += '<text class="v2-axis-label" x="' + left + '" y="13">' + (points.length ? 'change magnitude · delta_pct' : 'event rail') + '</text>';
+    content += '<text class="v2-axis-label" x="' + (left + plotW) + '" y="' + (top + plotH + 30) + '" text-anchor="end">time_ms</text>';
+
+    events.slice(0, 24).forEach((event, index) => {
+      const x = xScale(event.time);
+      const tip = v2TipHtml(event.label, [
+        ['time_ms', fmtTime(event.time)],
+        ['event source', event.source || '--'],
+        ['causality', 'annotation only; event point is not causal proof']
+      ], status);
+      content += '<line x1="' + x.toFixed(2) + '" x2="' + x.toFixed(2) + '" y1="' + top + '" y2="' + (top + plotH) + '" stroke="#b388ff" stroke-dasharray="3 3" opacity=".75"/>';
+      content += '<circle class="v2-hover-target" cx="' + x.toFixed(2) + '" cy="' + (top + plotH).toFixed(2) + '" r="5" fill="#b388ff" ' + v2TipAttr(tip) + '/>';
+      if (index < 8 && events.length <= 12) content += '<text class="v2-bar-sub" x="' + (x + 4).toFixed(2) + '" y="' + (top + 11 + (index % 2) * 11) + '">' + esc(v2ClipText(event.label, 18)) + '</text>';
+    });
+
+    if (points.length) {
+      for (const point of points) {
+        const x = xScale(point.time);
+        const y = yScale(point.delta);
+        const color = metricColor.get(point.metric) || '#ffb703';
+        const tip = v2TipHtml(point.metric + ' change point', [
+          ['time_ms', fmtTime(point.time)],
+          ['method', point.method || view.method || '--'],
+          ['before', point.before != null ? v2FormatAxisNumber(point.before) : '--'],
+          ['after', point.after != null ? v2FormatAxisNumber(point.after) : '--'],
+          ['delta_pct', v2FormatSignedPct(point.delta)],
+          ['score', point.score != null ? v2FormatAxisNumber(point.score) : '--'],
+          ['band width', 'visual marker only; contract has no anomaly duration']
+        ], status);
+        content += '<rect class="v2-band" x="' + (x - 3.5).toFixed(2) + '" y="' + top + '" width="7" height="' + plotH + '" fill="rgba(255,183,3,.08)"/>';
+        content += '<line x1="' + x.toFixed(2) + '" x2="' + x.toFixed(2) + '" y1="' + zeroY.toFixed(2) + '" y2="' + y.toFixed(2) + '" stroke="' + color + '" stroke-width="1.3" opacity=".8"/>';
+        content += '<circle class="v2-point" cx="' + x.toFixed(2) + '" cy="' + y.toFixed(2) + '" r="3.5" fill="' + color + '"/>';
+        content += '<circle class="v2-hover-target" cx="' + x.toFixed(2) + '" cy="' + y.toFixed(2) + '" r="9" fill="rgba(0,0,0,0)" ' + v2TipAttr(tip) + '/>';
+      }
+    }
+    timelineHtml = v2Svg(timelineHeight, content, 'change point and event timeline');
+  }
+
+  const visibleSeries = series.slice(0, 4);
+  const sparkHtml = visibleSeries.length ? '<div class="v2-spark-grid">' + visibleSeries.map((item) => {
+    const color = v2Color(item.name, item.index);
+    const min = Math.min(...item.values);
+    const max = Math.max(...item.values);
+    const width = 300;
+    const height = 44;
+    const xScale = v2LinearScale(0, Math.max(1, item.values.length - 1), 4, width - 4);
+    const yScale = v2LinearScale(min === max ? min - 1 : min, min === max ? max + 1 : max, height - 4, 4);
+    const path = v2LinePath(item.values.map((value, index) => ({ x: xScale(index), y: yScale(value) })));
+    const tip = v2TipHtml(item.name, [
+      ['series samples', String(item.values.length)],
+      ['min / max', v2FormatAxisNumber(min) + ' / ' + v2FormatAxisNumber(max)],
+      ['x mapping', 'sample index; series[] has no timestamps in the frozen contract']
+    ], status);
+    return '<div class="v2-spark"><div class="v2-spark-head"><span class="fn">' + esc(v2ClipText(item.name, 28)) +
+      '</span><span>' + esc(v2FormatAxisNumber(min)) + '–' + esc(v2FormatAxisNumber(max)) + '</span></div>' +
+      '<svg class="v2-spark-svg" viewBox="0 0 ' + width + ' ' + height + '" role="img" aria-label="' + esc(item.name + ' sparkline') + '">' +
+      '<rect width="' + width + '" height="' + height + '" fill="rgba(0,0,0,0)" class="v2-hover-target" ' + v2TipAttr(tip) + '/>' +
+      '<path d="' + path + '" fill="none" stroke="' + color + '" stroke-width="1.6"/></svg></div>';
+  }).join('') + '</div>' : '';
+
+  const notices = [];
+  if (!points.length) notices.push(v2Notice('没有变化点；只展示契约中的 series/event 证据，不推断异常区间。', 'info'));
+  if (!events.length) notices.push(v2Notice('events[] 为空；不可把变化点本身解释为部署或故障事件。', 'info'));
+  if (series.length > visibleSeries.length) notices.push(v2Notice('series sparkline 仅显示前 ' + visibleSeries.length + ' 条，另有 ' + (series.length - visibleSeries.length) + ' 条未绘制。', 'info'));
+  if (series.length) notices.push(v2Notice('series[] 没有时间戳字段；sparkline 的横轴是样本顺序，不与上方 time_ms 轴做伪造对齐。', 'warn'));
+  const stats = v2Stats([
+    ['method', v2ClipText(view.method || (points[0] && points[0].method) || '--', 26), ''],
+    ['min_samples', v2Num(view.min_samples) != null ? String(v2Num(view.min_samples)) : '--', ''],
+    ['change points', String(points.length), metrics.length + ' metrics'],
+    ['events', String(events.length), 'annotations only'],
+    ['series', String(series.length), visibleSeries.length + ' sparklines drawn']
+  ]);
+  const legend = metrics.slice(0, 6).map((name) => [metricColor.get(name), name]);
+  if (events.length) legend.push(['#b388ff', 'event annotation', true]);
+  return notices.join('') + timelineHtml + sparkHtml + stats + v2Legend(legend, status, 'change points and events are evidence annotations, not causality');
+}
+
+function v2RenderServiceTopology(view, status) {
+  const allNodes = (Array.isArray(view.nodes) ? view.nodes : [])
+    .map((node, index) => ({
+      raw: node,
+      key: String((node && (node.id || node.service)) || ''),
+      service: String((node && (node.service || node.name || node.id)) || ''),
+      name: String((node && (node.name || node.service || node.id)) || ''),
+      kind: String((node && node.kind) || 'service'),
+      nodeStatus: String((node && node.status) || ''),
+      index
+    }))
+    .filter((node) => node.key);
+  if (!allNodes.length) return v2IncompleteBody('nodes[] 为空；未绘制空服务拓扑。', status);
+  const selected = allNodes.slice(0, 24);
+  const selectedByKey = new Map(selected.map((node) => [node.key, node]));
+  const requestedRoot = String(view.root_service || '');
+  const root = selectedByKey.get(requestedRoot) || allNodes.find((node) => node.key === requestedRoot) ||
+    selected.find((node) => !(Array.isArray(view.edges) ? view.edges : []).some((edge) => String(edge && edge.to) === node.key)) || selected[0];
+  const edgeMap = new Map();
+  let invalidEdges = 0;
+  for (const edge of Array.isArray(view.edges) ? view.edges : []) {
+    const from = String((edge && edge.from) || '');
+    const to = String((edge && edge.to) || '');
+    if (!selectedByKey.has(from) || !selectedByKey.has(to)) {
+      invalidEdges++;
+      continue;
+    }
+    const key = from + '\x00' + to;
+    const calls = v2Num(edge.calls) || 0;
+    const latency = v2Num(edge.latency_ms) || 0;
+    const existing = edgeMap.get(key);
+    if (!existing) {
+      edgeMap.set(key, { from, to, calls, latency, weighted: latency * Math.max(1, calls) });
+    } else {
+      existing.calls += calls;
+      existing.latency = existing.calls > 0 ? (existing.weighted + latency * Math.max(1, calls)) / existing.calls : 0;
+    }
+  }
+  const edges = Array.from(edgeMap.values());
+  const levels = new Map([[root.key, 0]]);
+  const queue = [root.key];
+  while (queue.length) {
+    const current = queue.shift();
+    const currentLevel = levels.get(current) || 0;
+    for (const edge of edges) {
+      if (edge.from !== current || levels.has(edge.to)) continue;
+      levels.set(edge.to, currentLevel + 1);
+      queue.push(edge.to);
+    }
+  }
+  let maxLevel = Math.max(0, ...Array.from(levels.values()));
+  for (const node of selected) {
+    if (!levels.has(node.key)) {
+      maxLevel++;
+      levels.set(node.key, maxLevel);
+    }
+  }
+  const nodeW = 126;
+  const nodeH = 42;
+  const gapX = 16;
+  const gapY = 30;
+  const leftPad = 18;
+  const topPad = 25;
+  const perRow = Math.max(2, Math.floor((V2_W - 2 * leftPad + gapX) / (nodeW + gapX)));
+  const positions = new Map();
+  let cursorY = topPad;
+  const sortedLevels = Array.from(new Set(Array.from(levels.values()))).sort((a, b) => a - b);
+  for (const level of sortedLevels) {
+    const levelNodes = selected.filter((node) => levels.get(node.key) === level).sort((a, b) => a.index - b.index);
+    for (let offset = 0; offset < levelNodes.length; offset += perRow) {
+      const chunk = levelNodes.slice(offset, offset + perRow);
+      const totalW = chunk.length * nodeW + Math.max(0, chunk.length - 1) * gapX;
+      const startX = (V2_W - totalW) / 2;
+      chunk.forEach((node, index) => {
+        positions.set(node.key, {
+          node,
+          x: startX + index * (nodeW + gapX),
+          y: cursorY,
+          width: nodeW,
+          height: nodeH,
+          level
+        });
+      });
+      cursorY += nodeH + gapY;
+    }
+    cursorY += 8;
+  }
+  const height = Math.max(150, cursorY + 18);
+  let content = '<defs><marker id="v2TopArrow" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#7890ae"/></marker></defs>';
+  const maxCalls = Math.max(1, ...edges.map((edge) => edge.calls));
+  edges.forEach((edge) => {
+    const from = positions.get(edge.from);
+    const to = positions.get(edge.to);
+    if (!from || !to || from === to) return;
+    const sx = from.x + from.width / 2;
+    const sy = from.y + from.height;
+    const tx = to.x + to.width / 2;
+    const ty = to.y;
+    const movingDown = ty > sy + 8;
+    const bend = Math.max(22, Math.abs(ty - sy) * 0.34);
+    const d = movingDown
+      ? 'M ' + sx.toFixed(2) + ' ' + sy.toFixed(2) + ' C ' + sx.toFixed(2) + ' ' + (sy + bend).toFixed(2) + ', ' +
+        tx.toFixed(2) + ' ' + (ty - bend).toFixed(2) + ', ' + tx.toFixed(2) + ' ' + ty.toFixed(2)
+      : 'M ' + sx.toFixed(2) + ' ' + (from.y + from.height / 2).toFixed(2) + ' C ' + (sx + 74).toFixed(2) + ' ' +
+        (from.y + from.height / 2).toFixed(2) + ', ' + (tx + 74).toFixed(2) + ' ' + (to.y + to.height / 2).toFixed(2) + ', ' +
+        (to.x + to.width).toFixed(2) + ' ' + (to.y + to.height / 2).toFixed(2);
+    const width = 1.1 + 2.6 * (edge.calls / maxCalls);
+    const tip = v2TipHtml(edge.from + ' → ' + edge.to, [
+      ['calls', fmtCount(edge.calls)],
+      ['latency_ms mean', edge.latency > 0 ? fmtTime(edge.latency) : '--'],
+      ['scope', view.scope || 'not provided']
+    ], status);
+    content += '<path class="v2-edge" d="' + d + '" stroke-width="' + width.toFixed(2) + '" opacity=".62" marker-end="url(#v2TopArrow)"/>';
+    content += '<path d="' + d + '" fill="none" stroke="rgba(0,0,0,0)" stroke-width="12" class="v2-hover-target" ' + v2TipAttr(tip) + '/>';
+    if (edges.length <= 8) {
+      const mx = (sx + tx) / 2;
+      const my = (sy + ty) / 2;
+      content += '<text class="v2-edge-label" x="' + mx.toFixed(2) + '" y="' + my.toFixed(2) + '" text-anchor="middle">' +
+        esc(fmtCount(edge.calls)) + '× · ' + esc(edge.latency > 0 ? fmtTime(edge.latency) : '--') + '</text>';
+    }
+  });
+  positions.forEach((position) => {
+    const node = position.node;
+    const isRoot = node.key === root.key;
+    const normalizedStatus = node.nodeStatus.trim().toLowerCase();
+    const statusColor = normalizedStatus === 'error' ? '#ff6b6b' : (normalizedStatus === 'ok' ? '#2ec4b6' : '#5f7696');
+    const tip = v2TipHtml(node.name, [
+      ['service', node.service || '--'],
+      ['id', node.key],
+      ['kind', node.kind || '--'],
+      ['status', node.nodeStatus || '--'],
+      ['scope', view.scope || 'not provided'],
+      ['root', isRoot ? 'yes' : 'no']
+    ], status);
+    content += '<rect class="v2-hover-target" x="' + position.x.toFixed(2) + '" y="' + position.y.toFixed(2) + '" width="' + position.width +
+      '" height="' + position.height + '" rx="8" fill="#0c1527" stroke="' + (isRoot ? '#4cc9f0' : statusColor) +
+      '" stroke-width="' + (isRoot ? 2.2 : 1.2) + '" ' + v2TipAttr(tip) + '/>';
+    if (isRoot) content += '<rect x="' + (position.x - 4).toFixed(2) + '" y="' + (position.y - 4).toFixed(2) + '" width="' + (position.width + 8) +
+      '" height="' + (position.height + 8) + '" rx="10" fill="none" stroke="#4cc9f0" stroke-opacity=".25" stroke-dasharray="4 3"/>';
+    content += '<circle cx="' + (position.x + 10).toFixed(2) + '" cy="' + (position.y + 11).toFixed(2) + '" r="3" fill="' + statusColor + '"/>';
+    content += '<text class="v2-node-label" x="' + (position.x + 18).toFixed(2) + '" y="' + (position.y + 16).toFixed(2) + '">' + esc(v2ClipText(node.name, 17)) + '</text>';
+    content += '<text class="v2-node-sub" x="' + (position.x + 8).toFixed(2) + '" y="' + (position.y + 31).toFixed(2) + '">' +
+      esc(v2ClipText((node.kind || 'service') + (isRoot ? ' · root' : '') + (node.nodeStatus ? ' · ' + node.nodeStatus : ''), 22)) + '</text>';
+  });
+
+  const scope = String(view.scope || '').trim().toLowerCase();
+  let notices = '';
+  if (scope === 'process') notices += v2Notice('scope=process：没有跨服务 trace 边，不能宣称端到端拓扑。', 'warn');
+  else if (scope !== 'end_to_end') notices += v2Notice('scope 未提供或未知；不推断请求链路是否端到端。', 'warn');
+  if (allNodes.length > selected.length) notices += v2Notice('显示前 ' + selected.length + ' 个节点，另有 ' + (allNodes.length - selected.length) + ' 个节点未绘制。', 'info');
+  if (invalidEdges > 0) notices += v2Notice(invalidEdges + ' 条 edge 引用了未绘制/缺失节点，已忽略，未补造节点。', 'info');
+  if (!edges.length) notices += v2Notice('edges[] 为空；只绘制已观测节点，不生成依赖边。', 'info');
+
+  const stats = v2Stats([
+    ['scope', view.scope || 'not provided', ''],
+    ['root_service', v2ClipText(view.root_service || root.key || '--', 24), ''],
+    ['coverage', v2FormatCoverage(view.coverage), ''],
+    ['nodes', String(view.nodes.length), selected.length + ' drawn'],
+    ['edges', String(view.edges.length), edges.length + ' resolved']
+  ]);
+  return notices + v2Svg(height, content, 'service topology') + stats +
+    v2Legend([['#4cc9f0', 'root'], ['#2ec4b6', 'status OK'], ['#ff6b6b', 'status error'], ['#7890ae', 'edge width = calls', true]],
+      status, scope === 'process' ? 'process scope only' : 'edge geometry follows observed from/to only');
+}
+
 const metricsState = { rows: [], minT: 0, maxT: 1, crosshair: null };
 
 function fmtMetricValue(value, unit) {
@@ -1932,6 +3589,7 @@ function renderNotes() {
 function init() {
   renderMeta();
   renderKPIs();
+  renderViewsV2();
   renderTopN();
   initTimeline();
   drawScatter();

@@ -58,6 +58,7 @@
 | P1 `report` 性能仪表盘 | 完成 | 只读生成单文件离线 HTML；时间轴/散点/热力图/TopN/CDF/设备四象限，无外部依赖 |
 | 独立 metrics 采集 | 完成 | `cann-ebpf sample`；DCMI/npu-smi、进程、cgroup、主机 system、Prometheus 五类源；不修改 trace 原始证据 |
 | M1/M2 可视化增强 | 完成 | 延迟热图、次秒偏移热图、函数分位带、尾 cohort、多指标小倍数；有明确空态/降级原因 |
+| vLLM 十视图 | 完成代码 + 真实接入 | `load_latency`、`critical_path`、`summed_delay`、`slack_cdf`、`off_cpu`、`operator_treemap`、`roofline`、`ab_diff`、`change_point`、`service_topology`；严格证据缺失时显示 unavailable/inferred/partial |
 | 指标统计表/主机指标 | 完成 | metrics series 的 current/mean/p50/p95/p99/max、counter rate；`sample --system` 采集主机 CPU/load/memory/PSI/disk/net/thermal/frequency |
 | M2 off-CPU/futex 归因 | 完成并上机验证 | sched_switch + syscalls futex tracepoint、`offcpu_ns`/`futex_ns`；V4 10 秒与合成锁竞争均通过 |
 | E 层 npu-smi 硬件指标 | 完成并上机验证 | `hardware.jsonl`、manifest artifact、`hbm_pressure`；8 设备/HBM/AICore/功耗/温度 |
@@ -115,6 +116,20 @@
 - `--no-context` 2 秒实测：4 个 batch、4 个 request ID、4 条 batch span，manifest artifact 哈希校验通过，采集后 `PyObject_GetAttr` uprobe 残留为 0。
 
 边界：batch 身份是 `SchedulerOutput.num_scheduled_tokens` 的观测窗口，不是 `execute_model` 函数级入口/返回；`duration_ns` 不能当成 request 延迟或 NPU 执行时间。
+
+### 3.4.1 vLLM 十视图交付
+
+- 契约和接线在 `internal/report/views_v2.go`、`internal/report/build_views_v2.go`；CLI 参数在 `cmd/cann-ebpf/report.go`。
+- 真实 attach run：28,905 spans、217 batch spans、8 个 request ID；`spans.jsonl` SHA-256
+  `EBBFDFCF59403B413FD92C398A2CFAF25383A68D3FFE20C52A02050C6308F1FD`。
+- 真实 attach 报告：`.analysis/views2/report-views2-attach-integrated.html`。
+- 真实六档扫描：c1/c2/c4/c8/c16/c32 全部请求成功；客户端 `load.json` 和每档 metrics SHA 已记录在
+  `docs/M4-VIEWS2-VALIDATION.md`。
+- 当前活动背景请求导致六档扫描不能作为干净容量上限；报告保留真实曲线，但标记 `partial` 且不计算
+  `knee_concurrency`。
+- histogram 首帧跳过，`_created` gauge 排除；同一份相邻累计差值生成 P50/P95/P99。
+- 还没有 msPTI 设备区间、per-op `ops.jsonl`、OTel trace 或同 workload A/B run，因此严格关键路径、
+  operator exact Treemap、Roofline、A/B 和端到端拓扑不能声称完成。
 
 ### 3.5 证据链与输出
 
