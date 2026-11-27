@@ -97,9 +97,9 @@ OUT="runs/ebpf-$(date -u +%Y%m%dT%H%M%SZ)"
 - metrics 小图：CPU/内存/NPU/HBM/ECC/PCIe、Prometheus 指标
 - `metrics` 默认最多嵌入 256 个 series；超过会截断
 
-真实 V4.1 五分钟报告（296,877 host spans、72 metrics、内核栈火焰图）：
+真实 V4.1 十分钟报告（331,993 host spans、72 metrics、内核栈火焰图）：
 
-![真实 V4.1 五分钟报告](docs/images/report-demo.png)
+![真实 V4.1 十分钟报告](docs/images/report-demo.png)
 
 ## 火焰图（host 内核栈）
 
