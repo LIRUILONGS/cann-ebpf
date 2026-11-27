@@ -61,6 +61,19 @@ button { background: #13233d; color: var(--text); border: 1px solid #2c4266; bor
 button:hover { border-color: var(--accent); color: #fff; }
 .hint { color: var(--dim); font-size: 11px; margin: 2px 0 8px; }
 .chart-note { color: #8aa0bd; font-size: 11px; line-height: 1.55; margin: 8px 0 0; padding-top: 7px; border-top: 1px solid rgba(52,78,113,.55); }
+.fg-bars { display: flex; flex-direction: column; gap: 6px; margin: 4px 0 10px; }
+.fg-bar-row { display: grid; grid-template-columns: minmax(220px, 330px) minmax(0, 1fr) 100px; gap: 10px; align-items: center; font-size: 11px; }
+.fg-bar-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
+.fg-bar-name span { color: var(--dim); margin-left: 6px; }
+.fg-bar-track { height: 12px; background: rgba(52,78,113,.35); border-radius: 4px; overflow: hidden; }
+.fg-bar-track span { display: block; height: 100%; border-radius: 4px; }
+.fg-bar-value { color: var(--muted); text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.fg-donut-wrap { display: flex; gap: 22px; align-items: center; flex-wrap: wrap; margin: 4px 0 10px; }
+.fg-donut-wrap svg { flex: 0 0 auto; }
+.fg-legend-list { display: grid; grid-template-columns: repeat(2, minmax(180px, 1fr)); gap: 5px 18px; font-size: 11px; }
+.fg-legend-list div { display: flex; align-items: center; gap: 7px; color: var(--muted); }
+.fg-legend-list i { width: 9px; height: 9px; border-radius: 2px; display: inline-block; flex: 0 0 auto; }
+.fg-legend-list b { color: var(--text); font-weight: 500; margin-left: auto; font-variant-numeric: tabular-nums; }
 .scroll { max-height: 660px; overflow: auto; border-radius: 8px; }
 canvas { display: block; }
 .grid2 { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, .85fr); gap: 12px; }
@@ -4673,23 +4686,53 @@ function renderFlamegraphTable() {
   const top = (fg && Array.isArray(fg.top_npu)) ? fg.top_npu : [];
   const fgTotal = Math.max(1, Number((fg && fg.total_samples) || 0));
   if (top.length) {
-    html += '<div class="fg-subhead">Top NPU 帧</div><div class="fg-table-scroll"><table class="fg-table"><thead><tr><th>函数</th><th>模块</th><th>样本</th><th>样本%</th><th>类别</th></tr></thead><tbody>';
-    html += top.slice(0, 20).map((item) => '<tr><td class="mono">' + esc(item.name) + '</td><td class="mono">' + esc(item.module || '--') + '</td><td class="num">' + fmtCount(item.samples) + '</td><td class="num" title="出现在采样栈中的比例">' + fmtPct(fgClampPct(Number(item.samples || 0) * 100 / fgTotal)) + '</td><td>' + esc(item.category || 'npu') + '</td></tr>').join('');
-    html += '</tbody></table></div>';
+    const maxSamples = Math.max(1, ...top.map((item) => Number(item.samples) || 0));
+    html += '<div class="fg-subhead">Top NPU 帧</div><div class="fg-bars">';
+    html += top.slice(0, 20).map((item) => {
+      const samples = Number(item.samples) || 0;
+      const pct = fgClampPct(samples * 100 / fgTotal);
+      const width = Math.max(2, samples / maxSamples * 100);
+      return '<div class="fg-bar-row">' +
+        '<div class="fg-bar-name" title="' + esc(item.name) + '">' + esc(item.name) +
+        '<span>' + esc(item.module || '--') + ' · ' + esc(item.category || 'npu') + '</span></div>' +
+        '<div class="fg-bar-track"><span style="width:' + width.toFixed(2) + '%;background:' + fgColor(item.category || 'npu') + '"></span></div>' +
+        '<div class="fg-bar-value">' + fmtCount(samples) + ' · ' + fmtPct(pct) + '</div></div>';
+    }).join('');
+    html += '</div><div class="chart-note"><b>怎么看：</b>条形长度=采样命中次数，不是耗时；越长说明该内核函数出现在采样栈里的次数越多。</div>';
   } else {
     html += '<div class="fg-note">没有识别到 NPU 分类帧；unknown/other 帧仍保留在树里。</div>';
   }
   const categories = (fg && Array.isArray(fg.categories)) ? fg.categories : [];
   if (categories.length) {
-    html += '<div class="fg-subhead">类别 self 样本占比</div><div class="fg-table-scroll"><table class="fg-table"><thead><tr><th>类别</th><th>self 样本</th><th>占比</th></tr></thead><tbody>';
-    html += categories.map((item) => '<tr><td>' + esc(item.name) + '</td><td class="num">' + fmtCount(item.samples) + '</td><td class="num">' + fmtPct(fgClampPct(item.pct)) + '</td></tr>').join('');
-    html += '</tbody></table></div>';
+    const total = categories.reduce((sum, item) => sum + (Number(item.samples) || 0), 0) || 1;
+    const circumference = 2 * Math.PI * 42;
+    let offset = 0;
+    let circles = '';
+    categories.forEach((item) => {
+      const samples = Number(item.samples) || 0;
+      const pct = Math.max(0, Math.min(100, samples * 100 / total));
+      const dash = Math.max(0, Math.min(circumference, pct / 100 * circumference));
+      circles += '<circle cx="70" cy="70" r="42" fill="none" stroke="' + fgColor(item.name) +
+        '" stroke-width="18" stroke-dasharray="' + dash.toFixed(2) + ' ' + (circumference - dash).toFixed(2) +
+        '" stroke-dashoffset="' + (-offset).toFixed(2) + '" transform="rotate(-90 70 70)"><title>' +
+        esc(item.name) + ' ' + fmtPct(pct) + '</title></circle>';
+      offset += dash;
+    });
+    html += '<div class="fg-subhead">类别 self 样本占比</div><div class="fg-donut-wrap">' +
+      '<svg width="140" height="140" viewBox="0 0 140 140" role="img" aria-label="类别 self 样本占比">' +
+      circles + '<text x="70" y="66" text-anchor="middle" fill="#e6edf7" font-size="12">self</text>' +
+      '<text x="70" y="82" text-anchor="middle" fill="#8aa0bd" font-size="10">samples</text></svg>' +
+      '<div class="fg-legend-list">' + categories.map((item) => {
+        const pct = Math.max(0, Math.min(100, (Number(item.samples) || 0) * 100 / total));
+        return '<div><i style="background:' + fgColor(item.name) + '"></i><span>' + esc(item.name) + '</span><b>' +
+          fmtCount(item.samples) + ' · ' + fmtPct(pct) + '</b></div>';
+      }).join('') + '</div></div>';
   }
   const warnings = (fg && Array.isArray(fg.warnings)) ? fg.warnings : [];
   if (warnings.length) {
     html += '<div class="fg-subhead">栈采样告警</div><ul class="fg-warnings">' + warnings.map((warning) => '<li>' + esc(warning) + '</li>').join('') + '</ul>';
   }
-  if (!html) html = '<div class="fg-note">没有可展示的栈统计表。</div>';
+  if (!html) html = '<div class="fg-note">没有可展示的栈统计。</div>';
   host.innerHTML = html;
 }
 
