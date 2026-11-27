@@ -16,7 +16,7 @@ import (
 	"cann-ebpf/internal/elfutil"
 )
 
-const toolVersion = "0.6.0-m2"
+const toolVersion = "0.7.0"
 
 func main() {
 	os.Exit(run(os.Args[1:]))
