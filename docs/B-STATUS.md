@@ -49,7 +49,11 @@
 - **B4（真实 HCCL correlationId）失败**：见上，容器 HCCL 网络初始化失败，未产生 device 记录。
 - **B3（固定负载门禁）本次未重跑**：B1 失败后优先恢复 V4 并切 V4.1；保留
   `docs/B3-ONLINE-OVERHEAD.md` 的在线 smoke 结论，正式门禁仍待受控环境。
-- **V4.1 切换**：V4 已停，`orinfer-v41` 启动中；完成后以 `127.0.0.1:8000/health` 为准。
+- **V4.1 切换完成**：V4 已停，`orinfer-v41` active，`127.0.0.1:8000/health` 200，
+  `/v1/models` 返回 `deepseek-v4.1`；collector env block 已移除，无 device 文件。
+- **B2 Orinfer 采集**：`m5_capture` 成功（health 200，0 错误），但 10 秒窗口 `spans=0`；
+  说明 Orinfer 侧无实际 CANN 调用或 profile 未匹配到目标，`compare-v4-v41.md` 只有 V4 数据。
+  B2 仍需在 Orinfer 有真实负载时重采，不能据此下 A/B 结论。
 
 ## 可以在不停机下继续做的
 
