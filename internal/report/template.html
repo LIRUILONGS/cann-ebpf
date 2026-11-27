@@ -742,10 +742,7 @@ function renderKPIs() {
   const cards = [
     ['span / 线程 / 进程', fmtCount(s.spans), s.tids + ' TID · ' + s.pids + ' PID'],
     ['p50 / p95 / p99', fmtTime(s.p50_ms) + ' / ' + fmtTime(s.p95_ms) + ' / ' + fmtTime(s.p99_ms), 'max ' + fmtTime(s.max_ms)],
-    ['慢调用', fmtCount(s.slow_spans), '阈值 ' + fmtTime(s.slow_threshold_ms)],
-    ['设备匹配率', s.device_spans ? fmtPct(s.device_match_rate * 100) : '--', s.device_spans ? '慢 Sync ' + fmtPct(s.device_slow_sync_rate * 100) : '没有 device.jsonl'],
-    ['设备忙时长', s.device_spans ? fmtTime(s.device_busy_ms) : '--', s.device_spans ? fmtCount(s.device_spans) + ' device spans' : '设备图不可用'],
-    ['dropped / trace', fmtCount(s.dropped_events) + ' / ' + fmtCount(s.trace_spans), s.trace_spans ? '有 trace 上下文' : '没有 trace，不能按 request 下钻']
+    ['慢调用', fmtCount(s.slow_spans), '阈值 ' + fmtTime(s.slow_threshold_ms)]
   ];
   $('#kpis').innerHTML = cards.map((card) => '<div class="kpi"><div class="kpi-label">' + esc(card[0]) + '</div><div class="kpi-value">' + card[1] + '</div><div class="kpi-sub">' + esc(card[2]) + '</div></div>').join('');
 }
@@ -753,13 +750,6 @@ function renderKPIs() {
 function renderCoverageBanner() {
   const host = $('#coverageBanner');
   if (!host) return;
-  const views = Object.keys(VIEWS_V2).map((key) => VIEWS_V2[key]).filter((view) => view && view.status);
-  const availableViews = views.filter((view) => view.status.available === true).length;
-  const viewState = views.length ? (availableViews + ' / ' + views.length + ' 视图可用') : '没有 views_v2 证据';
-  const viewSub = views.length
-    ? (views.length - availableViews) + ' 个视图缺证据；报告里保留 unavailable 原因，不补画'
-    : '没有可判定的视图状态';
-
   const metrics = METRICS || {};
   const series = Array.isArray(metrics.series) ? metrics.series : [];
   const rendered = Number(metrics.rendered_series || series.length || 0);
@@ -781,18 +771,8 @@ function renderCoverageBanner() {
   if (!metricParts.length) metricParts.push(metrics.reason || '未采集 metrics');
   const metricSub = metricParts.join(' · ');
 
-  const summary = DATA.summary || {};
-  const evidenceState = summary.device_spans ? 'device 已接入' : 'device 未接入';
-  const evidenceSub = [
-    'trace ' + (summary.trace_spans ? '已接入' : '未接入'),
-    'dropped ' + fmtCount(summary.dropped_events),
-    summary.spans ? fmtCount(summary.spans) + ' spans' : 'metrics-only'
-  ].join(' · ');
-
   const cards = [
-    { label: '视图覆盖', value: viewState, sub: viewSub, ok: availableViews > 0, warn: availableViews < views.length },
-    { label: '指标覆盖', value: metricState, sub: metricSub, ok: rendered > 0 && truncated === 0, warn: rendered > 0 && truncated > 0 },
-    { label: '证据边界', value: evidenceState, sub: evidenceSub, ok: summary.device_spans > 0, warn: !summary.device_spans }
+    { label: '指标覆盖', value: metricState, sub: metricSub, ok: rendered > 0 && truncated === 0, warn: rendered > 0 && truncated > 0 }
   ];
   host.innerHTML = cards.map((card) => '<article class="coverage-card ' + (card.warn ? 'warn' : (card.ok ? 'ok' : '')) + '"><div class="coverage-label">' + esc(card.label) + '</div><div class="coverage-value">' + esc(card.value) + '</div><div class="coverage-sub">' + esc(card.sub) + '</div></article>').join('');
 }
@@ -2126,7 +2106,11 @@ function v2BindTooltips() {
 function renderViewsV2() {
   const host = document.getElementById('viewsV2Grid');
   if (!host) return;
-  host.innerHTML = VIEWS_V2_LABELS.map(([key, label], index) => {
+  const entries = VIEWS_V2_LABELS.filter(([key]) => {
+    const status = v2Status((VIEWS_V2 || {})[key] || {});
+    return status.available === true;
+  });
+  host.innerHTML = entries.map(([key, label], index) => {
     const view = VIEWS_V2[key] || {};
     const status = v2Status(view);
     const confidenceClass = v2ConfidenceClass(status.confidence);
