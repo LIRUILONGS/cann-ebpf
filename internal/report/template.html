@@ -329,8 +329,8 @@ footer { color: var(--dim); font-size: 11px; margin-top: 20px; border-top: 1px s
   <section class="panel trace-only" id="viewsV2Panel">
     <div class="panel-head">
       <div>
-        <h2>vLLM 十视图</h2>
-        <p>负载与关键路径、阻塞与算子、Roofline、A/B、变化点和服务拓扑。没有证据时明确显示不可用原因，不画空坐标轴。</p>
+        <h2>host 观测视图</h2>
+        <p>host 时间线、off-CPU、算子占比和服务拓扑；指标按实际采集结果绘制。</p>
       </div>
     </div>
     <div class="views-v2-grid" id="viewsV2Grid"></div>
@@ -561,7 +561,6 @@ const KIND_COLORS = { KERNEL: '#ff6b6b', MEMCPY: '#4cc9f0', HCCL: '#b388ff', API
 const VIEWS = (DATA && DATA.views) ? DATA.views : {};
 const VIEWS_V2 = (DATA && DATA.views_v2) ? DATA.views_v2 : {};
 const VIEWS_V2_LABELS = [
-  ['load_latency', '负载-延迟拐点'],
   ['off_cpu', 'off-CPU ribbon'],
   ['operator_treemap', '算子 Treemap'],
   ['service_topology', '服务拓扑']
@@ -2106,10 +2105,14 @@ function v2BindTooltips() {
 function renderViewsV2() {
   const host = document.getElementById('viewsV2Grid');
   if (!host) return;
-  const entries = VIEWS_V2_LABELS.filter(([key]) => {
+  const entries = [];
+  if (VIEWS_V2.load_latency && v2Status(VIEWS_V2.load_latency).available) {
+    entries.push(['load_latency', '负载-延迟拐点']);
+  }
+  entries.push(...VIEWS_V2_LABELS.filter(([key]) => {
     const status = v2Status((VIEWS_V2 || {})[key] || {});
     return status.available === true;
-  });
+  }));
   host.innerHTML = entries.map(([key, label], index) => {
     const view = VIEWS_V2[key] || {};
     const status = v2Status(view);
