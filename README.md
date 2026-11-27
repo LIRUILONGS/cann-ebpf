@@ -282,6 +282,32 @@ CGO_ENABLED=0 go build ./...
 gofmt -l ./cmd ./internal
 ```
 
+## 发布（GitHub Actions）
+
+`.github/workflows/release.yml` 在 push `v*` tag 时自动：
+
+1. `go test ./...`
+2. 构建 `linux/arm64` 二进制
+3. 生成 `SHA256SUMS.txt`
+4. 上传 artifact
+5. 创建 GitHub Release
+
+手动触发：Actions → `release` → Run workflow，可从 artifact 下载二进制。
+
+发布一个版本：
+
+```bash
+git tag v0.7.0
+git push origin v0.7.0
+```
+
+下载后直接执行：
+
+```bash
+chmod +x cann-ebpf-linux-arm64
+./cann-ebpf-linux-arm64 version
+```
+
 ## 文档
 
 - [docs/USAGE.md](docs/USAGE.md)：完整操作手册
