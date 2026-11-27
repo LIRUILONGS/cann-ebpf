@@ -63,6 +63,9 @@ MODE=dry-run
 WANT_PROFILER=auto        # auto|yes|no
 REQUIRE_PROFILER=0
 DECOMMISSION_ON_SUCCESS=0
+HOST_CAPTURE_OK=0
+DIAGNOSE_OK=0
+DEVICE_MERGE_OK=0
 
 # runtime state
 BLOCKERS=0
@@ -178,11 +181,18 @@ preflight(){
     fi
   else res FAIL C3 "collector.env" "missing: $FRAGMENT" 1; fi
 
-  chk_file C4 "msPTI library" "$MSPTI_LIB" 1
+  if [ -n "$FS" ]; then
+    chk_file C4 "msPTI library" "$MSPTI_LIB" 1
+  elif have docker && docker exec "$CONTAINER" test -f "$MSPTI_LIB" >/dev/null 2>&1; then
+    res PASS C4 "msPTI library (container)" "$CONTAINER:$MSPTI_LIB"
+  else
+    res FAIL C4 "msPTI library (container)" "missing: $CONTAINER:$MSPTI_LIB" 1
+  fi
   chk_exec C5 "cann-ebpf binary" "$BIN" 1
   chk_file C6 "device merge script" "$MERGE" 1
   chk_file C7 "V4 systemd unit" "$UNIT" 1
   chk_file C8 "vllm-ascend profile" "$PROFILES/vllm-ascend.yaml" 1
+  chk_file C17 "base config" "$PREFIX/configs/base.yaml" 1
 
   # C9 orinfer must be inactive (exclusive cards)
   if have systemctl && [ -z "$FS" ]; then
@@ -335,13 +345,16 @@ capture(){
   say "[capture] device merge + host span + diagnose"
   mkdir -p "$EV/device-merged" "$EV/run"
   python3 "$MERGE" --input-dir "$CACHE" --out "$EV/device-merged" >>"$EV/capture.log" 2>&1 || warn "device merge failed"
+  [ -s "$EV/device-merged/device.jsonl" ] && DEVICE_MERGE_OK=1
   find "$CACHE" -maxdepth 1 -name 'device-*.jsonl' -printf '%f %s\n' > "$EV/device-files.txt" 2>/dev/null || ls -l "$CACHE"/device-*.jsonl > "$EV/device-files.txt" 2>&1 || true
 
   "$BIN" attach --pid "$PROFILE_PID_AUTO" --profile vllm-ascend --profiles-dir "$PROFILES" \
     --duration "$SPAN_DURATION" --blocking on --hardware on \
     --device-jsonl "$EV/device-merged/device.jsonl" --output "$EV/run" --json \
     > "$EV/run/collector.json" 2> "$EV/run/collector.log" || warn "attach failed (see run/collector.log)"
+  if [ -s "$EV/run/spans.jsonl" ]; then HOST_CAPTURE_OK=1; fi
   "$BIN" diagnose --input "$EV/run" --json --out "$EV/diagnose.json" >>"$EV/capture.log" 2>&1 || warn "diagnose failed"
+  if [ -s "$EV/diagnose.json" ]; then DIAGNOSE_OK=1; fi
 
   if [ "$PROFILER_STATE" = enabled ]; then capture_profiler; else
     say "[capture] profiler=$PROFILER_STATE -> skipped" | tee "$EV/profiler-skipped.txt" >/dev/null
@@ -355,7 +368,7 @@ capture_profiler(){
   sleep "$PROF_DURATION"
   curl -s -o "$EV/profiler/stop.txt" -X POST "$BASE_URL/stop_profile" || warn "stop_profile failed"
   if have docker; then
-    docker cp "$CONTAINER:/tmp/vllm_profile/." "$EV/profiler/raw" >>"$EV/capture.log" 2>&1 || warn "docker cp profiler output failed"
+    docker cp "$CONTAINER:/cache/vllm_profile/." "$EV/profiler/raw" >>"$EV/capture.log" 2>&1 || warn "docker cp profiler output failed"
   fi
   # optional: analyse + convert to ops.jsonl (best-effort, gated)
   if [ -f "$OPS_CONVERTER" ] && [ -d "$EV/profiler/raw" ]; then
@@ -420,9 +433,9 @@ write_acceptance(){
     say "|---|---|---|---|"
     [ "$status" = OK ] && h=200 || h=unknown
     say "| S1 | health 200 | $([ "$status" = OK ] && echo PASS || echo FAIL) | systemctl-status-after.txt |"
-    say "| S2 | device files non-empty | see device-files.txt | device-merged/device.jsonl |"
-    say "| S3 | host span captured | see run/collector.json | run/ |"
-    say "| S4 | host<->device join | $([ -f "$EV/diagnose.json" ] && echo "see diagnose.json (verify)" || echo unknown) | diagnose.json |"
+    say "| S2 | device files non-empty | $([ "$DEVICE_MERGE_OK" = 1 ] && echo PASS || echo FAIL) | device-merged/device.jsonl |"
+    say "| S3 | host span captured | $([ "$HOST_CAPTURE_OK" = 1 ] && echo PASS || echo FAIL) | run/spans.jsonl |"
+    say "| S4 | host<->device join | $([ "$DIAGNOSE_OK" = 1 ] && echo "see diagnose.json (verify)" || echo unknown) | diagnose.json |"
     say "| S5 | profiler kernel_details | $([ "$PROFILER_STATE" = enabled ] && echo "see profiler/" || echo "skipped(patch_not_ready)") | profiler/ |"
     say "| S6 | ops.jsonl | $([ -f "$EV/ops.jsonl" ] && echo present || echo skipped) | ops.jsonl |"
     say "| S7 | evidence complete | see manifest.txt | - |"
@@ -471,6 +484,12 @@ if ! wait_ready; then
   exit 6
 fi
 capture
+if [ "$HOST_CAPTURE_OK" != 1 ]; then
+  write_acceptance PARTIAL
+  say ""
+  say "WINDOW_PARTIAL evidence=$EV profiler=$PROFILER_STATE (V4 health is restored; host capture failed)"
+  exit 7
+fi
 write_acceptance OK
 
 if [ "$DECOMMISSION_ON_SUCCESS" = 1 ]; then
