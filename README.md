@@ -146,6 +146,39 @@ sh scripts/report_once.sh \
 
 它**不发压测请求**；只做只读采集和离线报告。要压测请单独用 `scripts/run_sweep.sh`。
 
+### V4 vLLM 多进程怎么传 PID
+
+V4 不是一个进程：通常有 frontend、`VLLM::EngineCore`、8 个 `VLLM::Worker_TP`。  
+只传一个 PID 只能采一个进程。
+
+显式取全部 PID：
+
+```bash
+PIDS=$(pgrep -f 'vllm serve|VLLM::Worker_TP|VLLM::EngineCore' | sort -u)
+PID_ARGS=""
+for p in $PIDS; do PID_ARGS="$PID_ARGS --pid $p"; done
+echo "$PID_ARGS"
+
+sh scripts/report_once.sh $PID_ARGS \
+  --profile vllm-ascend \
+  --profiles-dir /opt/cann-ebpf/profiles \
+  --duration 10m \
+  --bin /opt/cann-ebpf/bin/cann-ebpf-report-demo \
+  --out "/var/log/cann-ebpf/runs/report-v4-$(date -u +%Y%m%dT%H%M%SZ)"
+```
+
+也可以让 `attach` 用 profile 自动发现：
+
+```bash
+sh scripts/report_once.sh \
+  --pid auto --profile vllm-ascend --profiles-dir /opt/cann-ebpf/profiles \
+  --duration 10m --bin /opt/cann-ebpf/bin/cann-ebpf-report-demo \
+  --out "/var/log/cann-ebpf/runs/report-v4-auto-$(date -u +%Y%m%dT%H%M%SZ)"
+```
+
+`--pid auto` 依赖 profile 匹配，V4 上曾出现过匹配不到；多进程场景**优先用显式 PID 列表**。  
+`stacks --pid auto` 还会从当前目录找 `profiles`，建议在仓库根目录执行，或直接用显式 PID。
+
 ## 报告里有什么
 
 | 视图 | 状态 | 前提 |

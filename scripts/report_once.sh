@@ -10,14 +10,17 @@ DURATION=${DURATION:-10m}
 FREQ=${FREQ:-99}
 METRICS=${METRICS:-auto}
 OUT=${OUT:-}
-PID=${PID:-}
+PIDS=""
+PID_AUTO=0
 WITH_STACKS=${WITH_STACKS:-1}
 
 usage() {
   cat <<'EOF'
-usage: report_once.sh --pid PID --out DIR [options]
+usage: report_once.sh --pid PID [--pid PID ...] --out DIR [options]
+       report_once.sh --pid auto --out DIR [options]
 
-  --pid PID            target host PID (or "auto"; explicit is more reliable)
+  --pid PID            target host PID; repeat for vLLM (frontend/EngineCore/Workers)
+                       or pass "auto" to use profile discovery
   --out DIR            new output directory (must not exist)
   --duration DUR       collection duration (default 10m)
   --freq HZ            stack sampling frequency (default 99)
@@ -41,7 +44,18 @@ EOF
 YES=0
 while [ $# -gt 0 ]; do
   case "$1" in
-    --pid) PID=$2; shift ;;
+    --pid)
+      value=$2
+      shift
+      if [ "$value" = "auto" ]; then
+        PID_AUTO=1
+      else
+        for p in $(printf '%s' "$value" | tr ',' ' '); do
+          case "$p" in ''|*[!0-9]*) echo "bad pid: $p" >&2; exit 2 ;; esac
+          PIDS="$PIDS $p"
+        done
+      fi
+      ;;
     --out) OUT=$2; shift ;;
     --duration) DURATION=$2; shift ;;
     --freq) FREQ=$2; shift ;;
@@ -57,15 +71,26 @@ while [ $# -gt 0 ]; do
   shift
 done
 
-[ -n "$PID" ] || { echo "--pid is required" >&2; exit 2; }
+if [ "$PID_AUTO" -eq 0 ] && [ -z "$(printf '%s' "$PIDS" | tr -d ' ')" ]; then
+  echo "--pid is required (repeat for vLLM multi-process, or use --pid auto)" >&2
+  exit 2
+fi
 [ -n "$OUT" ] || { echo "--out is required" >&2; exit 2; }
 [ ! -e "$OUT" ] || { echo "refusing to overwrite: $OUT" >&2; exit 2; }
 [ "$METRICS" = "on" ] && [ "$YES" -ne 1 ] && { echo "--metrics on requires --yes" >&2; exit 2; }
 
+if [ "$PID_AUTO" -eq 1 ]; then
+  PID_ARGS="--pid auto"
+else
+  PID_ARGS=""
+  for p in $PIDS; do PID_ARGS="$PID_ARGS --pid $p"; done
+fi
+
 mkdir -p "$OUT/attach"
-echo "pid=$PID duration=$DURATION out=$OUT"
+echo "pids=${PID_ARGS} duration=$DURATION out=$OUT"
+# shellcheck disable=SC2086
 "$BIN" attach \
-  --pid "$PID" \
+  $PID_ARGS \
   --profile "$PROFILE" \
   --profiles-dir "$PROFILES_DIR" \
   --duration "$DURATION" \
@@ -78,7 +103,8 @@ APID=$!
 
 SPID=""
 if [ "$WITH_STACKS" = 1 ]; then
-  "$BIN" stacks --pid "$PID" --duration "$DURATION" --freq "$FREQ" \
+  # shellcheck disable=SC2086
+  "$BIN" stacks $PID_ARGS --duration "$DURATION" --freq "$FREQ" \
     --out "$OUT/stacks" > "$OUT/stacks.log" 2>&1 &
   SPID=$!
 fi
