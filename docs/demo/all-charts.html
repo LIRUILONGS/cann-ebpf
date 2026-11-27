@@ -1,0 +1,430 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>cann-ebpf · 全部图表与证据</title>
+<style>
+  :root {
+    --bg: #07101f;
+    --bg-2: #091427;
+    --panel: #0d1729;
+    --panel-2: #0a1324;
+    --line: #22324d;
+    --text: #e8f1ff;
+    --muted: #8da3c4;
+    --dim: #617796;
+    --accent: #4cc9f0;
+    --green: #17c964;
+    --amber: #ffb703;
+    --red: #ff6b6b;
+    --radius: 12px;
+  }
+  * { box-sizing: border-box; }
+  html { color-scheme: dark; }
+  body {
+    margin: 0;
+    min-width: 320px;
+    background:
+      radial-gradient(circle at 16% -12%, rgba(76, 201, 240, .16), transparent 34rem),
+      radial-gradient(circle at 92% 4%, rgba(79, 125, 243, .12), transparent 30rem),
+      var(--bg);
+    color: var(--text);
+    font-family: "Segoe UI", "Microsoft YaHei", "PingFang SC", system-ui, -apple-system, sans-serif;
+    line-height: 1.5;
+  }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  code {
+    padding: 1px 5px;
+    border: 1px solid rgba(97, 119, 150, .35);
+    border-radius: 5px;
+    background: rgba(8, 16, 31, .65);
+    color: #c8e9ff;
+    font: 12px/1.5 Consolas, "SFMono-Regular", monospace;
+  }
+  .top {
+    max-width: 1760px;
+    margin: 0 auto;
+    padding: 30px 28px 16px;
+  }
+  .eyebrow {
+    color: var(--accent);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: .16em;
+    text-transform: uppercase;
+  }
+  h1 {
+    margin: 5px 0 7px;
+    font-size: clamp(25px, 3vw, 38px);
+    line-height: 1.15;
+    letter-spacing: -.02em;
+  }
+  .lede {
+    max-width: 1100px;
+    margin: 0;
+    color: var(--muted);
+    font-size: 14px;
+  }
+  .chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 7px;
+    margin-top: 14px;
+  }
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 9px;
+    border: 1px solid rgba(76, 201, 240, .24);
+    border-radius: 999px;
+    background: rgba(76, 201, 240, .055);
+    color: #b8d6ef;
+    font-size: 11px;
+    white-space: nowrap;
+  }
+  .chip::before {
+    content: "";
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--green);
+    box-shadow: 0 0 0 3px rgba(23, 201, 100, .09);
+  }
+  .chip.warn::before { background: var(--amber); box-shadow: 0 0 0 3px rgba(255, 183, 3, .09); }
+  .chip.muted::before { background: var(--dim); box-shadow: none; }
+
+  .summary {
+    max-width: 1760px;
+    margin: 0 auto;
+    padding: 2px 28px 16px;
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 10px;
+  }
+  .summary-card {
+    min-height: 82px;
+    padding: 13px 14px 12px;
+    border: 1px solid rgba(34, 50, 77, .9);
+    border-radius: 10px;
+    background: linear-gradient(180deg, rgba(16, 28, 49, .94), rgba(10, 19, 36, .94));
+    box-shadow: 0 10px 28px rgba(0, 0, 0, .16);
+  }
+  .summary-card .num {
+    color: #f4fbff;
+    font-size: 22px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -.02em;
+  }
+  .summary-card .label {
+    margin-top: 2px;
+    color: var(--muted);
+    font-size: 11px;
+    line-height: 1.35;
+  }
+  .summary-card .mini {
+    margin-top: 5px;
+    color: var(--dim);
+    font-size: 10px;
+    line-height: 1.35;
+  }
+  .summary-card .mini.ok { color: var(--green); }
+  .summary-card .mini.warn { color: var(--amber); }
+
+  .tabs-wrap {
+    max-width: 1760px;
+    margin: 0 auto;
+    padding: 0 28px;
+  }
+  .tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 7px;
+    padding: 7px;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: rgba(8, 16, 31, .72);
+  }
+  .tab {
+    appearance: none;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    padding: 9px 12px;
+    background: transparent;
+    color: var(--muted);
+    font: inherit;
+    font-size: 12px;
+    cursor: pointer;
+    transition: background .16s ease, border-color .16s ease, color .16s ease;
+  }
+  .tab:hover { color: var(--text); background: rgba(76, 201, 240, .055); }
+  .tab[aria-selected="true"] {
+    border-color: rgba(76, 201, 240, .34);
+    background: rgba(76, 201, 240, .13);
+    color: #f0fbff;
+    box-shadow: inset 0 0 0 1px rgba(76, 201, 240, .06);
+  }
+  .tab .badge {
+    margin-left: 6px;
+    padding: 1px 5px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, .07);
+    color: var(--dim);
+    font-size: 10px;
+    font-variant-numeric: tabular-nums;
+  }
+  .tab[aria-selected="true"] .badge { color: var(--accent); background: rgba(76, 201, 240, .12); }
+
+  .viewer {
+    max-width: 1760px;
+    margin: 0 auto;
+    padding: 12px 28px 22px;
+  }
+  .toolbar {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 18px;
+    margin-bottom: 9px;
+  }
+  .view-title h2 {
+    margin: 0;
+    font-size: 16px;
+    font-weight: 650;
+    letter-spacing: -.01em;
+  }
+  .view-title p {
+    max-width: 1120px;
+    margin: 3px 0 0;
+    color: var(--muted);
+    font-size: 12px;
+  }
+  .standalone {
+    flex: 0 0 auto;
+    padding: 7px 10px;
+    border: 1px solid rgba(76, 201, 240, .24);
+    border-radius: 7px;
+    background: rgba(76, 201, 240, .055);
+    color: #bcecff;
+    font-size: 11px;
+    white-space: nowrap;
+  }
+  .standalone:hover { background: rgba(76, 201, 240, .11); text-decoration: none; }
+  .frame-shell {
+    overflow: hidden;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: #07101f;
+    box-shadow: 0 18px 48px rgba(0, 0, 0, .24);
+  }
+  iframe {
+    display: block;
+    width: 100%;
+    height: max(720px, calc(100vh - 368px));
+    border: 0;
+    background: #07101f;
+  }
+  .coverage {
+    max-width: 1760px;
+    margin: 0 auto;
+    padding: 7px 28px 24px;
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 10px;
+  }
+  .coverage-card {
+    padding: 12px 13px;
+    border: 1px solid rgba(34, 50, 77, .76);
+    border-radius: 10px;
+    background: rgba(9, 20, 39, .64);
+  }
+  .coverage-card h3 {
+    margin: 0 0 5px;
+    color: #dcecff;
+    font-size: 12px;
+    font-weight: 650;
+  }
+  .coverage-card p {
+    margin: 0;
+    color: var(--dim);
+    font-size: 11px;
+    line-height: 1.55;
+  }
+  footer {
+    max-width: 1760px;
+    margin: 0 auto;
+    padding: 0 28px 28px;
+    color: var(--dim);
+    font-size: 11px;
+    line-height: 1.7;
+  }
+  footer strong { color: var(--muted); font-weight: 650; }
+  @media (max-width: 1100px) {
+    .summary, .coverage { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
+  @media (max-width: 700px) {
+    .top { padding: 22px 15px 13px; }
+    .summary, .coverage { padding-left: 15px; padding-right: 15px; }
+    .tabs-wrap { padding: 0 15px; }
+    .viewer { padding-left: 15px; padding-right: 15px; }
+    footer { padding-left: 15px; padding-right: 15px; }
+    .summary, .coverage { grid-template-columns: 1fr; }
+    .toolbar { align-items: flex-start; flex-direction: column; gap: 8px; }
+    iframe { min-height: 680px; height: 72vh; }
+  }
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="eyebrow">CANNN eBPF · READ-ONLY REPORT GALLERY</div>
+  <h1>全部图表与证据</h1>
+  <p class="lede">
+    这里不是重新绘制的示意图。每个标签页都是一份由 <code>cann-ebpf report</code> 生成的单文件离线报告，
+    报告内嵌 <code>DATA</code> JSON、Canvas/SVG 和全部降级原因；没有 CDN、没有网络请求。
+    先用下面的标签切换报告，再在报告内部滚动查看全部图表。
+  </p>
+  <div class="chips" aria-label="报告能力">
+    <span class="chip">内嵌 DATA JSON</span>
+    <span class="chip">无外部依赖</span>
+    <span class="chip">available / partial / inferred / unavailable 原样保留</span>
+    <span class="chip muted">图表只读派生，不修改原始证据</span>
+  </div>
+</header>
+
+<section class="summary" aria-label="数据规模">
+  <article class="summary-card">
+    <div class="num">28,905</div>
+    <div class="label">真实 vLLM attach host spans</div>
+    <div class="mini ok">16.37 s · 18 TID / 9 PID · dropped 0</div>
+  </article>
+  <article class="summary-card">
+    <div class="num">16,006</div>
+    <div class="label">36 机器真实 metrics 采样点</div>
+    <div class="mini">541 series · DCMI / proc / system / orinfer</div>
+  </article>
+  <article class="summary-card">
+    <div class="num">6</div>
+    <div class="label">真实并发扫描档位</div>
+    <div class="mini warn">c1/c2/c4/c8/c16/c32 · 背景负载，knee 不计</div>
+  </article>
+  <article class="summary-card">
+    <div class="num">148,466</div>
+    <div class="label">设备 join 设备区间（验证样本）</div>
+    <div class="mini warn">M3 synthetic ACL · 仅验证 join/UI</div>
+  </article>
+</section>
+
+<div class="tabs-wrap">
+  <nav class="tabs" id="tabs" aria-label="报告选择">
+    <button class="tab" type="button" data-key="attach">Host + vLLM 十视图<span class="badge">real</span></button>
+    <button class="tab" type="button" data-key="device">Host + device join<span class="badge">synthetic</span></button>
+    <button class="tab" type="button" data-key="sweep">并发扫描<span class="badge">real / partial</span></button>
+    <button class="tab" type="button" data-key="metrics">真实 metrics<span class="badge">real36</span></button>
+  </nav>
+</div>
+
+<main class="viewer">
+  <div class="toolbar">
+    <div class="view-title">
+      <h2 id="viewTitle">Host + vLLM 十视图</h2>
+      <p id="viewDesc">真实 attach run；固定图表和十张 vLLM 视图在同一份报告内。</p>
+    </div>
+    <a class="standalone" id="openStandalone" href="report-vllm-attach.html" target="_blank" rel="noopener">单独打开当前报告 ↗</a>
+  </div>
+  <div class="frame-shell">
+    <iframe id="reportFrame" src="report-vllm-attach.html" title="cann-ebpf 交互式报告"></iframe>
+  </div>
+</main>
+
+<section class="coverage" aria-label="图表覆盖">
+  <article class="coverage-card">
+    <h3>Host 固定区块</h3>
+    <p>KPI、线程时间轴、延迟散点、时间热力图、TopN、延迟热图、次秒偏移热图、函数分位带、尾 cohort、延迟 CDF、采集告警与边界。</p>
+  </article>
+  <article class="coverage-card">
+    <h3>vLLM 十视图</h3>
+    <p>load_latency、critical_path、summed_delay、slack_cdf、off_cpu、operator_treemap、roofline、ab_diff、change_point、service_topology；缺证据时显示原因。</p>
+  </article>
+  <article class="coverage-card">
+    <h3>Device join</h3>
+    <p>host API 与 msPTI KERNEL/MEMCPY/HCCL 按 correlationId/时间窗关联；设备四象限、忙率、算子 Treemap 和设备边界。</p>
+  </article>
+  <article class="coverage-card">
+    <h3>Metrics</h3>
+    <p>多指标小倍数、指标统计、NPU/vLLM/proc/cgroup/system 指标与 histogram 窗口分位；没有 spans 时明确显示 metrics-only 边界。</p>
+  </article>
+</section>
+
+<footer>
+  <strong>数据来源：</strong>Host + vLLM 十视图来自真实 vLLM-Ascend attach run；
+  并发扫描来自真实六档 sweep；
+  metrics 来自 36 机器 DeepSeek-V4.1 Orinfer 8 请求轻载窗口；
+  device join 标签页来自 final7 合成 ACL，仅用于验证 M3 join 和图表渲染，不能当作生产设备性能。
+  <br>
+  <strong>阅读方式：</strong>打开本文件后直接使用标签切换；也可以点击“单独打开当前报告”获得全屏报告。
+  报告中的 <code>available</code>、<code>partial</code>、<code>inferred</code>、<code>unavailable</code> 表示证据等级，不是装饰标签。
+</footer>
+
+<script>
+(function () {
+  const reports = {
+    attach: {
+      file: 'report-vllm-attach.html',
+      title: 'Host + vLLM 十视图',
+      desc: '真实 attach run：28,905 spans、16.37 s、0 dropped。固定区块和十张 vLLM 视图在同一份报告内；无 device 的视图会明确不可用。'
+    },
+    device: {
+      file: 'report-host-device.html',
+      title: 'Host + device join',
+      desc: 'final7 合成 ACL：11,859 host spans + 148,466 device spans，慢 Sync 305/305（100%），设备 busy 405.6 ms。用于验证 M3 join 与图表渲染，不是生产性能结论。'
+    },
+    sweep: {
+      file: 'report-vllm-sweep.html',
+      title: '并发扫描',
+      desc: '真实六档并发 c1/c2/c4/c8/c16/c32；load_latency 可用但为 partial，因背景 running 高于客户端并发，不计算容量拐点。其余视图缺少对应证据。'
+    },
+    metrics: {
+      file: 'report-real36-metrics.html',
+      title: '真实 metrics',
+      desc: '36 机器 DeepSeek-V4.1 Orinfer 8 请求轻载：16,006 点、541 series、30 s；只展示 metrics-only 证据，不用 metrics 冒充 span 或 request 关键路径。'
+    }
+  };
+
+  const tabs = Array.from(document.querySelectorAll('.tab'));
+  const frame = document.getElementById('reportFrame');
+  const title = document.getElementById('viewTitle');
+  const desc = document.getElementById('viewDesc');
+  const standalone = document.getElementById('openStandalone');
+
+  function activate(key, updateHash) {
+    const report = reports[key] || reports.attach;
+    const activeKey = reports[key] ? key : 'attach';
+    tabs.forEach(function (tab) {
+      tab.setAttribute('aria-selected', tab.dataset.key === activeKey ? 'true' : 'false');
+    });
+    frame.src = report.file;
+    title.textContent = report.title;
+    desc.textContent = report.desc;
+    standalone.href = report.file;
+    if (updateHash) history.replaceState(null, '', '#' + activeKey);
+  }
+
+  tabs.forEach(function (tab) {
+    tab.addEventListener('click', function () {
+      activate(tab.dataset.key, true);
+      document.querySelector('.viewer').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  });
+
+  window.addEventListener('hashchange', function () {
+    activate(location.hash.replace(/^#/, ''), false);
+  });
+
+  activate(location.hash.replace(/^#/, '') || 'attach', false);
+})();
+</script>
+</body>
+</html>
