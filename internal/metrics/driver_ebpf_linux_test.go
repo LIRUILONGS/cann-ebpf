@@ -128,6 +128,139 @@ func TestDriverStatusSeparatesUnverifiedBytesFromOperationCount(t *testing.T) {
 	}
 }
 
+func TestParseDriverKernelSymbolsTracksDuplicatesAndModules(t *testing.T) {
+	data := []byte("ffffffff81000000 T drv_ascend_intf_ioctl\nffffffffc0100000 t devmm_svm_mmap\t[drv_devmm_host]\nffffffffc0200000 t devmm_svm_mmap\t[drv_devmm_host_agent]\nffffffffc0300000 t xsmem_alloc\t[drv_xsmem]\nffffffffc0400000 t unrelated_symbol\t[other]\n")
+	wanted := map[string]struct{}{
+		"drv_ascend_intf_ioctl": {},
+		"devmm_svm_mmap":        {},
+		"xsmem_alloc":           {},
+	}
+	symbols := parseDriverKernelSymbols(data, wanted)
+	if got := symbols["drv_ascend_intf_ioctl"].Count; got != 1 {
+		t.Fatalf("unique symbol count=%d want 1", got)
+	}
+	duplicate := symbols["devmm_svm_mmap"]
+	if duplicate.Count != 2 {
+		t.Fatalf("duplicate count=%d want 2", duplicate.Count)
+	}
+	if got := strings.Join(duplicate.Modules, ","); got != "drv_devmm_host,drv_devmm_host_agent" {
+		t.Fatalf("duplicate modules=%q", got)
+	}
+	if got := strings.Join(symbols["xsmem_alloc"].Modules, ","); got != "drv_xsmem" {
+		t.Fatalf("xsmem modules=%q", got)
+	}
+	if _, ok := symbols["unrelated_symbol"]; ok {
+		t.Fatal("unrelated symbol should be ignored")
+	}
+}
+
+func TestPrepareDriverCollectionSpecSkipsAmbiguousAndMissingProbes(t *testing.T) {
+	spec, err := loadDriverCollectionSpec()
+	if err != nil {
+		t.Fatal(err)
+	}
+	symbols := map[string]driverSymbolResolution{
+		"drv_ascend_intf_ioctl": {Count: 1, Modules: []string{"drv_ascend"}},
+		"devmm_svm_mmap":        {Count: 2, Modules: []string{"drv_devmm_host", "drv_devmm_host_agent"}},
+		"xsmem_alloc":           {Count: 0},
+	}
+	failures := prepareDriverCollectionSpec(spec, symbols)
+	if !strings.Contains(failures[24], "ambiguous_kernel_symbol") {
+		t.Fatalf("devmm_svm_mmap failure=%q", failures[24])
+	}
+	if !strings.Contains(failures[26], "symbol_not_found") {
+		t.Fatalf("xsmem_alloc failure=%q", failures[26])
+	}
+	if spec.Programs["driver_enter_24"] != nil || spec.Programs["driver_exit_24"] != nil {
+		t.Fatal("ambiguous devmm_svm_mmap programs were not pruned")
+	}
+	if spec.Programs["driver_enter_26"] != nil || spec.Programs["driver_exit_26"] != nil {
+		t.Fatal("missing xsmem_alloc programs were not pruned")
+	}
+	if spec.Programs["driver_enter_1"] == nil || spec.Programs["driver_exit_1"] == nil {
+		t.Fatal("unique drv_ascend_intf_ioctl programs were pruned")
+	}
+	if spec.Programs["on_sys_enter_ioctl"] == nil || spec.Programs["on_sys_enter_mmap"] == nil {
+		t.Fatal("tracepoint programs were pruned")
+	}
+	if got := spec.Programs["on_sys_enter_ioctl"].AttachTo; got != "syscalls/sys_enter_ioctl" {
+		t.Fatalf("tracepoint AttachTo=%q, want syscalls/sys_enter_ioctl", got)
+	}
+	for name, program := range spec.Programs {
+		if isDriverKprobeSection(program.SectionName) && program.AttachTo != "" {
+			t.Fatalf("%s still has kprobe AttachTo=%q", name, program.AttachTo)
+		}
+	}
+}
+
+func TestPrepareDriverCollectionSpecWithoutInventoryKeepsKprobes(t *testing.T) {
+	spec, err := loadDriverCollectionSpec()
+	if err != nil {
+		t.Fatal(err)
+	}
+	failures := prepareDriverCollectionSpec(spec, nil)
+	if len(failures) != 0 {
+		t.Fatalf("failures=%v want none without inventory", failures)
+	}
+	if spec.Programs["driver_enter_24"] == nil || spec.Programs["driver_exit_24"] == nil {
+		t.Fatal("kprobes should remain when /proc/kallsyms is unreadable")
+	}
+	if spec.Programs["on_sys_enter_ioctl"] == nil {
+		t.Fatal("ioctl tracepoint should remain")
+	}
+	for name, program := range spec.Programs {
+		if isDriverKprobeSection(program.SectionName) && program.AttachTo != "" {
+			t.Fatalf("%s still has kprobe AttachTo=%q", name, program.AttachTo)
+		}
+	}
+}
+
+func TestDriverStatusReportsAmbiguousProbeAsDegraded(t *testing.T) {
+	source := NewDriverEBPFSource([]int{123}, time.Second, time.Second)
+	source.attached = map[uint32]bool{1: true, 33: true}
+	source.failures = map[uint32]string{24: "ambiguous_kernel_symbol: devmm_svm_mmap has 2 function entries"}
+	points := source.statusPoints()
+	var sourceStatus, metricStatus, reason string
+	for _, point := range points {
+		switch point.Name {
+		case "npu_driver_source_info":
+			sourceStatus = point.Labels["status"]
+		case "npu_driver_metric_status":
+			if point.Labels["handler"] == "devmm_svm_mmap" {
+				metricStatus = point.Labels["status"]
+				reason = point.Labels["reason"]
+			}
+		}
+	}
+	if sourceStatus != "degraded" {
+		t.Fatalf("source status=%q want degraded", sourceStatus)
+	}
+	if metricStatus != "unavailable" || !strings.Contains(reason, "ambiguous_kernel_symbol") {
+		t.Fatalf("metric status=%q reason=%q", metricStatus, reason)
+	}
+}
+
+func TestDriverStatusWithOnlyIoctlTracepointIsDegraded(t *testing.T) {
+	source := NewDriverEBPFSource([]int{123}, time.Second, time.Second)
+	source.attached = map[uint32]bool{}
+	source.failures = map[uint32]string{24: "ambiguous_kernel_symbol: devmm_svm_mmap has 2 function entries"}
+	source.ioctlTracepoints = true
+	points := source.statusPoints()
+	for _, point := range points {
+		if point.Name != "npu_driver_source_info" {
+			continue
+		}
+		if got := point.Labels["status"]; got != "degraded" {
+			t.Fatalf("source status=%q want degraded", got)
+		}
+		if got := point.Labels["probes_attached"]; got != "1" {
+			t.Fatalf("probes_attached=%q want 1 (ioctl tracepoint)", got)
+		}
+		return
+	}
+	t.Fatal("npu_driver_source_info point missing")
+}
+
 func itoa(value uint32) string {
 	const digits = "0123456789"
 	if value == 0 {

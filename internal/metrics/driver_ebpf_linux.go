@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -25,6 +26,8 @@ const (
 	driverModeIoctl   = 2
 	driverModeSizeArg = 3
 	driverModeSizeVMA = 4
+
+	driverKallsymsPath = "/proc/kallsyms"
 )
 
 //go:embed bpf/driver_metrics.bpf.o
@@ -40,6 +43,15 @@ type driverProbe struct {
 	SizeVerified bool
 	Group        string
 	Kind         string
+}
+
+// driverSymbolResolution is a load-time inventory of a kprobe symbol. A
+// duplicate count means the symbol exists in more than one kernel module; the
+// driver probe is skipped because cilium/ebpf's kprobe API cannot select a
+// module unambiguously.
+type driverSymbolResolution struct {
+	Count   int
+	Modules []string
 }
 
 var driverProbes = []driverProbe{
@@ -145,6 +157,7 @@ type DriverEBPFSource struct {
 	ioctlTracepoints   bool
 	ioctlTracepointErr string
 	mmapTracepointErr  string
+	symbolResolveErr   string
 	closed             bool
 	closeMu            sync.Mutex
 	deviceCache        map[string]cachedString
@@ -190,6 +203,13 @@ func (s *DriverEBPFSource) ensureInit() {
 			s.initErr = err
 			return
 		}
+		symbols, symbolErr := readDriverKernelSymbols(driverKallsymsPath)
+		if symbolErr != nil {
+			s.symbolResolveErr = "read " + driverKallsymsPath + ": " + symbolErr.Error()
+		}
+		for id, reason := range prepareDriverCollectionSpec(spec, symbols) {
+			s.failures[id] = reason
+		}
 		if err := rlimit.RemoveMemlock(); err != nil {
 			// Not fatal: some hardened hosts pre-set memlock; the load below
 			// will report EPERM if the limit is actually insufficient.
@@ -219,6 +239,9 @@ func (s *DriverEBPFSource) ensureInit() {
 		for _, probe := range driverProbes {
 			if probe.ID == 33 {
 				continue // tracepoint, attached below
+			}
+			if s.failures[probe.ID] != "" {
+				continue // missing or ambiguous symbol was pruned before load
 			}
 			enterName := fmt.Sprintf("driver_enter_%d", probe.ID)
 			exitName := fmt.Sprintf("driver_exit_%d", probe.ID)
@@ -358,6 +381,9 @@ func (s *DriverEBPFSource) Collect(ctx context.Context) ([]Point, []string, erro
 	if s.mmapTracepointErr != "" {
 		warnings = append(warnings, "driver-ebpf: "+s.mmapTracepointErr+"; npu_mmap_bytes is unavailable")
 	}
+	if s.symbolResolveErr != "" {
+		warnings = append(warnings, "driver-ebpf: "+s.symbolResolveErr+"; kprobe symbols were not pre-filtered")
+	}
 	return points, warnings, nil
 }
 
@@ -370,6 +396,112 @@ func loadDriverCollectionSpec() (*ebpf.CollectionSpec, error) {
 		return nil, fmt.Errorf("driver-ebpf: parse embedded BPF object: %w", err)
 	}
 	return spec, nil
+}
+
+func driverProbeSymbolSet() map[string]struct{} {
+	wanted := make(map[string]struct{}, len(driverProbes))
+	for _, probe := range driverProbes {
+		wanted[probe.Symbol] = struct{}{}
+	}
+	return wanted
+}
+
+// parseDriverKernelSymbols inventories only the configured driver symbols.
+// /proc/kallsyms includes both built-in and module function entries. A symbol
+// that appears more than once is ambiguous: tracefs cannot select the intended
+// module through cilium/ebpf's kprobe API.
+func parseDriverKernelSymbols(data []byte, wanted map[string]struct{}) map[string]driverSymbolResolution {
+	out := make(map[string]driverSymbolResolution)
+	for _, rawLine := range bytes.Split(data, []byte{10}) {
+		fields := strings.Fields(string(rawLine))
+		if len(fields) < 3 || (fields[1] != "t" && fields[1] != "T") {
+			continue
+		}
+		name := fields[2]
+		if _, ok := wanted[name]; !ok {
+			continue
+		}
+		module := "vmlinux"
+		if len(fields) >= 4 {
+			module = strings.Trim(fields[3], "[]")
+		}
+		resolution := out[name]
+		resolution.Count++
+		found := false
+		for _, existing := range resolution.Modules {
+			if existing == module {
+				found = true
+				break
+			}
+		}
+		if !found {
+			resolution.Modules = append(resolution.Modules, module)
+		}
+		sort.Strings(resolution.Modules)
+		out[name] = resolution
+	}
+	return out
+}
+
+func readDriverKernelSymbols(path string) (map[string]driverSymbolResolution, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	return parseDriverKernelSymbols(data, driverProbeSymbolSet()), nil
+}
+
+func isDriverKprobeSection(section string) bool {
+	return strings.HasPrefix(section, "kprobe/") || strings.HasPrefix(section, "kretprobe/")
+}
+
+func driverSymbolFailureReason(symbol string, resolution driverSymbolResolution) string {
+	if resolution.Count == 0 {
+		return "symbol_not_found: no t/T entry for " + symbol + " in " + driverKallsymsPath
+	}
+	modules := append([]string(nil), resolution.Modules...)
+	if len(modules) == 0 {
+		modules = []string{"unknown"}
+	}
+	return fmt.Sprintf("ambiguous_kernel_symbol: %s has %d function entries in modules %s; skipped",
+		symbol, resolution.Count, strings.Join(modules, ","))
+}
+
+// prepareDriverCollectionSpec clears kprobe AttachTo fields before
+// ebpf.NewCollection. cilium/ebpf resolves every non-empty kprobe AttachTo in a
+// batch and fails the whole collection on an ambiguous symbol. Link attachment
+// is explicit later, so AttachTo is not needed at program load time.
+//
+// When the symbol inventory is available, missing and ambiguous probes are
+// removed from the collection and their reasons are returned. A nil inventory
+// means /proc/kallsyms could not be read; keep the programs and let the
+// explicit link.Kprobe call report the final attach error.
+func prepareDriverCollectionSpec(spec *ebpf.CollectionSpec, symbols map[string]driverSymbolResolution) map[uint32]string {
+	failures := make(map[uint32]string)
+	if spec == nil {
+		return failures
+	}
+	for _, program := range spec.Programs {
+		if isDriverKprobeSection(program.SectionName) {
+			program.AttachTo = ""
+		}
+	}
+	if symbols == nil {
+		return failures
+	}
+	for _, probe := range driverProbes {
+		if probe.ID == 33 {
+			continue
+		}
+		resolution := symbols[probe.Symbol]
+		if resolution.Count == 1 {
+			continue
+		}
+		failures[probe.ID] = driverSymbolFailureReason(probe.Symbol, resolution)
+		delete(spec.Programs, fmt.Sprintf("driver_enter_%d", probe.ID))
+		delete(spec.Programs, fmt.Sprintf("driver_exit_%d", probe.ID))
+	}
+	return failures
 }
 
 func readDriverCounts(m *ebpf.Map) ([]driverCountSample, error) {
@@ -794,16 +926,24 @@ func driverPoint(point Point) Point {
 
 func (s *DriverEBPFSource) statusPoints() []Point {
 	points := make([]Point, 0, len(driverProbes)*2+1)
+	attachedCount := len(s.attached)
+	if s.ioctlTracepoints {
+		attachedCount++
+	}
+	failedCount := len(s.failures)
+	if s.ioctlTracepointErr != "" && !s.ioctlTracepoints {
+		failedCount++
+	}
 	status := "available"
-	if len(s.attached) == 0 {
+	if attachedCount == 0 {
 		status = "unavailable"
-	} else if len(s.failures) > 0 {
+	} else if failedCount > 0 || !s.ioctlTracepoints {
 		status = "degraded"
 	}
 	infoLabels := map[string]string{
 		"status":            status,
-		"probes_attached":   strconv.Itoa(len(s.attached)),
-		"probes_failed":     strconv.Itoa(len(s.failures)),
+		"probes_attached":   strconv.Itoa(attachedCount),
+		"probes_failed":     strconv.Itoa(failedCount),
 		"ioctl_tracepoints": strconv.FormatBool(s.ioctlTracepoints),
 		"mmap_tracepoint":   strconv.FormatBool(s.attached[33]),
 		"arch":              runtime.GOARCH,

@@ -55,9 +55,9 @@ cann-ebpf sample \
 | `--out` | 必填 | 输出目录；已存在的 `metrics.jsonl` 不会被覆盖 |
 | `--interval` | `1s` | 基础采样间隔；`npu-smi` 最小为 `5s` |
 | `--duration` | `0` | `0` 表示持续到 SIGINT/SIGTERM；支持 `10m`、`1h` |
-| `--dcmi` | 自动 | 使用 `CANN_DCMI_PROBE` 或 PATH 中的 `dcmi_probe` |
+| `--dcmi` | 自动 | 使用 `CANN_DCMI_PROBE` 或 PATH 中的 `dcmi_probe`；显式指定但找不到 helper 时直接失败 |
 | `--npu-smi` | 自动 | 运行 `npu-smi info` |
-| `--dcmi-ext` | 关闭 | 运行 `dcmi_probe --extended`；DCMI 直读扩展标量，默认 10s |
+| `--dcmi-ext` | 关闭 | 运行 `dcmi_probe --extended`；DCMI 直读扩展标量，默认 10s；同样要求能定位到 helper |
 | `--dcmi-ext-interval` | `10s` | DCMI 扩展间隔，最小 5s |
 | `--hccs` | 关闭 | 被动读取 `npu-smi info -t hccs -i N -c 0`，默认 30s |
 | `--hccs-interval` | `30s` | HCCS 采样间隔，最小 10s；10s 仅诊断 |
@@ -70,6 +70,10 @@ cann-ebpf sample \
 | `--json` | `false` | 输出 JSON 结果摘要 |
 
 未指定任何源时：先探测 `dcmi_probe`，可用则只启动 DCMI；否则尝试 `npu-smi`。两者都不可用时退出 4，不会偷偷读取任意进程。
+
+显式指定 `--dcmi` 或 `--dcmi-ext` 时不做这种降级：定位不到 `dcmi_probe` 就直接以
+`dcmi_probe not found in PATH (set CANN_DCMI_PROBE)` 退出，不会静默回退到 `npu-smi`。
+helper 查找顺序为 `CANN_DCMI_PROBE` → PATH → 失败，详见 [DCMI-HCCS-METRICS.md](DCMI-HCCS-METRICS.md) 第 8 节。
 
 输出目录：
 

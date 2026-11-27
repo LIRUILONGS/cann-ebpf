@@ -148,7 +148,23 @@ DCMI 直出、沿用既有名字的字段：
     npu-smi info -t hccs -i 0 -c 0
 
     # 集成采样
+    # 注意：cann-ebpf 不内置 dcmi_probe，必须能定位到 helper，否则
+    # `sample --dcmi-ext`（以及不带 --npu-smi 的 `sample --dcmi`）会直接失败：
+    #   dcmi_probe not found in PATH (set CANN_DCMI_PROBE)
+    # 两种方式二选一：
+    #   1) 用 CANN_DCMI_PROBE 指定绝对路径（推荐，优先于 PATH）
+    #   2) 把 dcmi_probe 放进 PATH（例如 install -m 0755 dcmi_probe /usr/local/bin/dcmi_probe）
+    export CANN_DCMI_PROBE="$(pwd)/dcmi_probe"
     cann-ebpf sample --out runs/hw-ext --duration 1m --dcmi-ext --hccs
+
+helper 的查找顺序（见 `internal/metrics/hardware.go: ResolveDCMIProbe`）：
+
+1. 环境变量 `CANN_DCMI_PROBE`，非空即直接使用，不再查 PATH；
+2. 否则 `exec.LookPath("dcmi_probe")`；
+3. 两者都没有时报错并退出，不静默降级。
+
+`CANN_DCMI_PROBE` 指到不存在的文件或不可执行文件时不会回退到 PATH，而是报执行错误，
+因此设置前先确认 `test -x "$CANN_DCMI_PROBE"`。
 
 ## 9. 验证记录
 
