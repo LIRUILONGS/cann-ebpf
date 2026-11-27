@@ -467,10 +467,10 @@ func counterRates(points []metricPoint) (rateLast, rateMean float64) {
 func metricPriority(name string) int {
 	lower := strings.ToLower(name)
 	prefixes := []string{
-		"npu_aicore", "npu_hbm", "npu_power", "npu_temperature",
 		"orinfer_requests_running", "orinfer_requests_waiting",
 		"orinfer_request_time_to_first_token", "orinfer_request_latency",
 		"orinfer_generated_tokens", "orinfer_prompt_tokens",
+		"npu_aicore", "npu_hbm", "npu_power", "npu_temperature",
 		"vllm_requests_running", "vllm_requests_waiting", "vllm_kv_cache", "vllm_gpu_cache",
 		"cann_p95", "cann_latency",
 	}
