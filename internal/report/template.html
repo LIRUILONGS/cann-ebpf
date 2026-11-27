@@ -24,6 +24,7 @@
 html, body { margin: 0; padding: 0; background: var(--bg); color: var(--text); }
 body { font: 13px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", Arial, sans-serif; }
 body.metrics-only .trace-only { display: none; }
+body.metrics-only #cdfPanel { display: none; }
 body.stacks-only .trace-only { display: none; }
 body.stacks-only #viewsV2Panel,
 body.stacks-only #coverageBanner,
@@ -207,6 +208,8 @@ canvas { display: block; }
 .metrics-detail-title { min-width: 0; }
 .metrics-detail-title h3 { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 600; }
 .metrics-detail-title p { margin: 2px 0 0; color: var(--dim); font-size: 10.5px; }
+.metric-detail-toggle { margin-top: 4px; padding: 2px 8px; border: 1px solid rgba(76,201,240,.42); border-radius: 999px; background: rgba(76,201,240,.08); color: #9fe8ff; font-size: 10px; cursor: pointer; }
+.metric-detail-toggle:hover { background: rgba(76,201,240,.16); }
 .metrics-detail-legend { display: flex; flex-wrap: wrap; gap: 4px; justify-content: flex-end; max-width: 72%; }
 .metric-legend-chip { display: inline-flex; align-items: center; gap: 4px; max-width: 220px; padding: 2px 6px; border: 1px solid rgba(36,54,83,.65); border-radius: 999px; background: #0c1527; color: var(--muted); font-size: 10px; }
 .metric-legend-chip i { flex: 0 0 auto; width: 6px; height: 6px; border-radius: 50%; }
@@ -339,6 +342,7 @@ footer { color: var(--dim); font-size: 11px; margin-top: 20px; border-top: 1px s
 
   <nav class="report-nav" id="reportNav" aria-label="报告导航">
     <a href="#viewsV2Panel" class="trace-only">生产视图（4）</a>
+    <a href="#metricsPanel">指标矩阵</a>
     <a href="#flamegraphPanel" id="flamegraphNavLink" hidden>内核栈火焰图</a>
   </nav>
 
@@ -766,6 +770,19 @@ function renderKPIs() {
       ['火焰图状态', status.available ? 'available' : 'unavailable', status.reason || ('confidence ' + (status.confidence || 'unknown'))]
     ];
     document.getElementById('kpis').innerHTML = cards.map((card) => '<div class="kpi"><div class="kpi-label">' + esc(card[0]) + '</div><div class="kpi-value">' + esc(card[1]) + '</div><div class="kpi-sub">' + esc(card[2]) + '</div></div>').join('');
+    return;
+  }
+  if (METRICS && METRICS.available && Array.isArray(METRICS.series) && METRICS.series.length) {
+    const rendered = numeric(METRICS.rendered_series, METRICS.series.length);
+    const eligible = numeric(METRICS.eligible_series, rendered);
+    const sources = Array.isArray(METRICS.sources) ? METRICS.sources.length : 0;
+    const windowMS = DATA.window ? DATA.window.duration_ms : 0;
+    const cards = [
+      ['报告模式', 'metrics-only', '无 host span；函数耗时、off-CPU 和火焰图不可用'],
+      ['指标 series', fmtCount(rendered) + ' / ' + fmtCount(eligible), fmtCount(METRICS.series.length) + ' 条曲线已嵌入报告'],
+      ['采样窗口', fmtTime(windowMS), fmtCount(METRICS.samples) + ' 个采样点 · ' + fmtCount(sources) + ' 个来源']
+    ];
+    $('#kpis').innerHTML = cards.map((card) => '<div class="kpi"><div class="kpi-label">' + esc(card[0]) + '</div><div class="kpi-value">' + esc(card[1]) + '</div><div class="kpi-sub">' + esc(card[2]) + '</div></div>').join('');
     return;
   }
   const s = DATA.summary;
@@ -3457,9 +3474,10 @@ const metricsState = {
   selectedKey: '',
   source: 'all',
   query: '',
-  changedOnly: true,
+  changedOnly: false,
   sort: 'change',
   intervalMS: 1000,
+  showAllDetailRows: false,
   matrixLayout: null,
   detailLayout: null,
   frame: 0,
@@ -3471,6 +3489,7 @@ const METRIC_LINE_COLORS = [
   '#4cc9f0', '#ffb703', '#2ec4b6', '#ff6b6b', '#b388ff', '#f72585',
   '#8ac926', '#ff9f1c', '#00b4d8', '#e0aaff', '#90be6d', '#f94144'
 ];
+const METRIC_DETAIL_MAX_ROWS = 12;
 const METRIC_SOURCE_COLORS = {
   'npu-smi': '#4cc9f0',
   'prometheus:vllm': '#ffb703',
@@ -3558,22 +3577,37 @@ function metricGroupKey(item) {
   return [item.source || '', item.name || item.id || '', item.unit || '', item.kind || ''].join('|');
 }
 
+function metricDetailRows(group) {
+  if (!group || !Array.isArray(group.rows)) return [];
+  if (metricsState.showAllDetailRows || group.rows.length <= METRIC_DETAIL_MAX_ROWS) return group.rows;
+  return group.rows.map((row) => {
+    const scale = Math.max(Math.abs(row.minV), Math.abs(row.maxV), 1e-12);
+    const relativeRange = Math.max(0, row.maxV - row.minV) / scale;
+    return { row, relativeRange, magnitude: Math.max(Math.abs(row.maxV), Math.abs(row.minV)) };
+  }).sort((a, b) => (b.relativeRange - a.relativeRange) || (b.magnitude - a.magnitude)).slice(0, METRIC_DETAIL_MAX_ROWS).map((item) => item.row);
+}
+
 function metricSeriesLabel(item, index, total) {
-  if (item.device) return String(item.device);
   const labels = item.labels || {};
+  if (labels.reason && labels.status) return String(labels.status) + ' · ' + labels.reason;
+  if (labels.reason) return String(labels.reason);
+  if (labels.handler) {
+    const parts = [];
+    if (labels.kind) parts.push(String(labels.kind));
+    parts.push((labels.method ? String(labels.method) + ' ' : '') + String(labels.handler));
+    if (labels.cmd && labels.cmd !== 'unavailable') parts.push('cmd ' + String(labels.cmd));
+    if (labels.tid) parts.push('tid ' + String(labels.tid));
+    if (labels.status) parts.push(String(labels.status));
+    return parts.join(' · ');
+  }
   if (labels.pid) {
     const comm = labels.comm ? String(labels.comm) + ' · ' : '';
     return comm + 'pid ' + labels.pid;
   }
-  if (labels.reason && labels.status) return String(labels.status) + ' · ' + labels.reason;
-  if (labels.reason) return String(labels.reason);
-  if (labels.handler) {
-    return (labels.method ? String(labels.method) + ' ' : '') + String(labels.handler) +
-      (labels.status ? ' · ' + labels.status : '');
-  }
   if (labels.status) return 'status ' + labels.status;
   if (labels.generation !== undefined) return 'gen ' + labels.generation;
   if (labels.engine !== undefined) return 'engine ' + labels.engine;
+  if (item.device) return String(item.device);
   return total > 1 ? 'series ' + (index + 1) : (item.source || 'series');
 }
 
@@ -3758,7 +3792,9 @@ function buildMetricGroupBuckets(group, minT, maxT) {
 
 function metricSourceLabel(source) {
   const lower = String(source || '').toLowerCase();
-  if (lower.includes('npu') || lower.includes('dcmi')) return 'NPU';
+  if (lower.includes('dcmi')) return 'DCMI';
+  if (lower.includes('npu-smi')) return 'NPU-smi';
+  if (lower.includes('npu')) return 'NPU';
   if (lower.includes('vllm')) return 'vLLM';
   if (lower.includes('proc')) return '进程';
   if (lower.includes('system') || lower.includes('node')) return '主机';
@@ -4140,6 +4176,7 @@ function metricsMatrixClick(ev) {
   const hit = metricMatrixHit(ev);
   if (!hit) return;
   metricsState.selectedKey = hit.group.key;
+  metricsState.showAllDetailRows = false;
   updateMetricDetail();
   drawMetricsMatrix();
   drawMetricDetail(metricsState.crosshair);
@@ -4159,10 +4196,18 @@ function updateMetricDetail() {
   }
   title.textContent = group.name;
   const unit = group.displayUnit || group.unit;
+  const detailRows = metricDetailRows(group);
+  const hiddenRows = Math.max(0, group.rows.length - detailRows.length);
   sub.textContent = group.source + ' · ' + (unit || 'unitless') + ' · ' +
     group.rows.length + ' series · ' + fmtMetricValue(group.minV, unit) + ' – ' +
-    fmtMetricValue(group.maxV, unit) + (group.kind === 'counter' ? ' · counter 已转 Δ/s' : '');
-  legend.innerHTML = group.rows.map((row) => {
+    fmtMetricValue(group.maxV, unit) + (group.kind === 'counter' ? ' · counter 已转 Δ/s' : '') +
+    (hiddenRows ? ' · 图中仅显示变化最大的 ' + detailRows.length + ' 条' : '');
+  const toggle = document.getElementById('metricDetailToggle');
+  if (toggle) {
+    toggle.hidden = group.rows.length <= METRIC_DETAIL_MAX_ROWS;
+    toggle.textContent = metricsState.showAllDetailRows ? '只看前 ' + METRIC_DETAIL_MAX_ROWS + ' 条' : '显示全部 ' + group.rows.length + ' 条';
+  }
+  legend.innerHTML = detailRows.map((row) => {
     const last = row.points.length ? row.points[row.points.length - 1].v : NaN;
     return '<span class="metric-legend-chip" title="' + esc(row.label) + '">' +
       '<i style="background:' + row.color + '"></i><span>' + esc(row.label) + '</span>' +
@@ -4225,7 +4270,8 @@ function drawMetricDetail(crosshairT) {
     ctx.textAlign = 'left';
     ctx.fillText(label, Math.max(left, Math.min(left + plotWidth - labelWidth, labelX)), height - 8);
   }
-  for (const row of group.rows) {
+  const rows = metricDetailRows(group);
+  for (const row of rows) {
     if (!row.points.length) continue;
     ctx.beginPath();
     for (let index = 0; index < row.points.length; index++) {
@@ -4235,7 +4281,7 @@ function drawMetricDetail(crosshairT) {
       if (index === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
     }
     ctx.strokeStyle = row.color;
-    ctx.lineWidth = group.rows.length > 8 ? 1.1 : 1.4;
+    ctx.lineWidth = rows.length > 8 ? 1.1 : 1.4;
     ctx.stroke();
     if (row.points.length === 1) {
       ctx.fillStyle = row.color;
@@ -4254,7 +4300,7 @@ function drawMetricDetail(crosshairT) {
     ctx.lineTo(x + 0.5, top + plotHeight);
     ctx.stroke();
     ctx.setLineDash([]);
-    for (const row of group.rows) {
+    for (const row of rows) {
       const nearest = nearestMetricPoint(row.points, crosshairT);
       if (!nearest) continue;
       ctx.fillStyle = row.color;
@@ -4271,7 +4317,7 @@ function drawMetricDetail(crosshairT) {
 function metricDetailTip(group, time) {
   let html = '<b>' + esc(group.name) + '</b><br><span class="muted">' + esc(group.source) +
     ' · ' + fmtClock(time / 1000) + '</span>';
-  for (const row of group.rows) {
+  for (const row of metricDetailRows(group)) {
     const nearest = nearestMetricPoint(row.points, time);
     if (!nearest) continue;
     html += '<div><i style="display:inline-block;width:6px;height:6px;border-radius:50%;background:' +
@@ -4361,7 +4407,7 @@ function renderMetricsSmallMultiples() {
     '<div class="metrics-matrix-wrap"><canvas id="metricsMatrix" tabindex="0" aria-label="指标组矩阵，点击行查看曲线"></canvas></div>' +
     '<div class="metrics-detail" id="metricsDetail">' +
       '<div class="metrics-detail-head">' +
-        '<div class="metrics-detail-title"><h3 id="metricDetailTitle"></h3><p id="metricDetailSub"></p></div>' +
+        '<div class="metrics-detail-title"><h3 id="metricDetailTitle"></h3><p id="metricDetailSub"></p><button type="button" id="metricDetailToggle" class="metric-detail-toggle" hidden></button></div>' +
         '<div class="metrics-detail-legend" id="metricDetailLegend"></div>' +
       '</div>' +
       '<div class="metrics-detail-chart"><canvas id="metricDetailCanvas"></canvas></div>' +
@@ -4401,6 +4447,14 @@ function renderMetricsSmallMultiples() {
     detailCanvas.addEventListener('mousemove', metricsDetailMove);
     detailCanvas.addEventListener('mouseleave', metricsDetailLeave);
   }
+  const detailToggle = document.getElementById('metricDetailToggle');
+  if (detailToggle) {
+    detailToggle.addEventListener('click', () => {
+      metricsState.showAllDetailRows = !metricsState.showAllDetailRows;
+      updateMetricDetail();
+      drawMetricDetail(metricsState.crosshair);
+    });
+  }
   renderMetricsSourceTabs();
   renderMetricsFiltered();
 }
@@ -4438,7 +4492,9 @@ function renderMetricsStats() {
     { name: 'npu_power_watts', label: 'Power' },
     { name: 'npu_temperature_celsius', label: 'Temp' }
   ];
-  const devices = [...new Set(stats.map((item) => String(item.device || '').trim()).filter(Boolean))]
+  const wantedNames = new Set(wanted.map((item) => item.name));
+  const devices = [...new Set(stats.filter((item) => wantedNames.has(String(item.name)))
+    .map((item) => String(item.device || '').trim()).filter(Boolean))]
     .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
   const byKey = new Map();
   stats.forEach((item) => byKey.set(String(item.name) + '|' + String(item.device || ''), item));
@@ -4453,7 +4509,7 @@ function renderMetricsStats() {
     return { ...col, min, max };
   });
   if (!devices.length) {
-    scroll.innerHTML = '<div class="metrics-stats-empty">没有设备维度指标；请看上方指标矩阵。</div>';
+    scroll.innerHTML = '<div class="metrics-stats-empty">本报告没有 DCMI/npu-smi 设备级指标；驱动与进程指标请直接看上方指标矩阵。</div>';
     meta.textContent = fmtCount(stats.length) + ' 项 / ' + fmtCount(metricsState.groups.length) + ' 组';
     return;
   }
@@ -4480,7 +4536,7 @@ function renderMetricsStats() {
     });
     html += '</tr>';
   });
-  html += '</tbody></table><div class="chart-note"><b>怎么看：</b>同一列颜色越深=该指标在这 8 张卡里越高；只做设备间对比，不是绝对阈值。鼠标悬停可看当前/均值/p95/最大。</div>';
+  html += '</tbody></table><div class="chart-note"><b>怎么看：</b>同一列颜色越深=该指标在这 ' + devices.length + ' 个设备里越高；只做设备间对比，不是绝对阈值。鼠标悬停可看当前/均值/p95/最大。</div>';
   scroll.innerHTML = html;
 }
 // ----------------------------- flamegraph -----------------------------
