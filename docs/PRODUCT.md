@@ -11,7 +11,7 @@
 
 | 项 | 值 |
 |---|---|
-| 源码 | `main` @ `5e2fc93`（in-process msPTI collector + host 接线） |
+| 源码 | `main` @ `410cd27`（M3 A1/A2 + A3-A8 + B 窗口记录） |
 | 版本号 | `0.6.0-m2` + M3（建议正式交付前改为 `0.7.0-m3`） |
 | Linux/arm64 二进制 | `dist/cann-ebpf-linux-arm64-m3` |
 | 大小 / SHA-256 | `13,407,163` bytes / `3fe700bb4d2345e7cee459c2c9449a1478e0b720da8db5ade29fc6f4569769c3` |
