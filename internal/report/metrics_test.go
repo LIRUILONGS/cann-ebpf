@@ -352,6 +352,36 @@ func TestMetricPriorityKeepsOrinferCriticalSeries(t *testing.T) {
 	}
 }
 
+func TestLoadMetricsHistogramUsesWindowDelta(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "metrics.jsonl")
+	writeMetricPoints(t, path, []metrics.Point{
+		{Schema: metrics.SchemaV1, MonoNS: 1_000_000_000, WallNS: 1_000_000_000, Source: "prometheus:vllm", Name: "vllm_e2e_latency_seconds", Kind: metrics.KindHistogram, Unit: "seconds", Histogram: &metrics.Histogram{Buckets: []float64{0.1, 0.5, 1}, Counts: []int64{10, 10, 10}, Sum: 0.75, Count: 10, Cumulative: true}},
+		{Schema: metrics.SchemaV1, MonoNS: 2_000_000_000, WallNS: 2_000_000_000, Source: "prometheus:vllm", Name: "vllm_e2e_latency_seconds", Kind: metrics.KindHistogram, Unit: "seconds", Histogram: &metrics.Histogram{Buckets: []float64{0.1, 0.5, 1}, Counts: []int64{10, 20, 20}, Sum: 3.75, Count: 20, Cumulative: true}},
+	})
+
+	data, err := LoadMetrics(path, MetricsOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var hist *MetricSeries
+	for i := range data.Series {
+		if data.Series[i].Kind == "histogram" {
+			hist = &data.Series[i]
+			break
+		}
+	}
+	if hist == nil || len(hist.V) != 2 {
+		t.Fatalf("histogram series = %+v", hist)
+	}
+	if hist.V[0] < 0.09 || hist.V[0] > 0.1 {
+		t.Fatalf("first cumulative p95 = %v", hist.V[0])
+	}
+	if hist.V[1] < 0.45 || hist.V[1] > 0.5 {
+		t.Fatalf("window delta p95 = %v", hist.V[1])
+	}
+}
+
 func assertClose(t *testing.T, got, want float64) {
 	t.Helper()
 	if math.Abs(got-want) > 1e-9 {

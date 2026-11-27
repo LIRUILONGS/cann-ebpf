@@ -80,6 +80,7 @@ func BuildWithMetrics(in *diagnose.Input, m *MetricsData, opts Options) (Data, e
 	data.Notes = append(data.Notes,
 		"指标模式：没有 spans.jsonl 证据，函数级归因、时间轴和设备四象限不可用。",
 		"指标值与采样间隔来自 metrics.jsonl / metrics.meta.json；缺失区间不插值。",
+		"histogram 的 p95 按相邻采样点的增量计算；首个采样点为累计快照，无新增请求的区间不绘制。",
 	)
 	return data, nil
 }

@@ -152,6 +152,7 @@ func LoadMetrics(path string, opts MetricsOptions) (*MetricsData, error) {
 	}
 
 	bySeries := map[string]*metricSeriesAgg{}
+	prevHistogram := map[string]*metrics.Histogram{}
 	for _, point := range points {
 		key := metrics.SeriesKey(point)
 		agg := bySeries[key]
@@ -170,7 +171,17 @@ func LoadMetrics(path string, opts MetricsOptions) (*MetricsData, error) {
 			}
 			agg.points = append(agg.points, metricPoint{T: t, V: *point.Value})
 		case metrics.KindHistogram:
-			if value, ok := histogramP95(point.Histogram); ok {
+			histogram := point.Histogram
+			if previous := prevHistogram[key]; previous != nil {
+				if delta, ok := subtractHistogram(histogram, previous); ok {
+					histogram = delta
+				}
+			}
+			prevHistogram[key] = point.Histogram
+			if histogram == nil || histogram.Count <= 0 {
+				continue
+			}
+			if value, ok := histogramP95(histogram); ok {
 				agg.points = append(agg.points, metricPoint{T: t, V: value})
 			}
 		}
@@ -287,6 +298,41 @@ func histogramP95(h *metrics.Histogram) (float64, bool) {
 		prevBound, prevCount = bound, count
 	}
 	return h.Buckets[len(h.Buckets)-1], true
+}
+
+// subtractHistogram returns the requests observed between two cumulative
+// Prometheus histogram snapshots. A reset, a bucket-layout change, or a
+// negative delta returns false so the caller can fall back to the raw snapshot
+// instead of fabricating a window value.
+func subtractHistogram(current, previous *metrics.Histogram) (*metrics.Histogram, bool) {
+	if current == nil || previous == nil || len(current.Buckets) != len(previous.Buckets) || len(current.Counts) != len(previous.Counts) {
+		return nil, false
+	}
+	for i := range current.Buckets {
+		if current.Buckets[i] != previous.Buckets[i] {
+			return nil, false
+		}
+	}
+	counts := make([]int64, len(current.Counts))
+	for i := range current.Counts {
+		delta := current.Counts[i] - previous.Counts[i]
+		if delta < 0 {
+			return nil, false
+		}
+		counts[i] = delta
+	}
+	count := current.Count - previous.Count
+	sum := current.Sum - previous.Sum
+	if count < 0 || sum < 0 {
+		return nil, false
+	}
+	return &metrics.Histogram{
+		Buckets:    append([]float64(nil), current.Buckets...),
+		Counts:     counts,
+		Sum:        sum,
+		Count:      count,
+		Cumulative: current.Cumulative,
+	}, true
 }
 
 func downsampleMetricPoints(points []metricPoint, maxPoints int) ([]metricPoint, bool) {
