@@ -122,24 +122,41 @@ OUT="runs/ebpf-$(date -u +%Y%m%dT%H%M%SZ)"
 ### 一条命令出报告（host span + 火焰图）
 
 `scripts/report_once.sh` 把 attach、stacks、report 串成一条命令。  
-**不传 PID 时会自动识别目标**：
+**PID 必须自己传，不做自动识别。**
+
+Orinfer（单进程）：
 
 ```bash
+PID=$(pgrep -f '/opt/orinfer/bin/orinfer serve' | head -1)
+
 sh scripts/report_once.sh \
+  --pid "$PID" \
+  --profile orinfer \
+  --profiles-dir /opt/cann-ebpf/profiles \
   --duration 10m \
-  --out "runs/report-$(date -u +%Y%m%dT%H%M%SZ)"
+  --out "/var/log/cann-ebpf/runs/report-orinfer-$(date -u +%Y%m%dT%H%M%SZ)"
 ```
 
-自动识别规则：
+vLLM（多进程）：把 frontend、EngineCore、所有 Worker 的 PID 都传进去。
 
-- 找到 `/opt/orinfer/bin/orinfer serve` → profile=`orinfer`，取该主进程 PID
-- 找到 `vllm serve` / `VLLM::Worker_TP` / `VLLM::EngineCore` → profile=`vllm-ascend`，取全部相关 PID
-- 找不到 → 报错并打印 `pgrep` 排查命令，不会静默采空
+```bash
+PIDS=$(pgrep -f 'vllm serve|VLLM::Worker_TP|VLLM::EngineCore' | sort -u)
+PID_ARGS=""
+for p in $PIDS; do PID_ARGS="$PID_ARGS --pid $p"; done
+echo "PIDS: $PIDS"
 
-二进制默认找 `./cann-ebpf`；如果不存在，会回退到 `dist/cann-ebpf-linux-arm64`。也可以显式指定：
+sh scripts/report_once.sh $PID_ARGS \
+  --profile vllm-ascend \
+  --profiles-dir /opt/cann-ebpf/profiles \
+  --duration 10m \
+  --out "/var/log/cann-ebpf/runs/report-vllm-$(date -u +%Y%m%dT%H%M%SZ)"
+```
+
+二进制默认找 `./cann-ebpf`；不存在时回退到 `dist/cann-ebpf-linux-arm64`。也可以显式指定：
 
 ```bash
 sh scripts/report_once.sh \
+  --pid "$PID" --profile orinfer \
   --bin ./dist/cann-ebpf-linux-arm64 \
   --profiles-dir ./profiles \
   --duration 10m \
@@ -156,36 +173,6 @@ sh scripts/report_once.sh \
 ```
 
 它**不发压测请求**；只做只读采集和离线报告。要压测请单独用 `scripts/run_sweep.sh`。
-
-### 显式指定 PID（自动识别失败时）
-
-单进程 Orinfer：
-
-```bash
-sh scripts/report_once.sh \
-  --pid 1571634 --profile orinfer \
-  --profiles-dir /opt/cann-ebpf/profiles \
-  --duration 10m \
-  --bin /opt/cann-ebpf/bin/cann-ebpf-report-demo \
-  --out "/var/log/cann-ebpf/runs/report-once-$(date -u +%Y%m%dT%H%M%SZ)"
-```
-
-vLLM 多进程：传重复 `--pid`，或逗号分隔。
-
-```bash
-PIDS=$(pgrep -f 'vllm serve|VLLM::Worker_TP|VLLM::EngineCore' | sort -u)
-PID_ARGS=""
-for p in $PIDS; do PID_ARGS="$PID_ARGS --pid $p"; done
-
-sh scripts/report_once.sh $PID_ARGS \
-  --profile vllm-ascend \
-  --profiles-dir /opt/cann-ebpf/profiles \
-  --duration 10m \
-  --bin /opt/cann-ebpf/bin/cann-ebpf-report-demo \
-  --out "/var/log/cann-ebpf/runs/report-v4-$(date -u +%Y%m%dT%H%M%SZ)"
-```
-
-`--pid auto` 也可以，但显式 PID 列表更可控；`stacks` 在多进程场景建议用显式列表。
 
 ## 报告里有什么
 
