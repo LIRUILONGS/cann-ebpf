@@ -52,8 +52,10 @@
     根因是缺 device 绑定导致两个 rank 抢同一 device，不是 HCCL 网络不可用。
   - collector 仍失败：带 `LD_PRELOAD` 或 HCCL 初始化后 `dlopen` 均使 Python SIGSEGV，
     没有生成 device 记录，**未得到 correlationId 证据**。这是 collector 生命周期问题。
-- **B3（固定负载门禁）本次未重跑**：B1 失败后优先恢复 V4 并切 V4.1；保留
-  `docs/B3-ONLINE-OVERHEAD.md` 的在线 smoke 结论，正式门禁仍待受控环境。
+- **B3（固定负载门禁）V4.1 客户端口径 PASS，但置信度低**：2 并发、30 秒、off/on
+  各 2 轮；client rps off 8.616→on 9.146（-6.15%，on 略快）、client p95 -1.92%、
+  agent CPU -0.065pp、dropped 0、health 151/151=200。噪声 stdev/median≈11.8%，
+  2 轮不能证明严格 <3%；详见 `docs/B3-V41-GATE.md`。
 - **V4.1 切换完成**：V4 已停，`orinfer-v41` active，`127.0.0.1:8000/health` 200，
   `/v1/models` 返回 `deepseek-v4.1`；collector env block 已移除，无 device 文件。
 - **B2 Orinfer 采集（有负载）成功**：20 秒、2 并发固定请求，`spans=584`，包含
