@@ -26,11 +26,28 @@ while [ $# -gt 0 ]; do
 done
 
 echo "mode=$MODE lib=$LIB cache=$CACHE env_file=$ENV_FILE fragment=$FRAGMENT"
+if [ "$MODE" != dry-run ] && [ ! -f "$LIB" ] && [ -f "$CACHE/libcannmspti.so" ]; then
+  LIB="$CACHE/libcannmspti.so"
+  echo "fallback: using already staged $LIB"
+fi
 [ "$MODE" = dry-run ] || [ -f "$LIB" ] || { echo "collector library not found: $LIB" >&2; exit 4; }
 
+BASE_LD=""
+if [ -f "$ENV_FILE" ]; then
+  BASE_LD=$(grep -E '^LD_PRELOAD=' "$ENV_FILE" | tail -1 | cut -d= -f2- || true)
+fi
+MS_PRELOAD=/usr/local/Ascend/cann-9.0.1/tools/mspti/lib64/libmspti.so
+COLLECTOR_PRELOAD=/cache/cann-ebpf/libcannmspti.so
+if [ -n "$BASE_LD" ]; then
+  PRELOAD_VALUE="$BASE_LD:$MS_PRELOAD:$COLLECTOR_PRELOAD"
+else
+  PRELOAD_VALUE="$MS_PRELOAD:$COLLECTOR_PRELOAD"
+fi
+
 BLOCK='# BEGIN cann-ebpf collector
-LD_PRELOAD=/cache/cann-ebpf/libcannmspti.so
+LD_PRELOAD='"$PRELOAD_VALUE"'
 CANN_MSPTI_ACTIVITIES=api,acl_api,runtime_api,kernel,memcpy,hccl
+CANN_MSPTI_ONLY_COMM=vllm,python
 CANN_MSPTI_OUTPUT=/cache/cann-ebpf/device-{pid}.jsonl
 CANN_MSPTI_RUN_ID=vllm-collector
 CANN_MSPTI_FLUSH_INTERVAL_MS=1000
@@ -45,7 +62,9 @@ if [ "$MODE" = dry-run ]; then
 fi
 
 mkdir -p "$CACHE"
-cp -f "$LIB" "$CACHE/libcannmspti.so"
+if [ "$LIB" != "$CACHE/libcannmspti.so" ]; then
+  cp -f "$LIB" "$CACHE/libcannmspti.so"
+fi
 chmod 0755 "$CACHE/libcannmspti.so"
 echo "staged $CACHE/libcannmspti.so"
 

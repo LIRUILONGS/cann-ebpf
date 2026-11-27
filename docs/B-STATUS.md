@@ -1,11 +1,12 @@
-# B1-B4 当前状态（2026-11-26）
+# B1-B4 当前状态（2026-11-27 更新）
 
-约束：**推理服务（V4）不能停**。以下按此约束执行。
+约束变化：2026-11-27 已允许停机；窗口方案见 `docs/MAINTENANCE-PLAN.md`，执行结果见下文。
 
 ## B1 真实 V4/Orinfer 设备时间线
 
-- **未执行**：msPTI collector 必须在 ACL 初始化前 LD_PRELOAD/入口 wrapper；对运行中的 V4
-  不能安全注入，必然需要一次 V4 重启或备用实例。
+- **已尝试，失败**（2026-11-27）：通过 V4 env-file `LD_PRELOAD` 注入 collector 后，容器入口
+  `bash` 与 vLLM `python3` 进程均 SIGSEGV；加 `CANN_MSPTI_ONLY_COMM` 仅修复 shell，python 仍崩溃。
+  已回滚 collector env，V4 恢复。详见 `docs/B-STATUS.md` 的窗口结果。
 - 已准备：`m3/mspti_collector` 可从当前源码构建并通过 selftest；`attach --device-jsonl`
   可导入 collector 产物、抓 pidmap 并封存 artifact。
 - 进一步准备（2026-11-26）：`deploy/b1/stage-collector.sh --stage` 已把
@@ -34,7 +35,21 @@
   因此不在共享卡上执行。
 - 需要：备用节点/独占卡测试环境，或维护窗口内与 B1 一起做；同时验证
   `msptiActivityHccl` 无 correlationId、只有 `Communication` 有的降级路径。
-- 方案与命令模板已写入 `docs/B4-HCCL-PLAN.md`，未执行。
+- 方案与命令模板已写入 `docs/B4-HCCL-PLAN.md`；2026-11-27 窗口在 `orinfer-cann920`
+  容器内尝试 2-rank，HCCL 初始化失败（hostname/IPv6 解析报错、ERR99999），**未得到 correlationId 证据**；
+  即使不加载 collector 也失败，属容器/网络配置问题，不是 collector 结论。
+
+## 2026-11-27 停机窗口执行结果
+
+- **B1（真实 V4 设备时间线）失败**：把 `libcannmspti.so` 通过 V4 `--env-file` 的 `LD_PRELOAD`
+  注入后，容器入口 `bash` 先 SIGSEGV；加 `CANN_MSPTI_ONLY_COMM` 过滤后 shell 正常，但
+  vLLM 的 `python3` 进程仍 SIGSEGV，V4 反复 139 退出。已回滚 collector env，V4 恢复正常。
+  结论：当前 collector 与 V4/CANN 9.0.1 + vLLM 运行时存在兼容性问题，不能直接 LD_PRELOAD；
+  需要改为“只包住目标进程”的入口 wrapper 或修复 collector 构造/初始化路径，再重试。
+- **B4（真实 HCCL correlationId）失败**：见上，容器 HCCL 网络初始化失败，未产生 device 记录。
+- **B3（固定负载门禁）本次未重跑**：B1 失败后优先恢复 V4 并切 V4.1；保留
+  `docs/B3-ONLINE-OVERHEAD.md` 的在线 smoke 结论，正式门禁仍待受控环境。
+- **V4.1 切换**：V4 已停，`orinfer-v41` 启动中；完成后以 `127.0.0.1:8000/health` 为准。
 
 ## 可以在不停机下继续做的
 

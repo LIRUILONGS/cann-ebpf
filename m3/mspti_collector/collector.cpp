@@ -1067,6 +1067,28 @@ __attribute__((constructor)) static void CannMsptiAutoStart() {
     if (output == nullptr || *output == '\0') {
         return;
     }
+    // LD_PRELOAD also reaches the shell entrypoint and helper binaries. msPTI
+    // initialization is only valid inside the CANN/Python workload; starting it
+    // in bash was observed to SIGSEGV before vLLM could run.
+    const char *only_comm = std::getenv("CANN_MSPTI_ONLY_COMM");
+    if (only_comm != nullptr && *only_comm != '\0') {
+        std::ifstream comm_file("/proc/self/comm");
+        std::string comm;
+        if (std::getline(comm_file, comm)) {
+            std::stringstream wanted(only_comm);
+            std::string token;
+            bool matched = false;
+            while (std::getline(wanted, token, ',')) {
+                if (!token.empty() && comm.find(token) != std::string::npos) {
+                    matched = true;
+                    break;
+                }
+            }
+            if (!matched) {
+                return;
+            }
+        }
+    }
     // {pid} lets a service-level LD_PRELOAD give every worker its own file;
     // otherwise all ranks would race on one output path.
     std::string output_path(output);

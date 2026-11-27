@@ -1,6 +1,10 @@
-# B1 准备：把 msPTI collector 接入 V4（未执行重启）
+# B1 准备：把 msPTI collector 接入 V4
 
-状态：**只准备，不激活**。V4 仍在运行，未改 `/etc/vllm-ds4.env`、未重启。
+状态（2026-11-27 更新）：**尝试激活失败，已回滚**。V4 已恢复正常。
+失败现象：env-file LD_PRELOAD 注入后容器入口 `bash`、以及 vLLM 的 `python3` 进程均 SIGSEGV；
+加 `CANN_MSPTI_ONLY_COMM=vllm,python` 只解决了 shell，python 仍崩溃。当前 collector 不能直接
+LD_PRELOAD 进 V4 运行时；需要入口 wrapper 只包住 vLLM 主进程或修复 collector 初始化。详见
+`docs/B-STATUS.md` 的窗口结果。
 
 ## 1. 原理
 
