@@ -144,3 +144,60 @@
 
 **建议他先交 P0/P1：过滤 `_created`、覆盖摘要、默认 Top-N、脱敏、单画廊、XSS 测试。**  
 这些做完，这份报告就可以作为“真实 V4 的 host + metrics 报告”对外展示；device/critical path 等再等补齐数据。
+
+## 7. 为什么缺这么多图（逐项解释）
+
+结论先说：**不是代码没写，而是每个图都有证据依赖；报告选择“没有证据就不画”，这是对的。**
+
+### 7.1 10 个视图里 7 个缺图，缺的东西不同
+
+| 缺的视图 | 缺什么数据 | 为什么这次没有 |
+|---|---|---|
+| `load_latency` | `sweep.json`，至少 4 档并发 | 本次只跑了一次 attach，没有并发扫描 |
+| `critical_path` | host span + device 时间线同窗口 | 只采了 host，没有 `device.jsonl`；V4 不能停，collector 没注入 |
+| `summed_delay` | 依赖 critical path | 上游 critical path 不可用 |
+| `slack_cdf` | 依赖 critical path | 上游 critical path 不可用 |
+| `roofline` | `ops.jsonl`（每算子 FLOPs/bytes） | 当前没有采集算子级算力/带宽数据 |
+| `ab_diff` | A/B 两次同 workload run | 只有一次 run，没有对照组 |
+| `change_point` | ≥5 分钟稳定序列 | 本次窗口 29.5 秒，被判定太短 |
+
+这 7 个不是“画不出来”，是**证据没到**；硬画就是假图。
+
+### 7.2 指标 991→256 是“截断”，不是“缺数据”
+
+- `metrics.jsonl` 实际有 **991 个 series**；
+- 报告 `MaxSeries=256`，只渲染了 **256 个**；
+- 其余 **735 个被截断**，warning 有提示，但页面顶部没有突出。
+
+这是报告主动限流，不是采集缺失。正确做法是：按 source 分组、默认 Top-N、可展开/分页，而不是硬塞 991 张图。
+
+### 7.3 还有一部分指标是“根本没采”
+
+例如：
+
+- HBM 带宽、ECC、频率、HCCS/PCIe；
+- 逐 request 的 TTFT/ITL/queue；
+- 完整 KV cache 压力。
+
+这些不是报告 bug，是采集端还没有对应数据源。
+
+### 7.4 为什么 host 侧只能给 3 个图
+
+这份是 **host-only** 采集：
+
+- `off_cpu`：有真实阻塞，但只覆盖外层 span → **partial**；
+- `operator_treemap`：没有 device 的 KERNEL/MEMCPY，只能用 host 时长推 → **inferred**；
+- `service_topology`：没有 trace_id 传播，只能到进程范围 → **partial**。
+
+Host eBPF 能看到“调用了什么、等了多久”，但看不到“NPU 内部 kernel/memcpy/HCCL 花了多久”。没有 msPTI device 时间线，`critical_path`/`roofline` 这类图天然缺证据。
+
+### 7.5 想多出图，按成本从低到高补
+
+1. **同一次 attach 带 metrics**（已做）→ 修 `_created`、分组/Top-N，指标图先完整；
+2. 跑一次 **sweep**（4–6 档并发）→ `load_latency`；
+3. 停 V4 的窗口采 **host + device 同窗口** → `critical_path`/`summed_delay`/`slack_cdf`；
+4. 补 **ops.jsonl** → `roofline`；
+5. 做 **A/B 两次 run** → `ab_diff`；
+6. 跑 **≥5 分钟** 稳定窗口 → `change_point`。
+
+**一句话：报告不是“少画了”，而是“该有的证据没采到”；先把 unavailable 原因讲清楚，再按上面的顺序补数据。**
