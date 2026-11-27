@@ -46,14 +46,21 @@
   vLLM 的 `python3` 进程仍 SIGSEGV，V4 反复 139 退出。已回滚 collector env，V4 恢复正常。
   结论：当前 collector 与 V4/CANN 9.0.1 + vLLM 运行时存在兼容性问题，不能直接 LD_PRELOAD；
   需要改为“只包住目标进程”的入口 wrapper 或修复 collector 构造/初始化路径，再重试。
-- **B4（真实 HCCL correlationId）失败**：见上，容器 HCCL 网络初始化失败，未产生 device 记录。
+- **B4（真实 HCCL correlationId）部分成功/collector 未完成**：
+  - 2-rank HCCL 本身已跑通：修复容器 `/etc/hosts` 的 hostname 解析 + 每个 rank
+    `torch.npu.set_device(local_rank)` 后，`all_reduce` 成功，两个 rank 输出 `sum=32`；
+    根因是缺 device 绑定导致两个 rank 抢同一 device，不是 HCCL 网络不可用。
+  - collector 仍失败：带 `LD_PRELOAD` 或 HCCL 初始化后 `dlopen` 均使 Python SIGSEGV，
+    没有生成 device 记录，**未得到 correlationId 证据**。这是 collector 生命周期问题。
 - **B3（固定负载门禁）本次未重跑**：B1 失败后优先恢复 V4 并切 V4.1；保留
   `docs/B3-ONLINE-OVERHEAD.md` 的在线 smoke 结论，正式门禁仍待受控环境。
 - **V4.1 切换完成**：V4 已停，`orinfer-v41` active，`127.0.0.1:8000/health` 200，
   `/v1/models` 返回 `deepseek-v4.1`；collector env block 已移除，无 device 文件。
-- **B2 Orinfer 采集**：`m5_capture` 成功（health 200，0 错误），但 10 秒窗口 `spans=0`；
-  说明 Orinfer 侧无实际 CANN 调用或 profile 未匹配到目标，`compare-v4-v41.md` 只有 V4 数据。
-  B2 仍需在 Orinfer 有真实负载时重采，不能据此下 A/B 结论。
+- **B2 Orinfer 采集（有负载）成功**：20 秒、2 并发固定请求，`spans=584`，包含
+  `event/handle/memory/sync` 和 **6 条 HCCL**（`HcclAllReduce` 3 次）；health 200→200，
+  `dropped=0`，`compare-v4-v41-load.md` 已生成。V4 基线为 1,765 spans，但两边不是同一
+  workload，且缺少 device 时间线，**只能作为 host 侧行为对比，不能下生产 A/B 结论**。
+  （早先无负载的 0-span 采集已作废。）
 
 ## 可以在不停机下继续做的
 
