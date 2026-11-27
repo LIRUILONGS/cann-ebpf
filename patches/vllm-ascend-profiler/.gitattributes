@@ -1,0 +1,6 @@
+# Keep the shell launchers LF on every checkout; a CRLF launcher breaks `bash -n`
+# and, worse, `set -euo pipefail` parsing on the host.
+*.sh text eol=lf
+*.py text eol=lf
+*.json text eol=lf
+*.diff text eol=lf

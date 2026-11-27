@@ -1,0 +1,7 @@
+{
+  "profiler": "torch",
+  "torch_profiler_dir": "/cache/vllm_profile",
+  "torch_profiler_with_stack": false,
+  "torch_profiler_record_shapes": true,
+  "torch_profiler_with_flops": true
+}
