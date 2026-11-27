@@ -216,7 +216,9 @@ type MetricStat struct {
 - 这是 series 级统计，不是 request 级统计；不能据此宣称单个请求的关键路径或尾延迟归因。
 - `MetricStat` 在 `LoadMetrics` 阶段基于 `metrics.jsonl` 的原始 series 计算；报告后续按 span 窗口裁剪/重排绘图序列时，不重新计算统计值。
 
-多指标小倍数默认选：
+指标矩阵按“来源 + 指标名 + 单位”归并；每行一条组均值曲线，纵轴按本行 min–max 归一化，
+counter 先转 Δ/s，样本不足（少于 2 个有效点）的组只标注、不画线。默认“按变化排序”，
+优先展示变化最大的组；也可切换“按来源排序”。优先展示的指标包括：
 
 - `npu_aicore_utilization_ratio`
 - `npu_hbm_used_ratio`

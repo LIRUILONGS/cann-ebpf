@@ -57,7 +57,9 @@
 | P0 `diagnose` 命令 | 完成 | 只读读取已有证据，JSON/Markdown，单测覆盖；不需要 NPU |
 | P1 `report` 性能仪表盘 | 完成 | 只读生成单文件离线 HTML；时间轴/散点/热力图/TopN/CDF/设备四象限，无外部依赖 |
 | 独立 metrics 采集 | 完成 | `cann-ebpf sample`；DCMI/npu-smi、进程、cgroup、主机 system、Prometheus 五类源；不修改 trace 原始证据 |
-| M1/M2 可视化增强 | 完成 | 延迟热图、次秒偏移热图、函数分位带、尾 cohort、多指标小倍数；有明确空态/降级原因 |
+| `attach` 同窗口 metrics | 完成（本机编译/单测） | 单条 `attach` 命令内采集 DCMI/npu-smi/Prometheus，可选进程/cgroup/system；写入 `metrics.jsonl`/`metrics.meta.json`，封存 manifest artifact，`--report auto` 直接叠加；真实 NPU/服务端窗口待验证 |
+| 报告指标覆盖与时间分批 | 完成（服务端 v2 验证） | 过滤 `*_created`/`*_info`（原始 JSONL 不变）；写入 `meta/projected/filtered/eligible/rendered/truncated/series_limit`；顶部覆盖率卡；默认散点上限 20000；新增 `scripts/run_metrics_window.sh` 长窗口 metrics-only 采集；详见 `docs/REPORT-REVIEW-SERVER-LIVE.md` |
+| M1/M2 可视化增强 | 完成 | 延迟热图、次秒偏移热图、函数分位带、尾 cohort、指标矩阵；有明确空态/降级原因 |
 | vLLM 十视图 | 完成代码 + 真实接入 | `load_latency`、`critical_path`、`summed_delay`、`slack_cdf`、`off_cpu`、`operator_treemap`、`roofline`、`ab_diff`、`change_point`、`service_topology`；严格证据缺失时显示 unavailable/inferred/partial |
 | 指标统计表/主机指标 | 完成 | metrics series 的 current/mean/p50/p95/p99/max、counter rate；`sample --system` 采集主机 CPU/load/memory/PSI/disk/net/thermal/frequency |
 | M2 off-CPU/futex 归因 | 完成并上机验证 | sched_switch + syscalls futex tracepoint、`offcpu_ns`/`futex_ns`；V4 10 秒与合成锁竞争均通过 |
@@ -272,7 +274,7 @@ span_id, seq
   （时间 × 对数耗时，慢阈值线，点击聚焦）、时间热力图（p95 或慢调用数）、TopN 函数
   （总耗时/p95/max/慢调用数）、延迟 CDF（p50/p95/p99）、设备四象限（host 等待 vs
   device busy%，区分 `device_bound`/`launch_starvation`）、设备忙率（busy/kernel/memcpy/HCCL），
-  以及延迟热图、次秒偏移热图、函数分位带、尾 cohort、多指标小倍数。
+  以及延迟热图、次秒偏移热图、函数分位带、尾 cohort、指标矩阵。
 - **判定口径**：设备区间只按 `device.Join` 的匹配结果统计；busy 是区间并集，kernel/memcpy/HCCL
   是区间时长之和，可能重叠；无 device 证据时明确显示“设备证据不可用”，不补造。
 - **边界**：没有调用栈采样，不是按栈聚合的火焰图；TID 泳道只能到线程/函数级，不能回答单

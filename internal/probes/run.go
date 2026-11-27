@@ -18,6 +18,7 @@ import (
 	"cann-ebpf/internal/discovery"
 	"cann-ebpf/internal/elfutil"
 	"cann-ebpf/internal/hardware"
+	"cann-ebpf/internal/metrics"
 	"cann-ebpf/internal/runlog"
 
 	"github.com/cilium/ebpf"
@@ -44,6 +45,11 @@ func Run(opts Options) (result *Result, retErr error) {
 	}()
 	functions, warnings := requestedFunctions(opts.Profile)
 	result.Warnings = append(result.Warnings, warnings...)
+	for _, warning := range opts.Metrics.ConfigWarnings {
+		if warning = strings.TrimSpace(warning); warning != "" {
+			result.Warnings = append(result.Warnings, "metrics: "+warning)
+		}
+	}
 	if len(functions) == 0 {
 		return nil, fmt.Errorf("profile selects no supported host probe functions")
 	}
@@ -257,6 +263,27 @@ func Run(opts Options) (result *Result, retErr error) {
 	runCtx, cancel := context.WithCancel(opts.Context)
 	defer cancel()
 	captureStart = time.Now()
+	var metricsCancel context.CancelFunc
+	var metricsDone chan struct{}
+	var metricsRun metrics.Result
+	var metricsRunErr error
+	if opts.Metrics.Enabled && opts.OutputDir != "" && len(opts.Metrics.Sources) > 0 {
+		result.Metrics.Enabled = true
+		metricsCtx, cancelMetrics := context.WithCancel(opts.Context)
+		metricsCancel = cancelMetrics
+		metricsDone = make(chan struct{})
+		interval := opts.Metrics.Interval
+		if interval <= 0 {
+			interval = time.Second
+		}
+		go func() {
+			defer close(metricsDone)
+			metricsRun, metricsRunErr = metrics.Run(metricsCtx, metrics.Options{
+				OutDir: opts.OutputDir, Interval: interval, Duration: opts.Duration,
+				Sources: opts.Metrics.Sources, ToolVersion: opts.ToolVersion,
+			})
+		}()
+	}
 	if opts.OnCaptureStart != nil {
 		opts.OnCaptureStart()
 	}
@@ -277,6 +304,31 @@ func Run(opts Options) (result *Result, retErr error) {
 	if opts.OnCaptureStop != nil {
 		opts.OnCaptureStop()
 	}
+	if metricsDone != nil {
+		metricsStopTimedOut := false
+		if runErr != nil {
+			metricsCancel()
+		}
+		select {
+		case <-metricsDone:
+		case <-time.After(10 * time.Second):
+			metricsStopTimedOut = true
+			metricsCancel()
+			<-metricsDone
+		}
+		metricsCancel()
+		result.Metrics = compactMetricsResult(metricsRun, metricsRunErr, opts.Metrics.Sources)
+		if metricsStopTimedOut {
+			result.Warnings = append(result.Warnings,
+				"metrics sampling did not stop within 10s after capture_stop; it was canceled")
+		}
+		for _, warning := range result.Metrics.Warnings {
+			result.Warnings = append(result.Warnings, "metrics: "+warning)
+		}
+		if result.Metrics.Error != "" {
+			result.Warnings = append(result.Warnings, "metrics sampling: "+result.Metrics.Error)
+		}
+	}
 	if hardwareCollector != nil {
 		result.Hardware = hardwareCollector.Stop()
 		result.Warnings = append(result.Warnings, result.Hardware.Warnings...)
@@ -293,6 +345,23 @@ func Run(opts Options) (result *Result, retErr error) {
 		result.Warnings = append(result.Warnings, result.DeviceEvidence.Warnings...)
 	}
 	if writer != nil {
+		for _, artifact := range []struct{ kind, path string }{
+			{"metrics_jsonl", result.Metrics.MetricsPath},
+			{"metrics_meta", result.Metrics.MetaPath},
+		} {
+			if artifact.path == "" {
+				continue
+			}
+			if _, statErr := os.Stat(artifact.path); statErr != nil {
+				result.Warnings = append(result.Warnings,
+					fmt.Sprintf("seal %s %s: %v", artifact.kind, artifact.path, statErr))
+				continue
+			}
+			if err := writer.AddArtifact(artifact.path, artifact.kind); err != nil {
+				result.Warnings = append(result.Warnings,
+					fmt.Sprintf("seal %s %s: %v", artifact.kind, artifact.path, err))
+			}
+		}
 		artifacts := []struct{ kind, path string }{
 			{"device_jsonl", result.DeviceEvidence.DevicePath},
 			{"device_meta", result.DeviceEvidence.MetaPath},

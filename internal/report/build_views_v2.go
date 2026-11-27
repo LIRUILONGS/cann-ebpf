@@ -81,6 +81,7 @@ func buildReportViewsV2(input viewsV2BuildInput) ReportViewsV2 {
 
 	offCPUOptions := OffCPUOptions{
 		WindowStartNS: input.windowStartNS,
+		MaxRows:       input.opts.MaxSpanPoints,
 		IntervalPath:  paths.offCPU,
 	}
 	views.OffCPU = BuildOffCPU(input.spans, offCPUOptions)

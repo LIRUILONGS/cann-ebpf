@@ -1,8 +1,14 @@
-# 评审：server-live-batch 报告（2026-11-27）
+# 评审与修复记录：server-live-batch 报告（2026-11-27）
 
-对象：`.analysis/server-live-batch-20261127/report.html`  
+对象：`.analysis/server-live-batch-20261127/report.html`（修复前）与
+`report-review-v2.html`（修复后）。
 生成时间：2026-11-27T09:41:02Z  
-文件：18,078,918 bytes，SHA-256 `c1b0287fdd2ef98e951961b96082e12bcb7bc0363e2ade2232a7812d068b95d7`
+原始 run：`vllm-ascend-20261127T094020.474635795Z`
+
+> 事实更正：报告里的主机是 `bms-84865758`，路径是
+> `/root/cann-ebpf/runs/ebpf-metrics-batch-20261127T094018Z`，不是早期评审里写的
+> `target-host` / `/opt/cann-ebpf`。这些是真实证据的一部分；本项目不做默认脱敏，
+> 也不会为了“看起来干净”修改原始证据。
 
 ## 1. 这份报告实际包含什么
 
@@ -14,23 +20,26 @@
 | PID / TID | 9 / 18 |
 | 慢 span（>1ms） | **1,391** |
 | profile | `vllm-ascend` |
-| 状态 | complete |
+| manifest 状态 | `complete` |
+| 修复前 HTML | 18,078,918 bytes |
+| 修复后 HTML | 8,649,046 bytes（默认 20k 散点上限） |
 
-指标：
+指标计数必须按下面这条链读，不能再把“原始 series”和“图表候选”混成一个数：
 
-| 项 | 值 |
-|---|---|
-| metrics 原始 series | **991** |
-| 报告实际渲染 | **256**（超过上限被截断） |
-| 采样点 | 27,102 |
-| interval | 1s |
-| sources | `proc=163`、`npu-smi=72`、`prometheus:vllm=21` |
-| kinds | counter=163、gauge=81、histogram=12 |
-| 仍被画成曲线的 `*_created` | **4** 个（TTFT/e2e/prompt/generation 的 created 时间戳） |
+| 阶段 | 字段 | 数量 | 说明 |
+|---|---|---|---|
+| 采集端原始 series | `meta_series` | **961** | `metrics.meta.json` 里登记的 series |
+| 报告投影后 | `projected_series` | **991** | 按窗口重建，histogram 展开成 p50/p95/p99，所以会多于 961 |
+| 上下文指标过滤 | `filtered_series` | **41** | `*_created` / `*_info` 只留在原始 `metrics.jsonl`，不画图 |
+| 可绘制候选 | `eligible_series` | **950** | 991 − 41 |
+| 实际上限 | `series_limit` | **256** | `--max-series` |
+| 实际绘制 | `rendered_series` | **256** | 报告里真正有曲线的 series |
+| 未绘制 | `truncated_series` | **694** | 950 − 256，warning 会写清楚 |
 
-## 2. 图表覆盖：不是“所有指标都有图”
+修复前的 warning 只写“991 超过上限 256，已截断”，没有说明 991 里包含 histogram
+分位展开、也没有说明 `_created` 被过滤；这是本次修复的重点之一。
 
-10 个视图里只有 **3 个可用**：
+## 2. 图表覆盖：视图 3/10 可用，不是“所有指标都有图”
 
 | 视图 | 状态 | 说明 |
 |---|---|---|
@@ -43,113 +52,27 @@
 | `slack_cdf` | **unavailable** | 依赖 critical path |
 | `roofline` | **unavailable** | 缺 `ops.jsonl` |
 | `ab_diff` | **unavailable** | 缺 A/B 两次 run |
-| `change_point` | **unavailable** | 窗口 29.5s < 300s |
+| `change_point` | **unavailable** | 本次窗口 29.5s < 300s |
 
-所以：
+结论：
+
 - **视图层：3/10 有图，7/10 是“不可用 + 原因”**；
-- **指标层：991 个 series 只画了 256 个**，不是全部；
-- 没有伪造 unavailable 数据，这一点是对的。
+- **指标层：950 个可绘制候选里画了 256 个**，其余 694 个是主动限流，不是采集缺失；
+- 没有伪造 unavailable 数据，这一点保持不变。
 
-## 3. 做得好的地方
+## 3. 已修复项（含验证）
 
-- 10 个视图都有明确的 `available/partial/inferred/unavailable` 和 reason；
-- `operator_treemap` 明确标 `inferred`，没有冒充设备算子级；
-- `off_cpu` 标 `partial`，没有声称覆盖所有线程；
-- 46,717 spans、27,102 个指标点都内嵌，报告可离线打开；
-- 有 metrics 截断 warning（991→256），没有假装全量；
-- 构建、单测通过，报告 schema 完整。
+| 项 | 状态 | 验证 |
+|---|---|---|
+| `*_created` / `*_info` 被画成误导性平线 | **已修复** | 投影阶段过滤；v2 报告 `DATA.metrics.series` 中 `_created` / `_info` 名称计数均为 0；原始 `metrics.jsonl` 未改动 |
+| 991→256 截断在页面顶部不可见 | **已修复** | 顶部新增“视图覆盖 / 指标覆盖 / 证据边界”三张卡；指标卡显示“已绘制 / 候选、投影后、过滤、未绘制、上限” |
+| 18MB 页面 + 46,717 spans 太重 | **已修复（默认值）** | `--report-max-spans` 与 `--max-spans` 默认从 100000/0 改为 **20000**；`0` 仍表示全量。v2 报告 8.6MB，原始 `spans.jsonl` 完整保留 |
+| series 计数口径混乱 | **已修复** | 报告写入 `meta_series`、`projected_series`、`filtered_series`、`eligible_series`、`rendered_series`、`truncated_series`、`series_limit` |
+| 三个 JSON 的 `</script>` 转义 | **已有覆盖，无需改** | 当前实现只有一个 `DATA` payload，`Render` 统一做 `</` → `<\/`；`report_test.go` 已用 `</script>` 注入用例覆盖 span 名和标题。仓库中不存在旧评审提到的 `RenderBundle` |
+| 两个画廊重复 | **已不存在** | 当前 `docs/demo/` 只有 13KB 的 `all-charts.html` 索引和 4 个 `report-*.html`，没有 17MB 的 `all-reports.html`；无需再删 |
+| 默认脱敏 host / 绝对路径 | **不采纳为默认** | 报告必须保留真实 host 和真实路径作为证据；如未来对外发布，再加**可选** `--redact`，不改变默认行为 |
 
-## 4. 必须修的问题
-
-### P0：报告内嵌了主机名/绝对路径
-
-报告 `DATA.input` 和 `DATA.run.host` 仍包含：
-
-- `target-host`（主机名）
-- `/opt/cann-ebpf/runs/...`（服务器绝对路径）
-
-如果这份报告要发给别人/公开，必须加**脱敏选项**（默认隐藏 host、input 路径只留 basename），或在生成后做替换。
-
-### P0：`*_created` 时间戳被当指标画
-
-4 个 `*_created` 是 Prometheus 的进程创建时间戳，不是延迟/吞吐：
-
-- `vllm:time_to_first_token_seconds_created`
-- `vllm:e2e_request_latency_seconds_created`
-- `vllm:request_prompt_tokens_created`
-- `vllm:request_generation_tokens_created`
-
-它们会画成巨大的平线，误导读者。应在加载 metrics 时过滤 `_created`（以及 `_info`）。
-
-### P1：991 个指标只画 256 个，但 UI 没突出“已截断”
-
-- warning 只出现在数据里，页面顶部没有“metrics 991→256”的提示；
-- 用户会以为所有指标都在图上；
-- 建议顶部加“指标覆盖：256/991，按 source 分组，可展开 Top-N”。
-
-### P1：18MB 页面 + 46,717 spans + 最多 256 张动态图
-
-- 浏览器打开、滚动、重绘都会慢；
-- `MaxSpanPoints` 默认 100k 太大；
-- 建议：默认 Top-N（如 24 张关键图）、按 source 折叠、span 点降到 10k–20k、必要时分页。
-
-### P1：两个画廊重复
-
-- `docs/demo/all-reports.html` 是 17MB 自包含版本；
-- `docs/demo/all-charts.html` 只有 13KB，依赖同目录 `report-*.html`；
-- 对外只保留一个自包含版本，另一个删除或归档。
-
-### P2：XSS 转义不完整
-
-`RenderBundle` 只转义了 `DOCS` 的 `</`；`REPORTS`/`SUMMARY` 的 JSON 仍是原样插入，manifest 的 label/description 含 `</script>` 时可跳出脚本块。三个 JSON 都要转义。
-
-### P2：缺少关键指标/视图
-
-- 视图缺：sweep、device correlation、ops、A/B、5 分钟序列；
-- 指标缺：HBM 带宽、ECC、频率、HCCS/PCIe、逐 request TTFT/ITL（当前只有 batch/局部）。
-
-## 5. 现在能做什么 / 需要什么数据
-
-### 现在就能做（不需要新采集）
-
-1. 过滤 `*_created` / `*_info`；
-2. 顶部加“视图覆盖 3/10、指标 256/991”的摘要；
-3. 指标按 source 分组，默认只画关键 SLO，支持展开；
-4. 报告默认脱敏 host/input 路径；
-5. 默认 Top-N 图 + 更低 span 上限，控制 HTML <5MB；
-6. 只保留一个自包含画廊；
-7. 三个 JSON 全部做 `</` 转义 + 测试；
-8. 把 unavailable 的 reason 汇总成一张表，放在报告开头。
-
-### 需要补数据
-
-| 数据 | 解锁 |
-|---|---|
-| `sweep.json`（≥4 档并发） | `load_latency` |
-| 同窗口 host + device | `critical_path`、`summed_delay`、`slack_cdf` |
-| `ops.jsonl` | `roofline` |
-| A/B 两次 run | `ab_diff` |
-| ≥5 分钟稳定 metrics | `change_point` |
-| HBM 带宽/ECC/频率 | 硬件图表 |
-| request/trace ID 贯通 | 逐 request TTFT/ITL/全链路 |
-
-## 6. 结论
-
-**这份 live 报告证明了采集和报告链路可用，但还不能说“所有指标都有图”：**
-
-- 视图：**3/10 可用**；
-- 指标：**256/991 渲染**；
-- 关键图（critical path、roofline、A/B、change point）都缺证据；
-- 还有 `*_created` 误导、18MB 体积、host/path 泄漏三个交付问题。
-
-**建议他先交 P0/P1：过滤 `_created`、覆盖摘要、默认 Top-N、脱敏、单画廊、XSS 测试。**  
-这些做完，这份报告就可以作为“真实 V4 的 host + metrics 报告”对外展示；device/critical path 等再等补齐数据。
-
-## 7. 为什么缺这么多图（逐项解释）
-
-结论先说：**不是代码没写，而是每个图都有证据依赖；报告选择“没有证据就不画”，这是对的。**
-
-### 7.1 10 个视图里 7 个缺图，缺的东西不同
+## 4. 仍然缺的图：缺的是证据，不是代码
 
 | 缺的视图 | 缺什么数据 | 为什么这次没有 |
 |---|---|---|
@@ -161,43 +84,62 @@
 | `ab_diff` | A/B 两次同 workload run | 只有一次 run，没有对照组 |
 | `change_point` | ≥5 分钟稳定序列 | 本次窗口 29.5 秒，被判定太短 |
 
-这 7 个不是“画不出来”，是**证据没到**；硬画就是假图。
+另外，HBM 带宽、ECC、频率、HCCS/PCIe、逐 request TTFT/ITL 这些指标采集端还没有
+对应数据源；报告不会用推断值补齐。
 
-### 7.2 指标 991→256 是“截断”，不是“缺数据”
+## 5. 按时间分批的采集计划
 
-- `metrics.jsonl` 实际有 **991 个 series**；
-- 报告 `MaxSeries=256`，只渲染了 **256 个**；
-- 其余 **735 个被截断**，warning 有提示，但页面顶部没有突出。
+原则：**短窗口采 host + device，长窗口只采 metrics**。长时间 attach 会产生巨量
+spans，既拖慢报告也干扰业务；metrics-only 的代价小得多。
 
-这是报告主动限流，不是采集缺失。正确做法是：按 source 分组、默认 Top-N、可展开/分页，而不是硬塞 991 张图。
+| 批次 | 窗口 | 方式 | 解锁 | 状态 |
+|---|---|---|---|---|
+| A | 30–60s | `attach` + `--metrics` | host spans、batch、device、基础指标、off-CPU、TopN、拓扑 | 已完成（本报告） |
+| B | 6 分钟 | `sample --duration 360s` | `change_point`（≥300s、≥30 点） | 本次执行 |
+| C | 20–30 分钟 | `sample --duration 1200s/1800s` | KV cache、HBM/内存、队列漂移、长稳基线 | 待执行 |
+| D | 4–6 档 × 30–60s | `sweep` + 固定 workload | `load_latency` 拐点 | 需单独压测窗口 |
+| E | 与 D 同窗口 | host + msPTI `device.jsonl` | `critical_path`、`summed_delay`、`slack_cdf` | 需维护窗口注入 collector |
+| F | 2 × 60s | 两次相同 workload | `ab_diff` | 需固定模型/prompt/max_tokens |
+| G | 单次 | `ops.jsonl` | `roofline` | 需算子级 FLOPs/bytes |
 
-### 7.3 还有一部分指标是“根本没采”
+批次 B/C 使用 `scripts/run_metrics_window.sh`，每次都写新目录，拒绝覆盖：
 
-例如：
+```bash
+cd /root/cann-ebpf
+OUT=/root/cann-ebpf/runs/metrics-window-b-<UTC>
+DURATION=360s sh run_metrics_window.sh
+```
 
-- HBM 带宽、ECC、频率、HCCS/PCIe；
-- 逐 request 的 TTFT/ITL/queue；
-- 完整 KV cache 压力。
+采集完成后生成 metrics-only 报告：
 
-这些不是报告 bug，是采集端还没有对应数据源。
+```bash
+./cann-ebpf-review report \
+  --metrics /root/cann-ebpf/runs/metrics-window-b-<UTC>/metrics.jsonl \
+  --out /root/cann-ebpf/runs/metrics-window-b-<UTC>/report.html
+```
 
-### 7.4 为什么 host 侧只能给 3 个图
+### 5.1 批次 B 实测（2026-11-27 18:06–18:12）
 
-这份是 **host-only** 采集：
+| 项 | 值 |
+|---|---|
+| 窗口 | **359.0 s**（`sample --duration 360s`） |
+| 采样点 | **292,104** |
+| metrics 文件 | 73,224,623 bytes，SHA-256 `d25f642a...b4912f` |
+| exit code | `0` |
+| 服务健康 | 采集前后 `/health` 均为 `200` |
+| `change_point` | **available**；256 series、1,222 个变化点、PELT-like 方法 |
+| 并发请求 | `num_requests_running` 5–16，`num_requests_waiting` 0–1 |
+| KV cache | `vllm:kv_cache_usage_perc` 4.4%–41.0%，说明窗口内有真实推理流量 |
+| NPU 显存 | 8 卡 `npu_hbm_used_ratio` 均为 93.7%，窗口内基本恒定 |
+| Worker RSS | 各 Worker 约 5.5–6.15 GB，窗口内波动约 1%–3% |
 
-- `off_cpu`：有真实阻塞，但只覆盖外层 span → **partial**；
-- `operator_treemap`：没有 device 的 KERNEL/MEMCPY，只能用 host 时长推 → **inferred**；
-- `service_topology`：没有 trace_id 传播，只能到进程范围 → **partial**。
+这份数据证明长窗口 metrics-only 采集不影响正在运行的 V4，并且能拿到真实的
+队列、KV cache 和内存漂移；但它是采样观测，不是逐 request 关键路径。
 
-Host eBPF 能看到“调用了什么、等了多久”，但看不到“NPU 内部 kernel/memcpy/HCCL 花了多久”。没有 msPTI device 时间线，`critical_path`/`roofline` 这类图天然缺证据。
+## 6. 本次修复后的结论
 
-### 7.5 想多出图，按成本从低到高补
-
-1. **同一次 attach 带 metrics**（已做）→ 修 `_created`、分组/Top-N，指标图先完整；
-2. 跑一次 **sweep**（4–6 档并发）→ `load_latency`；
-3. 停 V4 的窗口采 **host + device 同窗口** → `critical_path`/`summed_delay`/`slack_cdf`；
-4. 补 **ops.jsonl** → `roofline`；
-5. 做 **A/B 两次 run** → `ab_diff`；
-6. 跑 **≥5 分钟** 稳定窗口 → `change_point`。
-
-**一句话：报告不是“少画了”，而是“该有的证据没采到”；先把 unavailable 原因讲清楚，再按上面的顺序补数据。**
+- 这份 live 报告证明了采集、投影、报告链路可用；
+- `_created` 误导、覆盖不可见、默认 18MB 三个交付问题已修；
+- 视图仍是 **3/10**，指标仍是 **256/950 可绘制候选**，缺的图都明确写了证据依赖；
+- 报告保留真实 host、真实路径和原始 JSONL，不做默认脱敏，不修改原始证据；
+- 下一步按第 5 节 B→C→D→E 补数据，其中 B 只读 metrics，不影响正在运行的 V4。

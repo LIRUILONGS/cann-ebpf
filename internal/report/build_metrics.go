@@ -28,8 +28,12 @@ func BuildWithMetrics(in *diagnose.Input, m *MetricsData, opts Options) (Data, e
 				m = rebaseMetrics(m, startNS, endNS)
 			}
 			data.Metrics = m
+			if hasNPUMetricSeries(m) {
+				data.Summary.HardwareAvailable = true
+			}
 			data.Warnings = append(data.Warnings, m.Warnings...)
 			data.ViewsV2 = buildViewsV2ForData(&data, in, m, opts)
+			data.Warnings = appendOffCPUTruncationWarning(data.Warnings, data.ViewsV2, opts)
 		}
 		return data, nil
 	}

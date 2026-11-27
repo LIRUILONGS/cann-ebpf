@@ -8,6 +8,7 @@ import (
 	"cann-ebpf/internal/config"
 	"cann-ebpf/internal/contextfeed"
 	"cann-ebpf/internal/hardware"
+	"cann-ebpf/internal/metrics"
 	"cann-ebpf/internal/runlog"
 )
 
@@ -30,9 +31,20 @@ type Options struct {
 	HardwareMode     string
 	HardwareInterval time.Duration
 	HardwareBackend  string
+	Metrics          MetricsOptions
 	OnCaptureStart   func()
 	OnCaptureStop    func()
 	DeviceJSONL      string
+}
+
+// MetricsOptions runs the independent cann.metrics.v1 collector in the same
+// capture window as the eBPF probes. Metrics failures are warnings: they must
+// not discard or invalidate span/device evidence.
+type MetricsOptions struct {
+	Enabled        bool
+	Interval       time.Duration
+	Sources        []metrics.Source
+	ConfigWarnings []string
 }
 
 // PythonBatchOptions enables the read-only CPython/vLLM SchedulerOutput
@@ -72,6 +84,7 @@ type Result struct {
 	PythonBatch          []PythonBatchCapture
 	Blocking             BlockingResult
 	Hardware             hardware.Result
+	Metrics              MetricsResult
 	DeviceEvidence       DeviceEvidence
 	SetupDuration        time.Duration
 	CaptureDuration      time.Duration
@@ -81,6 +94,22 @@ type Result struct {
 	ConsumeWaitDuration  time.Duration
 	WriterCloseDuration  time.Duration
 	SummaryDuration      time.Duration
+}
+
+// MetricsResult is the compact result surfaced by attach. The full metrics
+// metadata stays in metrics.meta.json on disk.
+type MetricsResult struct {
+	Enabled     bool     `json:"enabled"`
+	Status      string   `json:"status,omitempty"`
+	Points      int      `json:"points"`
+	Series      int      `json:"series"`
+	Sources     []string `json:"sources,omitempty"`
+	MetricsPath string   `json:"metrics_path,omitempty"`
+	MetaPath    string   `json:"meta_path,omitempty"`
+	Bytes       int64    `json:"bytes,omitempty"`
+	SHA256      string   `json:"sha256,omitempty"`
+	Warnings    []string `json:"warnings,omitempty"`
+	Error       string   `json:"error,omitempty"`
 }
 
 type PythonBatchCapture struct {

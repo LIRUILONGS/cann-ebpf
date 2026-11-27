@@ -19,12 +19,14 @@ func cmdReport(args []string) int {
 	fs := flag.NewFlagSet("report", flag.ContinueOnError)
 	input := fs.String("input", "", "run directory or spans.jsonl path")
 	metricsPath := fs.String("metrics", "", "metrics.jsonl path or metrics run directory (optional)")
+	stacksPath := fs.String("stacks", "", "stacks run directory or stacks.folded path (optional)")
 	outPath := fs.String("out", "report.html", "write the standalone HTML report to this file")
 	title := fs.String("title", "", "report title")
 	minDuration := fs.Duration("min-duration", 50*time.Microsecond, "minimum span duration shown on the timeline")
 	slowThreshold := fs.Duration("slow-threshold", time.Millisecond, "slow span threshold used by the CDF, heatmap and evidence counters")
 	topN := fs.Int("top", 15, "maximum number of functions in the TopN chart")
 	maxLanes := fs.Int("max-lanes", 64, "maximum number of TID lanes embedded in the timeline")
+	maxSpans := fs.Int("max-spans", attachReportDefaultMaxSpans, "maximum scatter points embedded in the HTML; 0 keeps all spans")
 	bucketCount := fs.Int("buckets", 160, "number of time buckets used by the heatmap and device busy chart")
 	deviceMode := fs.String("device-mode", "matched", "device embedding: matched or none")
 	deviceContainerID := fs.String("device-container-id", "", "container id used to translate device pid/tid when pidmap.json is absent")
@@ -44,15 +46,15 @@ func cmdReport(args []string) int {
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
-	if strings.TrimSpace(*input) == "" && strings.TrimSpace(*metricsPath) == "" {
-		fmt.Fprintln(os.Stderr, "report: --input and/or --metrics is required")
+	if strings.TrimSpace(*input) == "" && strings.TrimSpace(*metricsPath) == "" && strings.TrimSpace(*stacksPath) == "" {
+		fmt.Fprintln(os.Stderr, "report: --input, --metrics, and/or --stacks is required")
 		return 2
 	}
 	if strings.TrimSpace(*outPath) == "" {
 		fmt.Fprintln(os.Stderr, "report: --out must not be empty")
 		return 2
 	}
-	if *minDuration < 0 || *slowThreshold < 0 || *topN <= 0 || *maxLanes <= 0 || *bucketCount <= 0 || *maxSeries <= 0 {
+	if *minDuration < 0 || *slowThreshold < 0 || *topN <= 0 || *maxLanes <= 0 || *maxSpans < 0 || *bucketCount <= 0 || *maxSeries <= 0 {
 		fmt.Fprintln(os.Stderr, "report: durations must be non-negative and counts must be positive")
 		return 2
 	}
@@ -101,13 +103,15 @@ func cmdReport(args []string) int {
 			return 4
 		}
 	}
-	data, err := report.BuildWithMetrics(in, metricsData, report.Options{
+	options := report.Options{
 		Title:               *title,
+		StacksPath:          *stacksPath,
 		MinDurationNS:       int64(*minDuration),
 		SlowThresholdNS:     int64(*slowThreshold),
 		BucketCount:         *bucketCount,
 		TopN:                *topN,
 		MaxLanes:            *maxLanes,
+		MaxSpanPoints:       *maxSpans,
 		DeviceMode:          mode,
 		DeviceContainerID:   *deviceContainerID,
 		SweepPath:           *sweepPath,
@@ -122,10 +126,24 @@ func cmdReport(args []string) int {
 		RooflinePeakGBPS:    *rooflinePeakGBPS,
 		RooflineDType:       *rooflineDType,
 		TopologyRootService: *topologyRootService,
-	})
+	}
+	var data report.Data
+	if in == nil && metricsData == nil && strings.TrimSpace(*stacksPath) != "" {
+		data, err = report.Build(nil, options)
+	} else {
+		data, err = report.BuildWithMetrics(in, metricsData, options)
+	}
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "report: %v\n", err)
 		return 3
+	}
+	if strings.TrimSpace(*stacksPath) != "" && data.Flamegraph == nil {
+		flamegraph, flamegraphErr := report.LoadFlamegraph(*stacksPath)
+		if flamegraphErr != nil {
+			fmt.Fprintf(os.Stderr, "report: stacks: %v\n", flamegraphErr)
+			return 4
+		}
+		data.Flamegraph = flamegraph
 	}
 	html, err := report.Render(data)
 	if err != nil {
@@ -144,7 +162,14 @@ func cmdReport(args []string) int {
 	if data.Metrics != nil {
 		metricSeries = len(data.Metrics.Series)
 	}
-	fmt.Printf("report out=%s spans=%d device_intervals=%d metrics_series=%d bytes=%d\n",
-		*outPath, data.Summary.Spans, deviceIntervals, metricSeries, len(html))
+	flamegraphState := "none"
+	if data.Flamegraph != nil {
+		flamegraphState = "unavailable"
+		if data.Flamegraph.Status.Available {
+			flamegraphState = "available"
+		}
+	}
+	fmt.Printf("report out=%s spans=%d device_intervals=%d metrics_series=%d flamegraph=%s bytes=%d\n",
+		*outPath, data.Summary.Spans, deviceIntervals, metricSeries, flamegraphState, len(html))
 	return 0
 }

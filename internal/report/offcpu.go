@@ -206,8 +206,10 @@ func buildOffCPUAggregate(spans []runlog.Span, opts OffCPUOptions) OffCPUData {
 	}
 
 	sortOffCPURows(rows)
+	out.TotalRows = len(rows)
 	if opts.MaxRows > 0 && len(rows) > opts.MaxRows {
 		rows = rows[:opts.MaxRows]
+		out.Truncated = true
 	}
 	out.Rows = rows
 	out.Status = ViewStatus{Available: true, Source: "spans", Confidence: "partial"}
@@ -344,8 +346,10 @@ func buildOffCPUExact(spans []runlog.Span, opts OffCPUOptions) OffCPUData {
 	}
 
 	sortOffCPURows(rows)
+	out.TotalRows = len(rows)
 	if opts.MaxRows > 0 && len(rows) > opts.MaxRows {
 		rows = rows[:opts.MaxRows]
+		out.Truncated = true
 	}
 	out.Rows = rows
 	out.Status = ViewStatus{Available: true, Source: source, Confidence: "exact"}

@@ -117,9 +117,11 @@ type OffCPURow struct {
 }
 
 type OffCPUData struct {
-	Status ViewStatus  `json:"status"`
-	Mode   string      `json:"mode,omitempty"` // aggregate|exact
-	Rows   []OffCPURow `json:"rows"`
+	Status    ViewStatus  `json:"status"`
+	Mode      string      `json:"mode,omitempty"` // aggregate|exact
+	Rows      []OffCPURow `json:"rows"`
+	TotalRows int         `json:"total_rows,omitempty"`
+	Truncated bool        `json:"truncated,omitempty"`
 }
 
 type TreemapNode struct {

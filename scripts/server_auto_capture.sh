@@ -6,6 +6,11 @@ set -u
 
 ROOT=${ROOT:-/opt/cann-ebpf/m4-20261126}
 DURATION=${DURATION:-5s}
+METRICS=${METRICS:-auto}
+METRICS_NPU_BACKEND=${METRICS_NPU_BACKEND:-auto}
+PROMETHEUS_URL=${PROMETHEUS_URL:-}
+PROMETHEUS_INCLUDE=${PROMETHEUS_INCLUDE:-}
+REPORT=${REPORT:-auto}
 HEALTH=${VLLM_HEALTH:-http://127.0.0.1:8905/health}
 STAMP=$(date -u +%Y%m%dT%H%M%SZ)
 OUT=${OUT:-"$ROOT/runs/ebpf-auto-$DURATION-$STAMP"}
@@ -30,12 +35,22 @@ curl -sS -o /dev/null -w '%{http_code}\n' -m 5 "$HEALTH" > "$OUT/health-before.t
 systemctl is-active vllm-ds4-8905.service > "$OUT/service-before.txt" || true
 start_epoch=$(date +%s)
 
-timeout 180 ./cann-ebpf-linux-arm64 attach \
+set -- attach \
     --pid auto \
     --profile vllm-ascend \
     --profiles-dir profiles \
     --duration "$DURATION" \
-    --output "$OUT" > "$OUT/collector.log" 2>&1
+    --output "$OUT" \
+    --metrics "$METRICS" \
+    --metrics-npu-backend "$METRICS_NPU_BACKEND" \
+    --report "$REPORT"
+if [ -n "$PROMETHEUS_URL" ]; then
+    set -- "$@" --prometheus "$PROMETHEUS_URL"
+fi
+if [ -n "$PROMETHEUS_INCLUDE" ]; then
+    set -- "$@" --prometheus-include "$PROMETHEUS_INCLUDE"
+fi
+timeout 180 ./cann-ebpf-linux-arm64 "$@" > "$OUT/collector.log" 2>&1
 rc=$?
 
 end_epoch=$(date +%s)

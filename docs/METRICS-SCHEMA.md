@@ -5,6 +5,32 @@
 
 本文定义 `cann-ebpf sample` 的输入、输出、退出码和 `cann.metrics.v1` 数据格式。指标采集与 trace 采集完全独立：采集指标不会修改 `spans.jsonl`、`device.jsonl` 或 `hardware.jsonl`。
 
+`cann-ebpf attach` 复用同一组 source，在 eBPF capture 窗口内自动写入同一个 run 目录的
+`metrics.jsonl` / `metrics.meta.json`。集成参数为 `--metrics auto|on|off`、
+`--metrics-npu-backend auto|dcmi|npu-smi|both|off`、`--metrics-interval`、`--prometheus`、
+`--prometheus-include`、`--metrics-proc`、`--metrics-system` 和 `--metrics-cgroup`。
+采集完成后，两个 metrics 文件会作为 manifest artifact `metrics_jsonl` / `metrics_meta`
+封存；`--report auto` 只读取这些落盘证据生成 HTML。metrics 失败只影响 metrics，不会回滚
+spans/device 证据，也不会把缺失值补成 0。
+
+### 1.1 报告投影与覆盖率字段
+
+`metrics.meta.json` 的 `series` 是**采集端原始条数**；报告嵌入的是窗口投影后的子集。
+`report` 在 `DATA.metrics` 中写入以下字段，页面顶部“指标覆盖”卡直接读这些值：
+
+| 字段 | 含义 |
+|---|---|
+| `meta_series` | `metrics.meta.json` 登记的原始 series 数 |
+| `projected_series` | 按窗口重建后的候选数；histogram 会展开成 p50/p95/p99，因此可能大于 `meta_series` |
+| `filtered_series` | 被投影阶段过滤的 `*_created` / `*_info` 数；原始 `metrics.jsonl` 保留不删 |
+| `eligible_series` | `projected_series - filtered_series`，可进入绘图的候选数 |
+| `series_limit` | `--max-series` 上限 |
+| `rendered_series` | 实际写入 `DATA.metrics.series` 的数量 |
+| `truncated_series` | `eligible_series - rendered_series`，因上限未绘制的数量 |
+
+过滤只发生在报告投影层：`*_created` 是 Prometheus 的进程创建时间戳，`*_info` 是配置
+标签集，把它们画成性能曲线会产生误导性平线。原始 JSONL 不做任何改写。
+
 ## 1. 命令
 
 ```bash

@@ -15,19 +15,26 @@ import (
 // MetricsData is the report-facing, downsampled metrics view. Raw metrics
 // remain in metrics.jsonl; this type is derived and read-only.
 type MetricsData struct {
-	Path         string         `json:"-"`
-	Available    bool           `json:"available"`
-	Reason       string         `json:"reason,omitempty"`
-	Samples      int            `json:"samples"`
-	Sources      []string       `json:"sources"`
-	IntervalMS   float64        `json:"interval_ms"`
-	Series       []MetricSeries `json:"series"`
-	Stats        []MetricStat   `json:"stats"`
-	Warnings     []string       `json:"warnings"`
-	Coverage     float64        `json:"coverage"`
-	ClockQuality string         `json:"clock_quality"`
-	StartNS      int64          `json:"-"`
-	EndNS        int64          `json:"-"`
+	Path            string         `json:"-"`
+	Available       bool           `json:"available"`
+	Reason          string         `json:"reason,omitempty"`
+	Samples         int            `json:"samples"`
+	Sources         []string       `json:"sources"`
+	IntervalMS      float64        `json:"interval_ms"`
+	Series          []MetricSeries `json:"series"`
+	Stats           []MetricStat   `json:"stats"`
+	Warnings        []string       `json:"warnings"`
+	Coverage        float64        `json:"coverage"`
+	ClockQuality    string         `json:"clock_quality"`
+	MetaSeries      int            `json:"meta_series,omitempty"`
+	ProjectedSeries int            `json:"projected_series,omitempty"`
+	FilteredSeries  int            `json:"filtered_series,omitempty"`
+	EligibleSeries  int            `json:"eligible_series,omitempty"`
+	RenderedSeries  int            `json:"rendered_series,omitempty"`
+	TruncatedSeries int            `json:"truncated_series,omitempty"`
+	SeriesLimit     int            `json:"series_limit,omitempty"`
+	StartNS         int64          `json:"-"`
+	EndNS           int64          `json:"-"`
 }
 
 // MetricSeries is a columnar series so embedded HTML stays compact.
@@ -142,10 +149,12 @@ func LoadMetrics(path string, opts MetricsOptions) (*MetricsData, error) {
 	}
 	data.StartNS, data.EndNS = startNS, endNS
 	data.Samples = len(points)
+	data.SeriesLimit = opts.MaxSeries
 
 	metaPath := filepath.Join(filepath.Dir(path), "metrics.meta.json")
 	if meta, err := readMetricsMeta(metaPath); err == nil {
 		data.IntervalMS = meta.IntervalMS
+		data.MetaSeries = len(meta.Series)
 		if len(meta.Sources) > 0 {
 			data.Sources = append([]string(nil), meta.Sources...)
 		}
@@ -222,8 +231,26 @@ func LoadMetrics(path string, opts MetricsOptions) (*MetricsData, error) {
 		}
 		return keys[i] < keys[j]
 	})
+	data.ProjectedSeries = len(keys)
+	eligible := keys[:0]
+	for _, key := range keys {
+		agg := bySeries[key]
+		if agg == nil || len(agg.points) == 0 {
+			continue
+		}
+		if isContextOnlyMetric(agg.point.Name) {
+			data.FilteredSeries++
+			continue
+		}
+		eligible = append(eligible, key)
+	}
+	keys = eligible
+	data.EligibleSeries = len(keys)
 	if len(keys) > opts.MaxSeries {
-		data.Warnings = append(data.Warnings, fmt.Sprintf("metrics series 数量 %d 超过上限 %d，已截断", len(keys), opts.MaxSeries))
+		data.TruncatedSeries = len(keys) - opts.MaxSeries
+		data.Warnings = append(data.Warnings, fmt.Sprintf(
+			"metrics series 数量 %d 超过上限 %d，已截断 %d；另有 %d 个 `_created`/`_info` 仅保留在原始 metrics.jsonl，不进入图表",
+			data.EligibleSeries, opts.MaxSeries, data.TruncatedSeries, data.FilteredSeries))
 		keys = keys[:opts.MaxSeries]
 	}
 	for _, key := range keys {
@@ -270,12 +297,25 @@ func LoadMetrics(path string, opts MetricsOptions) (*MetricsData, error) {
 		data.Reason = "no usable metric series"
 		return data, nil
 	}
+	data.RenderedSeries = len(data.Series)
+	if data.TruncatedSeries == 0 && data.EligibleSeries > data.RenderedSeries {
+		data.TruncatedSeries = data.EligibleSeries - data.RenderedSeries
+	}
 	data.Available = true
 	if data.IntervalMS <= 0 {
 		data.IntervalMS = estimateIntervalMS(data.Series)
 	}
 	data.Coverage = estimateCoverage(data.Series, data.IntervalMS, float64(endNS-startNS)/1e6)
 	return data, nil
+}
+
+// isContextOnlyMetric identifies Prometheus metadata series that describe a
+// process creation timestamp or an info/configuration label set. They remain
+// in metrics.jsonl as raw evidence; only the embedded chart projection drops
+// them. Plotting them as performance curves creates misleading flat lines.
+func isContextOnlyMetric(name string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(name))
+	return strings.HasSuffix(normalized, "_created") || strings.HasSuffix(normalized, "_info")
 }
 
 func metricPointInWindow(point metrics.Point, opts MetricsOptions) bool {

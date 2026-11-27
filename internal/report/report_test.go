@@ -114,3 +114,58 @@ func TestRenderEscapesScriptPayload(t *testing.T) {
 		t.Fatal("schema missing from rendered report")
 	}
 }
+
+func TestBuildMaxSpanPointsKeepsSlowestAndFullSummary(t *testing.T) {
+	spans := make([]runlog.Span, 0, 1000)
+	for i := 0; i < 1000; i++ {
+		duration := int64(1_000_000)
+		spanID := "span"
+		if i == 777 {
+			duration = 10_000_000_000
+			spanID = "slowest"
+		}
+		spans = append(spans, testSpan(1, 1, int64(i+1)*1_000_000, duration, "aclrtSynchronizeStream", "sync", spanID))
+	}
+	data, err := Build(&diagnose.Input{Path: "test-run", Spans: spans}, Options{MaxSpanPoints: 100})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if data.Summary.Spans != 1000 {
+		t.Fatalf("summary spans = %d, want 1000", data.Summary.Spans)
+	}
+	if len(data.Spans) != 100 {
+		t.Fatalf("embedded spans = %d, want 100", len(data.Spans))
+	}
+	foundSlowest := false
+	for _, point := range data.Spans {
+		if point.SpanID == "slowest" {
+			foundSlowest = true
+		}
+	}
+	if !foundSlowest {
+		t.Fatal("downsample dropped the slowest span")
+	}
+	if !strings.Contains(strings.Join(data.Warnings, " "), "抽样") {
+		t.Fatalf("missing downsample warning: %v", data.Warnings)
+	}
+}
+
+func TestBuildMaxSpanPointsCapsOffCPURows(t *testing.T) {
+	spans := make([]runlog.Span, 0, 50)
+	for i := 0; i < 50; i++ {
+		span := testSpan(1, 1, int64(i+1)*1_000_000, 1_000_000, "aclrtSynchronizeStream", "sync", "span")
+		offCPU := int64(200_000)
+		span.OffCPUNS = &offCPU
+		spans = append(spans, span)
+	}
+	data, err := Build(&diagnose.Input{Path: "test-run", Spans: spans}, Options{MaxSpanPoints: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !data.ViewsV2.OffCPU.Truncated || data.ViewsV2.OffCPU.TotalRows != 50 || len(data.ViewsV2.OffCPU.Rows) != 10 {
+		t.Fatalf("offcpu rows = %+v", data.ViewsV2.OffCPU)
+	}
+	if !strings.Contains(strings.Join(data.Warnings, " "), "off-CPU ribbon") {
+		t.Fatalf("missing off-CPU truncation warning: %v", data.Warnings)
+	}
+}

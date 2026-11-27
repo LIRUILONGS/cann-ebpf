@@ -1,0 +1,89 @@
+categories:
+  - name: npu
+    prefixes:
+      - devdrv_
+      - drv_
+      - davinci
+      - hisi_
+      - svm_
+      - ascend
+      - aicore
+      - aicpu
+      - hdc_
+      # 2026-11-27 /proc/kallsyms evidence on bms-84865758 (kernel
+      # 5.10.0-136.108.0.188.31.oe2203sp1.bclinux.aarch64):
+      # hdcdrv_=370 + hdccom_=7 -> drv_pcie_hdc_host; devmm_=1421 ->
+      # drv_devmm_host/drv_devmm_host_agent; trs_=820 -> ascend_trs_*;
+      # pcivnic_=76 -> drv_pcie_vnic_host; dms_=447 -> ascend_dms_*/
+      # ascend_urd/drv_devmng_host; tsagent_=17 -> ts_agent; vdavinci=28 ->
+      # drv_vascend; dbl_=7 -> ascend_uda/dbl_runenv_config; ka_=54 ->
+      # ascend_kernel_adapt. See docs/STACKS-CLASSIFICATION-REVIEW.md.
+      - hdcdrv_
+      - hdccom_
+      - devmm_
+      - trs_
+      - pcivnic_
+      - dms_
+      - tsagent_
+      - vdavinci
+      - dbl_
+      - ka_
+  - name: dma
+    prefixes:
+      - dma_
+      - smmu_
+      - iommu_
+      - iomap_
+      - arm_smmu
+  - name: net
+    prefixes:
+      - tcp_
+      - udp_
+      - unix_
+      - hccn_
+      - dev_queue_xmit
+      - napi_
+      - sk_
+      - sock_
+      - net_
+  - name: sync
+    prefixes:
+      - futex_
+      - epoll_
+      - mutex
+      - rwsem
+      - schedule
+      - __schedule
+      - wait_
+      - complete
+      - wake_up
+      - osq_
+  - name: vfs
+    prefixes:
+      - vfs_
+      - do_sys_open
+      - filp_
+      - path_
+      - ext4_
+      - xfs_
+      - overlayfs_
+      - fuse_
+  - name: block
+    prefixes:
+      - blk_
+      - bio_
+      - submit_bio
+      - io_schedule
+      - nvme_
+  - name: sched
+    prefixes:
+      - sched_
+      - cpu_
+      - idle_
+      - irq_
+      - softirq_
+      - timer_
+  - name: sample
+    prefixes: []
+  - name: other
+    prefixes: []

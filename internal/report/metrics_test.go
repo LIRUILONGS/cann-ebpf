@@ -5,6 +5,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"cann-ebpf/internal/metrics"
@@ -105,6 +106,51 @@ func TestLoadMetricsDownsamplesAndEmpty(t *testing.T) {
 	}
 	if data.Stats == nil || len(data.Stats) != 0 {
 		t.Fatalf("empty stats must be an empty slice: %+v", data.Stats)
+	}
+}
+
+func TestLoadMetricsFiltersContextSeriesAndTracksProjection(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "metrics.jsonl")
+	points := []metrics.Point{
+		{Schema: metrics.SchemaV1, MonoNS: 1_000_000_000, WallNS: 1_000_000_000, Source: "prometheus:vllm", Name: "vllm:num_requests_running", Kind: metrics.KindGauge, Value: metrics.Float(1), Unit: "count"},
+		{Schema: metrics.SchemaV1, MonoNS: 2_000_000_000, WallNS: 2_000_000_000, Source: "prometheus:vllm", Name: "vllm:num_requests_running", Kind: metrics.KindGauge, Value: metrics.Float(2), Unit: "count"},
+		{Schema: metrics.SchemaV1, MonoNS: 1_000_000_000, WallNS: 1_000_000_000, Source: "prometheus:vllm", Name: "vllm:kv_cache_usage_perc", Kind: metrics.KindGauge, Value: metrics.Float(0.2), Unit: "ratio"},
+		{Schema: metrics.SchemaV1, MonoNS: 2_000_000_000, WallNS: 2_000_000_000, Source: "prometheus:vllm", Name: "vllm:kv_cache_usage_perc", Kind: metrics.KindGauge, Value: metrics.Float(0.3), Unit: "ratio"},
+		{Schema: metrics.SchemaV1, MonoNS: 1_000_000_000, WallNS: 1_000_000_000, Source: "prometheus:vllm", Name: "vllm:request_success_total", Kind: metrics.KindCounter, Value: metrics.Float(10), Unit: "count"},
+		{Schema: metrics.SchemaV1, MonoNS: 2_000_000_000, WallNS: 2_000_000_000, Source: "prometheus:vllm", Name: "vllm:request_success_total", Kind: metrics.KindCounter, Value: metrics.Float(12), Unit: "count"},
+		{Schema: metrics.SchemaV1, MonoNS: 1_000_000_000, WallNS: 1_000_000_000, Source: "proc", Name: "proc_cpu_seconds_total", Kind: metrics.KindCounter, Value: metrics.Float(4), Unit: "seconds"},
+		{Schema: metrics.SchemaV1, MonoNS: 2_000_000_000, WallNS: 2_000_000_000, Source: "proc", Name: "proc_cpu_seconds_total", Kind: metrics.KindCounter, Value: metrics.Float(5), Unit: "seconds"},
+		{Schema: metrics.SchemaV1, MonoNS: 1_000_000_000, WallNS: 1_000_000_000, Source: "prometheus:vllm", Name: "vllm:time_to_first_token_seconds_created", Kind: metrics.KindGauge, Value: metrics.Float(1_700_000_000), Unit: "seconds"},
+		{Schema: metrics.SchemaV1, MonoNS: 2_000_000_000, WallNS: 2_000_000_000, Source: "prometheus:vllm", Name: "vllm:time_to_first_token_seconds_created", Kind: metrics.KindGauge, Value: metrics.Float(1_700_000_000), Unit: "seconds"},
+		{Schema: metrics.SchemaV1, MonoNS: 1_000_000_000, WallNS: 1_000_000_000, Source: "prometheus:vllm", Name: "vllm:cache_config_info", Kind: metrics.KindGauge, Value: metrics.Float(1), Unit: "count"},
+		{Schema: metrics.SchemaV1, MonoNS: 2_000_000_000, WallNS: 2_000_000_000, Source: "prometheus:vllm", Name: "vllm:cache_config_info", Kind: metrics.KindGauge, Value: metrics.Float(1), Unit: "count"},
+	}
+	writeMetricPoints(t, path, points)
+	meta := `{"schema":"cann.metrics.meta.v1","interval_ms":1000,"sources":["proc","prometheus:vllm"],"series":[{},{},{},{},{},{}],"status":"complete"}`
+	if err := os.WriteFile(filepath.Join(dir, "metrics.meta.json"), []byte(meta), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	data, err := LoadMetrics(path, MetricsOptions{MaxSeries: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if data.MetaSeries != 6 || data.ProjectedSeries != 6 {
+		t.Fatalf("meta/projected = %d/%d, want 6/6", data.MetaSeries, data.ProjectedSeries)
+	}
+	if data.FilteredSeries != 2 || data.EligibleSeries != 4 || data.RenderedSeries != 3 || data.TruncatedSeries != 1 || data.SeriesLimit != 3 {
+		t.Fatalf("coverage counts = meta:%d projected:%d filtered:%d eligible:%d rendered:%d truncated:%d limit:%d",
+			data.MetaSeries, data.ProjectedSeries, data.FilteredSeries, data.EligibleSeries,
+			data.RenderedSeries, data.TruncatedSeries, data.SeriesLimit)
+	}
+	for _, series := range data.Series {
+		if strings.HasSuffix(series.Name, "_created") || strings.HasSuffix(series.Name, "_info") {
+			t.Fatalf("context-only series leaked into chart projection: %s", series.Name)
+		}
+	}
+	if !strings.Contains(strings.Join(data.Warnings, " "), "已截断 1") {
+		t.Fatalf("missing truncation warning: %v", data.Warnings)
 	}
 }
 

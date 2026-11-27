@@ -21,12 +21,14 @@ const SchemaV1 = "cann.report.html.v1"
 // Options controls how much data is embedded in the standalone report.
 type Options struct {
 	Title               string
+	StacksPath          string
 	MinDurationNS       int64
 	SlowThresholdNS     int64
 	BucketCount         int
 	TopN                int
 	MaxLanes            int
 	MaxHeatmapRows      int
+	MaxSpanPoints       int
 	DeviceMode          string
 	DeviceContainerID   string
 	SweepPath           string
@@ -62,32 +64,36 @@ func (o *Options) normalize() {
 	if o.MaxHeatmapRows <= 0 {
 		o.MaxHeatmapRows = 32
 	}
+	if o.MaxSpanPoints < 0 {
+		o.MaxSpanPoints = 0
+	}
 	if o.DeviceMode == "" {
 		o.DeviceMode = "matched"
 	}
 }
 
 type Data struct {
-	Schema      string        `json:"schema"`
-	GeneratedAt string        `json:"generated_at"`
-	Input       string        `json:"input"`
-	Title       string        `json:"title"`
-	Run         RunInfo       `json:"run"`
-	Window      Window        `json:"window"`
-	Summary     Summary       `json:"summary"`
-	Categories  []CategoryRow `json:"categories"`
-	Functions   []FunctionRow `json:"functions"`
-	Spans       []SpanPoint   `json:"spans"`
-	Timeline    TimelineData  `json:"timeline"`
-	Heatmap     HeatmapData   `json:"heatmap"`
-	CDF         []CDFPoint    `json:"cdf"`
-	Views       ReportViews   `json:"views"`
-	ViewsV2     ReportViewsV2 `json:"views_v2"`
-	Device      *DeviceData   `json:"device,omitempty"`
-	Hardware    HardwareData  `json:"hardware"`
-	Metrics     *MetricsData  `json:"metrics,omitempty"`
-	Warnings    []string      `json:"warnings"`
-	Notes       []string      `json:"notes"`
+	Schema      string          `json:"schema"`
+	GeneratedAt string          `json:"generated_at"`
+	Input       string          `json:"input"`
+	Title       string          `json:"title"`
+	Run         RunInfo         `json:"run"`
+	Window      Window          `json:"window"`
+	Summary     Summary         `json:"summary"`
+	Categories  []CategoryRow   `json:"categories"`
+	Functions   []FunctionRow   `json:"functions"`
+	Spans       []SpanPoint     `json:"spans"`
+	Timeline    TimelineData    `json:"timeline"`
+	Heatmap     HeatmapData     `json:"heatmap"`
+	CDF         []CDFPoint      `json:"cdf"`
+	Views       ReportViews     `json:"views"`
+	ViewsV2     ReportViewsV2   `json:"views_v2"`
+	Flamegraph  *FlamegraphData `json:"flamegraph,omitempty"`
+	Device      *DeviceData     `json:"device,omitempty"`
+	Hardware    HardwareData    `json:"hardware"`
+	Metrics     *MetricsData    `json:"metrics,omitempty"`
+	Warnings    []string        `json:"warnings"`
+	Notes       []string        `json:"notes"`
 }
 
 type RunInfo struct {
@@ -292,7 +298,18 @@ type busyInterval struct {
 // for the same input and options, and never calls attach or writes evidence.
 func Build(in *diagnose.Input, opts Options) (Data, error) {
 	opts.normalize()
+	var flamegraph *FlamegraphData
+	if strings.TrimSpace(opts.StacksPath) != "" {
+		loaded, err := LoadFlamegraph(opts.StacksPath)
+		if err != nil {
+			return Data{}, fmt.Errorf("stacks evidence: %w", err)
+		}
+		flamegraph = loaded
+	}
 	if in == nil {
+		if flamegraph != nil {
+			return buildStacksOnlyReport(flamegraph, opts), nil
+		}
 		return Data{}, fmt.Errorf("input is nil")
 	}
 	spans := make([]runlog.Span, 0, len(in.Spans))
@@ -340,17 +357,25 @@ func Build(in *diagnose.Input, opts Options) (Data, error) {
 			DeviceRows:    []LaneRow{},
 			MinDurationMS: float64(opts.MinDurationNS) / 1e6,
 		},
-		Heatmap:  HeatmapData{Rows: []HeatRow{}},
-		CDF:      []CDFPoint{},
-		Views:    ReportViews{},
-		Warnings: append([]string{}, in.Warnings...),
-		Notes:    defaultNotes(),
+		Heatmap:    HeatmapData{Rows: []HeatRow{}},
+		CDF:        []CDFPoint{},
+		Views:      ReportViews{},
+		Flamegraph: flamegraph,
+		Warnings:   append([]string{}, in.Warnings...),
+		Notes:      defaultNotes(),
 	}
 	if data.Title == "" {
 		data.Title = "CANN eBPF 性能报告"
 	}
 
 	points, durations := buildSpanPoints(spans, startNS, opts)
+	if opts.MaxSpanPoints > 0 && len(points) > opts.MaxSpanPoints {
+		original := len(points)
+		points = downsampleSpanPoints(points, opts.MaxSpanPoints)
+		data.Warnings = append(data.Warnings, fmt.Sprintf(
+			"图表散点从 %d 条抽样到 %d 条（保留最慢调用并沿时间均匀抽样）；原始 spans.jsonl 和全部统计口径未改动。",
+			original, len(points)))
+	}
 	data.Spans = points
 	data.Summary = buildSummary(spans, durations, in, opts)
 	data.Categories = buildCategories(spans)
@@ -382,7 +407,23 @@ func Build(in *diagnose.Input, opts Options) (Data, error) {
 		data.Notes = append(data.Notes, "没有嵌入设备时间线：device.jsonl 缺失，或使用了 --device-mode none。")
 	}
 	data.ViewsV2 = buildViewsV2ForData(&data, in, nil, opts)
+	data.Warnings = appendOffCPUTruncationWarning(data.Warnings, data.ViewsV2, opts)
 	return data, nil
+}
+
+func appendOffCPUTruncationWarning(warnings []string, views ReportViewsV2, opts Options) []string {
+	if opts.MaxSpanPoints <= 0 || !views.OffCPU.Truncated {
+		return warnings
+	}
+	message := fmt.Sprintf(
+		"off-CPU ribbon 从 %d 行截断到 %d 行（与 --max-spans 共用上限）；原始 spans.jsonl 未改动。",
+		views.OffCPU.TotalRows, len(views.OffCPU.Rows))
+	for _, warning := range warnings {
+		if warning == message {
+			return warnings
+		}
+	}
+	return append(warnings, message)
 }
 
 func buildReportViews(spans []runlog.Span, windowStart, windowNS int64, opts Options) ReportViews {
@@ -508,6 +549,76 @@ func buildSpanPoints(spans []runlog.Span, windowStart int64, opts Options) ([]Sp
 		points = append(points, point)
 	}
 	return points, durations
+}
+
+// downsampleSpanPoints bounds the browser payload without changing any
+// aggregate. It always keeps a sample of the slowest spans (the points most
+// likely to matter in a latency investigation) and fills the remainder with a
+// deterministic time-stride sample. Raw spans.jsonl is never modified.
+func downsampleSpanPoints(points []SpanPoint, limit int) []SpanPoint {
+	if limit <= 0 || len(points) <= limit {
+		return points
+	}
+	keepSlow := limit / 10
+	if keepSlow < 1 {
+		keepSlow = 1
+	}
+	if keepSlow > limit {
+		keepSlow = limit
+	}
+	order := make([]int, len(points))
+	for i := range order {
+		order[i] = i
+	}
+	sort.SliceStable(order, func(i, j int) bool {
+		left, right := points[order[i]], points[order[j]]
+		if left.D != right.D {
+			return left.D > right.D
+		}
+		return order[i] < order[j]
+	})
+	selected := make([]bool, len(points))
+	selectedCount := 0
+	for i := 0; i < keepSlow; i++ {
+		selected[order[i]] = true
+		selectedCount++
+	}
+	remaining := limit - selectedCount
+	if remaining > 0 {
+		step := float64(len(points)) / float64(remaining)
+		for i := 0; i < remaining; i++ {
+			idx := int(float64(i) * step)
+			if idx >= len(points) {
+				idx = len(points) - 1
+			}
+			for idx < len(points)-1 && selected[idx] {
+				idx++
+			}
+			if !selected[idx] {
+				selected[idx] = true
+				selectedCount++
+			}
+		}
+	}
+	for i := 0; i < len(points) && selectedCount < limit; i++ {
+		if !selected[i] {
+			selected[i] = true
+			selectedCount++
+		}
+	}
+	out := make([]SpanPoint, 0, selectedCount)
+	for i := range points {
+		if selected[i] {
+			out = append(out, points[i])
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].T != out[j].T {
+			return out[i].T < out[j].T
+		}
+		return out[i].D > out[j].D
+	})
+	return out
 }
 
 func buildSummary(spans []runlog.Span, durations []int64, in *diagnose.Input, opts Options) Summary {
