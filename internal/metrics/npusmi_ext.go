@@ -43,7 +43,8 @@ var npusmiExtendedParsers = map[string]func([]byte) (hardware.Sample, error){
 // subcommand is a warning, not a fatal error: the other families are still
 // emitted.
 //
-// It deliberately does not collect HCCS (deferred) or fan speed (the 910B2 has
+// It deliberately does not collect HCCS here: HCCS has a separate passive
+// source (NPUSmiHCCSSource). It also does not collect fan speed (the 910B2 has
 // no NPU fan), and it never fabricates absolute HBM GB/s from the utilisation
 // percentage.
 type NPUSmiExtendedSource struct {

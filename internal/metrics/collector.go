@@ -151,6 +151,7 @@ func (w *warningList) All() []string {
 // metrics.meta.json. Existing output files are never overwritten.
 func (c *Collector) Run(ctx context.Context) (Result, error) {
 	opts := c.Options
+	defer closeSources(opts.Sources)
 	if strings.TrimSpace(opts.OutDir) == "" {
 		return Result{}, fmt.Errorf("metrics: output directory is required")
 	}
@@ -418,6 +419,17 @@ func sourceNames(sources []Source) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// closeSources releases long-lived collectors (for example the driver eBPF
+// source) after the metrics window ends. Sources that do not implement
+// io.Closer are left untouched.
+func closeSources(sources []Source) {
+	for _, source := range sources {
+		if closer, ok := source.(io.Closer); ok {
+			_ = closer.Close()
+		}
+	}
 }
 
 func seriesList(series map[string]*SeriesSummary) []SeriesSummary {

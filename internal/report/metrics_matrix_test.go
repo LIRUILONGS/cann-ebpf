@@ -63,3 +63,28 @@ func TestRenderMetricsMatrixUsesGroupedView(t *testing.T) {
 		t.Fatal("old per-series canvas must not be emitted")
 	}
 }
+
+func TestRenderMetricsMatrixIncludesHCCSMetrics(t *testing.T) {
+	times := []float64{0, 1000}
+	m := &MetricsData{
+		Available: true, Samples: 2, IntervalMS: 1000, Coverage: 1,
+		Sources: []string{"npu-smi"},
+		Series: []MetricSeries{{
+			ID: "hccs-0", Name: "npu_hccs_tx_bytes_total", Kind: "counter",
+			Unit: "bytes", Source: "npu-smi", Device: "NPU-0",
+			Labels: map[string]string{"lane": "0"}, T: times, V: []float64{100, 200},
+		}},
+		Stats: []MetricStat{{
+			ID: "hccs-0", Name: "npu_hccs_tx_bytes_total", Kind: "counter",
+			Unit: "bytes", Source: "npu-smi", Device: "NPU-0",
+			Points: 2, Last: 200, Mean: 150, P95: 200, Max: 200,
+		}},
+	}
+	out, err := Render(Data{Schema: SchemaV1, Title: "hccs matrix", Metrics: m})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(out), "npu_hccs_tx_bytes_total") {
+		t.Fatal("metrics matrix missing HCCS metric")
+	}
+}

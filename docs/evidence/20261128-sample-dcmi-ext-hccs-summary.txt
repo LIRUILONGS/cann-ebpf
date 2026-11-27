@@ -1,0 +1,19 @@
+Date: 2026-11-28
+Host: validation server (910B2 x8, driver 25.2.1, npu-smi 25.2.1)
+Command:
+  CANN_DCMI_PROBE=/tmp/dcmi-build/dcmi_probe /tmp/cann-ebpf-linux-arm64 sample     --out /tmp/cann-hw-sample-20261128 --interval 5s --duration 20s     --dcmi-ext --hccs --hccs-interval 10s --json
+
+Result:
+  status=completed
+  points=1427
+  bytes=318538
+  sha256=97cb1d70a41606e5ad1f2ca816d6130052cd0d69885e08d1d899875cba868804
+  DCMI extended samples: 16 (8 devices x 2 rounds)
+  HCCS lanes sampled: NPU-0..4 twice, NPU-5..7 once (20s duration ended during the second round)
+  HCCS metric series per lane: 9 (tx/rx bytes, tx/rx packets, retry, error, link speed, lane mode, healthy)
+  Sample HCCS line:
+    {"schema":"cann.metrics.v1","source":"npu-smi","device":"NPU-0","name":"npu_hccs_tx_bytes_total","kind":"counter","value":73520119680,"unit":"bytes","labels":{"lane":"0"}}
+
+Warnings:
+  npu-smi -t hccs -i 5/6/7 -c 0: signal killed / context canceled at the end of the 20s window.
+  This is a normal stop-mid-round behavior, not a device failure. A full round needs a longer duration.

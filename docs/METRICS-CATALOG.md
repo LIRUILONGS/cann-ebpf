@@ -19,6 +19,33 @@
 | `npu_temperature_celsius` | gauge | celsius | 温度 |
 | `npu_health` | gauge | count | health label；值是 1，状态在 `status` label |
 
+### DCMI 扩展标量（sample --dcmi-ext / attach --metrics-dcmi-ext）
+
+| 指标 | 类型 | 单位 | 说明 |
+|---|---|---|---|
+| npu_aivector_utilization_ratio / npu_aicpu_utilization_ratio / npu_ctrlcpu_utilization_ratio / npu_utilization_ratio | gauge | ratio | 整卡 AIVector/AICPU/CtrlCPU/NPU 利用率，不能归因到单个 Worker |
+| npu_vectorcore_clock_mhz / npu_ctrlcpu_clock_mhz | gauge | mhz | VectorCore/CtrlCPU 时钟；VectorCore 在 910B2/25.2.1 为 unsupported，省略 |
+| npu_aicore_clock_ratio | gauge | ratio | AICore 当前/最大频率；仅表示疑似降频，不是原因 |
+| npu_hbm_temperature_celsius / npu_soc_temperature_celsius / npu_ndie_temperature_celsius / npu_sfp_temperature_celsius | gauge | celsius | 分域温度 |
+| npu_health_error_count | gauge | count | DCMI 错误码数量；0 是有效值 |
+| npu_aicore_clock_mhz / npu_aicore_clock_max_mhz / npu_hbm_clock_mhz | gauge | mhz | DCMI 直读频率 |
+| npu_hbm_bandwidth_util_ratio | gauge | ratio | HBM 带宽利用率，只有百分比，无绝对 GB/s |
+| npu_voltage_volts | gauge | volts | DCMI 电压，原始值 10 mV |
+| npu_hbm_ecc_* | gauge/counter | count | 8 个 ECC 计数 + enable；累计计数是 counter |
+| npu_pcie_*_total | counter | count | TX/RX/LCRC/ECRC/Retry 五类累计错误 |
+
+### HCCS 被动计数（sample --hccs / attach --metrics-hccs）
+
+| 指标 | 类型 | 单位 | 说明 |
+|---|---|---|---|
+| npu_hccs_tx_bytes_total / npu_hccs_rx_bytes_total | counter | bytes | 按 lane 标签；报告端用 counter 差分 |
+| npu_hccs_tx_packets_total / npu_hccs_rx_packets_total | counter | count | 按 lane 标签 |
+| npu_hccs_retry_total / npu_hccs_error_total | counter | count | 按 lane 标签 |
+| npu_hccs_link_speed / npu_hccs_lane_mode | gauge | raw | 驱动原始值，不转 GB/s/百分比 |
+| npu_hccs_healthy | gauge | count | hccs health status；status label |
+
+完整单位、采样频率、unknown 规则与实测证据见 [DCMI-HCCS-METRICS.md](DCMI-HCCS-METRICS.md)。
+
 ### 进程（`sample --pid`）
 
 | 指标 | 类型 | 单位 |
@@ -95,6 +122,13 @@ Prometheus source 按低基数 label 落盘指标，不硬编码 vLLM metric 名
 - `sample --system`：主机 CPU/load/memory/PSI/disk/net/thermal/cpufreq 快照
 
 进程/cgroup/Prometheus 指标名以 `docs/METRICS-SCHEMA.md` 的实现为准；system 指标以 `docs/METRICS-SCHEMA-SYSTEM.md` 为准。
+
+### NPU 驱动层（`sample --driver --pid` / `attach --metrics-driver`）
+
+驱动层指标在 `source=driver-ebpf` 下输出：ioctl 次数/延迟、DMA map/unmap、IOVA、
+HDC 发送/接收/提交、SVM/XSMEM、任务提交/等待和 mmap。每个点带 PID/TID/cgroup/device
+与 confidence；没有对应内核符号时只输出 `npu_driver_metric_status{status="unavailable"}`，
+不补零。完整清单、符号前提和边界见 `docs/DRIVER-METRICS.md`。
 
 ## 3. 建议的下一批指标
 

@@ -10,16 +10,21 @@ import (
 )
 
 type attachMetricsConfig struct {
-	Mode       string
-	NPUBackend string
-	Interval   time.Duration
-	PIDs       []int
-	ProcRoot   string
-	Proc       bool
-	Cgroups    []string
-	System     bool
-	Prometheus []prometheusSpec
-	Include    []string
+	Mode            string
+	NPUBackend      string
+	Interval        time.Duration
+	Driver          bool
+	DCMIExt         bool
+	DCMIExtInterval time.Duration
+	HCCS            bool
+	HCCSInterval    time.Duration
+	PIDs            []int
+	ProcRoot        string
+	Proc            bool
+	Cgroups         []string
+	System          bool
+	Prometheus      []prometheusSpec
+	Include         []string
 }
 
 // buildAttachMetricSources reuses the standalone sample sources for the
@@ -64,18 +69,33 @@ func buildAttachMetricSources(config attachMetricsConfig) ([]metrics.Source, []s
 			warnings = append(warnings, "NPU metrics unavailable: dcmi_probe and npu-smi are both missing")
 		}
 	}
-	if useDCMI {
+	useDCMIExt := config.DCMIExt
+	if useDCMIExt {
+		// Extended DCMI includes the basic fields; do not emit two DCMI sources.
+		useDCMI = false
+	}
+	if useDCMI || useDCMIExt {
 		probe, ok := metrics.ResolveDCMIProbe()
 		if !ok {
 			return nil, warnings, fmt.Errorf("dcmi_probe not found in PATH (set CANN_DCMI_PROBE)")
 		}
-		sources = append(sources, metrics.NewDCMISource(probe, config.Interval, 2*time.Second))
+		if useDCMI {
+			sources = append(sources, metrics.NewDCMISource(probe, config.Interval, 2*time.Second))
+		}
+		if useDCMIExt {
+			sources = append(sources, metrics.NewDCMISourceExtended(probe, config.DCMIExtInterval, 10*time.Second))
+		}
 	}
-	if useNPUSmi {
+	if useNPUSmi || config.HCCS {
 		if _, err := exec.LookPath("npu-smi"); err != nil {
 			return nil, warnings, fmt.Errorf("npu-smi not found in PATH: %w", err)
 		}
-		sources = append(sources, metrics.NewNPUSmiSource("npu-smi", config.Interval, 5*time.Second))
+		if useNPUSmi {
+			sources = append(sources, metrics.NewNPUSmiSource("npu-smi", config.Interval, 5*time.Second))
+		}
+		if config.HCCS {
+			sources = append(sources, metrics.NewNPUSmiHCCSSource("npu-smi", nil, config.HCCSInterval, 60*time.Second))
+		}
 	}
 	if config.Proc {
 		if len(config.PIDs) == 0 {
@@ -93,6 +113,13 @@ func buildAttachMetricSources(config attachMetricsConfig) ([]metrics.Source, []s
 	}
 	if config.System {
 		sources = append(sources, metrics.NewSystemSource("/proc", "/sys", config.Interval, 2*time.Second))
+	}
+	if config.Driver {
+		if len(config.PIDs) == 0 {
+			warnings = append(warnings, "driver-ebpf metrics skipped: no target PIDs")
+		} else {
+			sources = append(sources, metrics.NewDriverEBPFSource(config.PIDs, config.Interval, 3*time.Second))
+		}
 	}
 	for _, spec := range config.Prometheus {
 		source, err := metrics.NewPrometheusSource(metrics.PrometheusConfig{

@@ -57,6 +57,11 @@ cann-ebpf sample \
 | `--duration` | `0` | `0` 表示持续到 SIGINT/SIGTERM；支持 `10m`、`1h` |
 | `--dcmi` | 自动 | 使用 `CANN_DCMI_PROBE` 或 PATH 中的 `dcmi_probe` |
 | `--npu-smi` | 自动 | 运行 `npu-smi info` |
+| `--dcmi-ext` | 关闭 | 运行 `dcmi_probe --extended`；DCMI 直读扩展标量，默认 10s |
+| `--dcmi-ext-interval` | `10s` | DCMI 扩展间隔，最小 5s |
+| `--hccs` | 关闭 | 被动读取 `npu-smi info -t hccs -i N -c 0`，默认 30s |
+| `--hccs-interval` | `30s` | HCCS 采样间隔，最小 10s；10s 仅诊断 |
+| `--driver` | 关闭 | 采集 NPU 驱动层 eBPF 指标；必须同时指定至少一个 `--pid`，详见 `docs/DRIVER-METRICS.md` |
 | `--system` | 关闭 | 从 procfs/sysfs 采集主机整体 CPU、load、memory、PSI、disk、net、thermal 和 cpufreq；详见 `docs/METRICS-SCHEMA-SYSTEM.md` |
 | `--pid` | 无 | 从 `/proc/<pid>` 采集；可重复；不指定时不会主动读取未知 PID |
 | `--cgroup` | 无 | cgroup v2 目录；可重复 |
@@ -158,6 +163,8 @@ Prometheus 的 `_bucket{le="+Inf"}` 不写入 `buckets` 数组：`buckets` 只�
 | `npu_health` | gauge | count | 值为 1，`status` 标签记录 OK/Warning 等 |
 
 设备维度写入 `device` 字段（`NPU-0`）。DCMI 默认 1s，子进程超时 2s；npu-smi 默认且最小 5s，子进程超时 5s。
+
+`--dcmi-ext` / `--hccs` 的扩展指标、单位、采样间隔与 unknown/unsupported 规则见 `docs/DCMI-HCCS-METRICS.md`。
 
 ### 4.2 `/proc/<pid>`
 

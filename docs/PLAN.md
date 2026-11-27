@@ -61,6 +61,44 @@
 - DCMI 字段、HCCL activity 是否可用，需在目标机实测；不可用时按 7.1 的降级路径处理。
 - 当前每卡 HBM 余量约 4.6GB，不能为验证 vLLM 硬起一个抢 HBM 的实例。
 
+### 2.4 采集深度分层（纵向）
+
+除了 7.1 的 H1/H2/M/C/D/E 功能分层，本项目还需要一条**按证据深度从浅到深**的分层。两者是不同维度：
+
+- **采集深度**回答“我们观察到了哪一层、离根因还有多远”；
+- **功能分层**回答“同一层里具体在测什么”。
+
+| 深度 | 层 | 回答的问题 | 主要数据源 | 项目定位 |
+|---|---|---|---|---|
+| **L1** | 请求/服务边界 | 哪个请求慢了，QPS/TTFT/状态码是否异常 | nginx/网关日志、已有 `/metrics` | 只做外部上下文，不是核心交付 |
+| **L2** | 框架/调度 | 哪个 batch、哪个执行阶段、是否卡在调度 | vLLM/Orinfer batch 事件、插件/USDT | 当前只做 batch 窗口；request 级不承诺 |
+| **L3** | CANN host API | 哪个进程/线程、哪个 CANN 调用、host 等了多久 | `cann-ebpf attach`、H1/H2/M/C | **主战场，必须交付** |
+| **L4** | 内核/驱动 | host 为什么慢：锁、调度、ioctl、DMA、HDC、SVM/xsmem、task submit | off-CPU/futex、kernel stacks、K 层驱动指标 | **主战场，当前重点补齐** |
+| **L5** | 设备/硬件 | 设备执行了多久，硬件是否出现压力 | DCMI/HCCS 快照；msPTI/官方 profiler timeline | 硬件快照可用；设备 timeline 当前不作为可实现主路径 |
+
+其中 K 层是 L4 的驱动子层，指标和不可用语义见 `docs/DRIVER-METRICS.md`；不要把 K 的 ioctl/DMA/HDC 耗时写成 L5 的设备执行时长。
+
+两条硬边界：
+
+1. **L3/L4 是当前项目的交付核心。** 没有 L5，仍然可以判断 host 阻塞、host 提交延迟、驱动控制路径慢、内存分配异常和硬件背景压力。
+2. **L5 不能默认写成已实现。** DCMI/HCCS 只是设备级/硬件级快照，不能当 per-op 归因；真实 device timeline 需要 msPTI/profiler 预置或维护窗口，当前运行中服务拿不到时统一标 `unavailable`。
+
+因果定位按深度而不是按数据源堆叠：
+
+```text
+L1 现象
+  -> L2 框架/batch 上下文（有则使用，不强行）
+    -> L3 CANN API 是否慢
+      -> L4 host/驱动是否慢
+        -> L5 设备执行是否慢（只有真实 device 证据时）
+```
+
+不允许跨层推断：
+
+- L4 的 `ioctl/DMA/HDC` 耗时不能写成 L5 的 kernel 执行耗时；
+- L5 的 DCMI 利用率不能写成某个 CANN 调用或 request 的归因；
+- 没有 L5 设备证据时，只能输出 `device_side: unavailable`，不能输出 `device_slow` 或 `launch_starvation` 的确定性结论。
+
 ## 3. 设计原则
 
 1. **配置驱动，固定模板**：profile 可以选择探针、符号、采样率、阈值和上下文方式，但不允许 YAML 现场生成任意 BPF 代码；核心只实现有限的安全模板。

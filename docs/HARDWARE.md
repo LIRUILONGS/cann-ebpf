@@ -1,7 +1,7 @@
-# E 层：npu-smi 硬件指标
+# E 层：DCMI / npu-smi 硬件指标
 
-日期：2026-11-26
-状态：代码 + 单测完成，已在 `target-host` V4 上批量验证。
+日期：2026-11-28
+状态：代码 + 单测完成；npu-smi 链路已在 target-host 验证，DCMI/HCCS 已在 910B2 测试服务器完成只读实测（详见 docs/DCMI-HCCS-METRICS.md）。
 
 ## 1. 定位
 
@@ -15,7 +15,7 @@
 
 ## 2. 数据源与 schema
 
-当前实现 `npu-smi info`（host 与容器内都可用）。
+当前实现两条后端：`npu-smi info`（host 与容器内都可用）和独立 C helper `dcmi_probe`（host 上直读 DCMI；基础模式默认，`--extended` 打开频率/温度/ECC/电压/PCIe/health error 扩展）。DCMI/HCCS 的指标、单位、unknown 规则与实测证据见 [DCMI-HCCS-METRICS.md](DCMI-HCCS-METRICS.md)。
 
 ```json
 {"schema":"cann.hardware.v1","ts_ns":1795681823289280259,"device_id":0,"name":"910B2",
@@ -37,6 +37,9 @@
 |---|---|
 | `internal/hardware/types.go` | schema、指针字段、HBM free 计算 |
 | `internal/hardware/npusmi.go` | `npu-smi info` 两行一设备的解析 |
+| `internal/hardware/npusmi_hccs.go` | `npu-smi info -t hccs` 按实际 lane 数量的解析 |
+| `internal/metrics/npusmi_hccs.go` | HCCS 逐卡被动采样（30s 默认，失败仅 warning） |
+| `m3/dcmi_probe/dcmi_probe.c` | DCMI 直读 helper（基础模式默认，`--extended` 扩展标量） |
 | `internal/hardware/collector.go` | 周期采样、JSONL 写入、失败降级 |
 | `internal/probes/hardware.go` | `--hardware auto\|on\|off` 与 profile 合并 |
 | `internal/probes/run.go` | 在 uprobe attach 前启动、采集结束停止、manifest artifact |
@@ -69,7 +72,7 @@ JSON 新增：
 }
 ```
 
-Markdown 增加“硬件层（npu-smi，粗粒度）”表格，并明确写“不能和 monotonic host span 逐调用 join”。
+Markdown 增加“硬件层（DCMI/npu-smi，粗粒度）”表格，并明确写“不能和 monotonic host span 逐调用 join”。
 
 判定：`hbm_pressure` 只在
 
@@ -96,5 +99,5 @@ Markdown 增加“硬件层（npu-smi，粗粒度）”表格，并明确写“�
   但要先确认 npu-smi 调用开销。
 - `npu-smi` 的 AICore% 是整卡利用率，不是某个 stream/kernel。
 - HBM free% 以整卡为准；多进程共享时不能归因到单个 Worker。
-- DCMI 后端尚未实现；当前 `--hardware auto` 只走 npu-smi。宿主 `/usr/local/dcmi` 有 `libdcmi.so`，
-  后续可在不引入 CGO 的前提下通过 `npu-smi` 子命令或独立 helper 补充。
+- DCMI 后端通过独立 C helper 实现（`m3/dcmi_probe/dcmi_probe.c`），Go 侧用 `--metrics-dcmi-ext` 接入；`sample` 侧对应 `--dcmi-ext`。
+- HCCS 通过 `sample --hccs` / `attach --metrics-hccs` 接入，只读 `npu-smi info -t hccs -i N -c 0`；不执行 hccs-bw。

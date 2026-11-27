@@ -474,6 +474,17 @@ func MergeSample(dst *Sample, src Sample) {
 		{&dst.PowerW, &src.PowerW},
 		{&dst.TempC, &src.TempC},
 		{&dst.VoltageV, &src.VoltageV},
+		{&dst.AIVectorPct, &src.AIVectorPct},
+		{&dst.AICPUPct, &src.AICPUPct},
+		{&dst.CtrlCPUPct, &src.CtrlCPUPct},
+		{&dst.NPUPct, &src.NPUPct},
+		{&dst.VectorCoreClockMHz, &src.VectorCoreClockMHz},
+		{&dst.CtrlCPUClockMHz, &src.CtrlCPUClockMHz},
+		{&dst.AICoreClockRatio, &src.AICoreClockRatio},
+		{&dst.HBMTempC, &src.HBMTempC},
+		{&dst.SocTempC, &src.SocTempC},
+		{&dst.NDieTempC, &src.NDieTempC},
+		{&dst.SFPTempC, &src.SFPTempC},
 	} {
 		if *pair.dst == nil {
 			*pair.dst = *pair.src
@@ -498,10 +509,22 @@ func MergeSample(dst *Sample, src Sample) {
 		{&dst.PCIeLCRCErrors, &src.PCIeLCRCErrors},
 		{&dst.PCIeECRCErrors, &src.PCIeECRCErrors},
 		{&dst.PCIeRetry, &src.PCIeRetry},
+		{&dst.HealthErrorCount, &src.HealthErrorCount},
+		{&dst.HealthCode, &src.HealthCode},
 	} {
 		if *pair.dst == nil {
 			*pair.dst = *pair.src
 		}
+	}
+	if dst.HCCSHealth == "" {
+		dst.HCCSHealth = src.HCCSHealth
+	}
+	if dst.HCCSLanes == nil && src.HCCSLanes != nil {
+		dst.HCCSLanes = append([]HCCSLane(nil), src.HCCSLanes...)
+	}
+	if dst.AICoreClockRatio == nil && dst.AICoreClockMHz != nil && dst.AICoreClockMaxMHz != nil && *dst.AICoreClockMaxMHz > 0 {
+		ratio := *dst.AICoreClockMHz / *dst.AICoreClockMaxMHz
+		dst.AICoreClockRatio = &ratio
 	}
 	if dst.ECCEnabled == nil {
 		dst.ECCEnabled = src.ECCEnabled

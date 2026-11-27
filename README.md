@@ -12,6 +12,9 @@ CANN / vLLM-Ascend 的**主机侧只读观测工具**：用 eBPF uprobe 记录 h
 | off-CPU / futex | `cann-ebpf attach --blocking on` | 记录 host 阻塞 |
 | 硬件基础指标 | `cann-ebpf sample --npu-smi` | HBM/AICore/功耗/温度 |
 | HBM 扩展指标 | `cann-ebpf sample --npu-smi-ext` | 频率、ECC、电压、PCIe 错误、HBM 利用率（30s 周期） |
+| DCMI 扩展指标 | `cann-ebpf sample --dcmi-ext` | DCMI 直读 AIVector/AICPU/CtrlCPU/NPU、频率、HBM 温度、ECC、电压、PCIe、health error（10s 周期） |
+| HCCS 被动计数 | `cann-ebpf sample --hccs` | 逐 lane 的 tx/rx bytes/packets、retry、error、link speed（30s 周期，不执行 hccs-bw） |
+| NPU 驱动层指标 | `cann-ebpf sample --driver --pid <pid>` | ioctl、DMA/IOVA、HDC、SVM/XSMEM、任务提交；无符号时显式 unavailable |
 | **内核栈火焰图** | `cann-ebpf stacks` | 对目标 host 进程做 99Hz 内核栈采样，输出 `stacks.folded` |
 | 进程/cgroup/system 指标 | `cann-ebpf sample` | procfs、cgroup v2、主机系统 |
 | Prometheus 指标 | `cann-ebpf sample --prometheus ...` | vLLM/Orinfer 等 endpoint |
@@ -63,7 +66,7 @@ CANN / vLLM-Ascend 的**主机侧只读观测工具**：用 eBPF uprobe 记录 h
 - 10 分钟 host 采集的 `spans.jsonl` 约 **200MB**
 - 同一份报告 HTML 约 **8–9MB**
 - 火焰图 `stacks.folded` 约几百 KB
-- 采样频率默认：host stack `99Hz`，metrics 基础间隔 `1s`，`--npu-smi-ext` 默认 `30s`
+- 采样频率默认：host stack `99Hz`，metrics 基础间隔 `1s`，`--npu-smi-ext` 默认 `30s`，`--dcmi-ext` 默认 `10s`，`--hccs` 默认 `30s`
 
 ## 快速开始
 

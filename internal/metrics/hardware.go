@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"time"
 
@@ -35,6 +36,7 @@ type DCMISource struct {
 	Probe    string
 	Every    time.Duration
 	Deadline time.Duration
+	Extended bool
 	Runner   CommandRunner
 }
 
@@ -51,6 +53,19 @@ func NewDCMISource(probe string, interval, timeout time.Duration) *DCMISource {
 	return &DCMISource{Probe: probe, Every: interval, Deadline: timeout, Runner: execRunner}
 }
 
+// NewDCMISourceExtended creates a DCMI source that runs dcmi_probe --extended.
+// Extended mode is slower because it reads frequencies, ECC, temperatures,
+// voltage and PCIe counters; it defaults to a 10s interval.
+func NewDCMISourceExtended(probe string, interval, timeout time.Duration) *DCMISource {
+	if interval <= 0 || interval < 5*time.Second {
+		interval = 10 * time.Second
+	}
+	if timeout <= 0 {
+		timeout = 10 * time.Second
+	}
+	return &DCMISource{Probe: probe, Every: interval, Deadline: timeout, Extended: true, Runner: execRunner}
+}
+
 func (s *DCMISource) Name() string            { return "dcmi" }
 func (s *DCMISource) Interval() time.Duration { return s.Every }
 func (s *DCMISource) Timeout() time.Duration  { return s.Deadline }
@@ -60,7 +75,11 @@ func (s *DCMISource) Collect(ctx context.Context) ([]Point, []string, error) {
 	if runner == nil {
 		runner = execRunner
 	}
-	raw, err := runner(ctx, s.Probe)
+	args := []string{}
+	if s.Extended {
+		args = append(args, "--extended")
+	}
+	raw, err := runner(ctx, s.Probe, args...)
 	if err != nil {
 		return nil, nil, fmt.Errorf("dcmi_probe: %w", err)
 	}
@@ -131,14 +150,17 @@ func hardwareSamplesToPoints(source string, samples []hardware.Sample) []Point {
 			point.Device = device
 			points = append(points, point)
 		}
-		addCounter := func(name string, value *int64, labels map[string]string) {
+		addCounterUnit := func(name, unit string, value *int64, labels map[string]string) {
 			if value == nil {
 				return
 			}
-			point := Counter(name, "count", float64(*value), labels)
+			point := Counter(name, unit, float64(*value), labels)
 			point.Source = source
 			point.Device = device
 			points = append(points, point)
+		}
+		addCounter := func(name string, value *int64, labels map[string]string) {
+			addCounterUnit(name, "count", value, labels)
 		}
 		addIntGauge := func(name string, value *int64, labels map[string]string) {
 			if value == nil {
@@ -174,6 +196,9 @@ func hardwareSamplesToPoints(source string, samples []hardware.Sample) []Point {
 		addGauge("npu_temperature_celsius", "celsius", sample.TempC, baseLabels)
 		if sample.Health != "" {
 			labels := cloneLabels(baseLabels)
+			if labels == nil {
+				labels = make(map[string]string, 1)
+			}
 			labels["status"] = sample.Health
 			value := 1.0
 			addGauge("npu_health", "count", &value, labels)
@@ -212,6 +237,69 @@ func hardwareSamplesToPoints(source string, samples []hardware.Sample) []Point {
 		addCounter("npu_pcie_lcrc_errors_total", sample.PCIeLCRCErrors, baseLabels)
 		addCounter("npu_pcie_ecrc_errors_total", sample.PCIeECRCErrors, baseLabels)
 		addCounter("npu_pcie_retry_total", sample.PCIeRetry, baseLabels)
+
+		// --- P1 DCMI extended scalar metrics ---
+		if sample.AIVectorPct != nil {
+			ratio := *sample.AIVectorPct / 100
+			addGauge("npu_aivector_utilization_ratio", "ratio", &ratio, baseLabels)
+		}
+		if sample.AICPUPct != nil {
+			ratio := *sample.AICPUPct / 100
+			addGauge("npu_aicpu_utilization_ratio", "ratio", &ratio, baseLabels)
+		}
+		if sample.CtrlCPUPct != nil {
+			ratio := *sample.CtrlCPUPct / 100
+			addGauge("npu_ctrlcpu_utilization_ratio", "ratio", &ratio, baseLabels)
+		}
+		if sample.NPUPct != nil {
+			ratio := *sample.NPUPct / 100
+			addGauge("npu_utilization_ratio", "ratio", &ratio, baseLabels)
+		}
+		addGauge("npu_vectorcore_clock_mhz", "mhz", sample.VectorCoreClockMHz, baseLabels)
+		addGauge("npu_ctrlcpu_clock_mhz", "mhz", sample.CtrlCPUClockMHz, baseLabels)
+		if sample.AICoreClockRatio != nil {
+			addGauge("npu_aicore_clock_ratio", "ratio", sample.AICoreClockRatio, baseLabels)
+		} else if sample.AICoreClockMHz != nil && sample.AICoreClockMaxMHz != nil && *sample.AICoreClockMaxMHz > 0 {
+			ratio := *sample.AICoreClockMHz / *sample.AICoreClockMaxMHz
+			addGauge("npu_aicore_clock_ratio", "ratio", &ratio, baseLabels)
+		}
+		addGauge("npu_hbm_temperature_celsius", "celsius", sample.HBMTempC, baseLabels)
+		addGauge("npu_soc_temperature_celsius", "celsius", sample.SocTempC, baseLabels)
+		addGauge("npu_ndie_temperature_celsius", "celsius", sample.NDieTempC, baseLabels)
+		addGauge("npu_sfp_temperature_celsius", "celsius", sample.SFPTempC, baseLabels)
+		addIntGauge("npu_health_error_count", sample.HealthErrorCount, baseLabels)
+
+		// --- HCCS passive counters ---
+		for _, lane := range sample.HCCSLanes {
+			laneLabels := cloneLabels(baseLabels)
+			if laneLabels == nil {
+				laneLabels = make(map[string]string, 1)
+			}
+			laneLabels["lane"] = strconv.Itoa(lane.Lane)
+			addCounterUnit("npu_hccs_tx_bytes_total", "bytes", lane.TXBytes, laneLabels)
+			addCounterUnit("npu_hccs_rx_bytes_total", "bytes", lane.RXBytes, laneLabels)
+			addCounter("npu_hccs_tx_packets_total", lane.TXPackets, laneLabels)
+			addCounter("npu_hccs_rx_packets_total", lane.RXPackets, laneLabels)
+			addCounter("npu_hccs_retry_total", lane.Retry, laneLabels)
+			addCounter("npu_hccs_error_total", lane.Error, laneLabels)
+			if lane.LinkSpeed != nil {
+				value := float64(*lane.LinkSpeed)
+				addGauge("npu_hccs_link_speed", "raw", &value, laneLabels)
+			}
+			if lane.LinkMode != nil {
+				value := float64(*lane.LinkMode)
+				addGauge("npu_hccs_lane_mode", "raw", &value, laneLabels)
+			}
+			if sample.HCCSHealth != "" {
+				healthyLabels := cloneLabels(laneLabels)
+				healthyLabels["status"] = sample.HCCSHealth
+				healthy := 0.0
+				if strings.EqualFold(sample.HCCSHealth, "OK") {
+					healthy = 1
+				}
+				addGauge("npu_hccs_healthy", "count", &healthy, healthyLabels)
+			}
+		}
 	}
 	return points
 }

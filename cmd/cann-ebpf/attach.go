@@ -41,8 +41,13 @@ func cmdAttach(args []string) int {
 	metricsMode := fs.String("metrics", "auto", "integrated cann.metrics.v1 sampling: auto|on|off")
 	metricsNPUBackend := fs.String("metrics-npu-backend", "auto", "NPU metrics backend: auto|dcmi|npu-smi|both|off")
 	metricsInterval := fs.Duration("metrics-interval", time.Second, "base interval for DCMI, process, cgroup, system and Prometheus metrics")
+	metricsDriver := fs.Bool("metrics-driver", false, "also collect NPU driver-layer eBPF metrics (kprobes + ioctl tracepoints)")
 	metricsProc := fs.Bool("metrics-proc", false, "also sample CPU/RSS for the discovered target PIDs")
 	metricsSystem := fs.Bool("metrics-system", false, "also sample host CPU/load/memory/PSI/disk/net/thermal/frequency metrics")
+	metricsDCMIExt := fs.Bool("metrics-dcmi-ext", false, "sample extended DCMI scalar metrics (AIVector/AICPU/CtrlCPU/NPU, clocks, HBM bandwidth/temperature, ECC, voltage, PCIe, health errors)")
+	metricsDCMIExtInterval := fs.Duration("metrics-dcmi-ext-interval", 10*time.Second, "DCMI extended sampling interval (minimum 5s)")
+	metricsHCCS := fs.Bool("metrics-hccs", false, "sample passive HCCS lane counters via npu-smi info -t hccs -i N -c 0")
+	metricsHCCSInterval := fs.Duration("metrics-hccs-interval", 30*time.Second, "HCCS passive sampling interval (minimum 10s; 10s is diagnostic only)")
 	var metricsCgroups repeatStrings
 	fs.Var(&metricsCgroups, "metrics-cgroup", "cgroup v2 path to sample (repeatable)")
 	var prometheusTargets repeatStrings
@@ -64,6 +69,14 @@ func cmdAttach(args []string) int {
 	}
 	if *metricsInterval <= 0 {
 		fmt.Fprintln(os.Stderr, "attach: --metrics-interval must be > 0")
+		return 2
+	}
+	if *metricsDCMIExtInterval <= 0 {
+		fmt.Fprintln(os.Stderr, "attach: --metrics-dcmi-ext-interval must be > 0")
+		return 2
+	}
+	if *metricsHCCSInterval <= 0 {
+		fmt.Fprintln(os.Stderr, "attach: --metrics-hccs-interval must be > 0")
 		return 2
 	}
 	if code := runPreflightGate(*preflightMode); code != 0 {
@@ -133,6 +146,9 @@ func cmdAttach(args []string) int {
 	}
 	metricSources, metricsWarnings, err := buildAttachMetricSources(attachMetricsConfig{
 		Mode: *metricsMode, NPUBackend: *metricsNPUBackend, Interval: *metricsInterval,
+		Driver:  *metricsDriver,
+		DCMIExt: *metricsDCMIExt, DCMIExtInterval: *metricsDCMIExtInterval,
+		HCCS: *metricsHCCS, HCCSInterval: *metricsHCCSInterval,
 		PIDs: pids, ProcRoot: *procRoot, Proc: *metricsProc,
 		Cgroups: append([]string(nil), metricsCgroups...), System: *metricsSystem,
 		Prometheus: prometheusSpecs, Include: append([]string(nil), prometheusInclude...),

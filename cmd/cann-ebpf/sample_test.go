@@ -113,3 +113,22 @@ func TestBuildSampleSourcesSystemWithProc(t *testing.T) {
 		t.Fatalf("system source type=%T", sources[1])
 	}
 }
+
+func TestParseSampleArgsDCMIExtendedAndHCCS(t *testing.T) {
+	config, err := parseSampleArgs([]string{
+		"--out", "runs/hw-ext",
+		"--dcmi-ext",
+		"--dcmi-ext-interval", "5s",
+		"--hccs",
+		"--hccs-interval", "10s",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !config.DCMIExt || config.DCMIExtInterval != 5*time.Second {
+		t.Fatalf("dcmi ext config = %+v", config)
+	}
+	if !config.HCCS || config.HCCSInterval != 10*time.Second {
+		t.Fatalf("hccs config = %+v", config)
+	}
+}

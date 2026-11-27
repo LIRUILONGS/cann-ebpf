@@ -51,18 +51,23 @@ type prometheusSpec struct {
 }
 
 type sampleConfig struct {
-	Out        string
-	Interval   time.Duration
-	Duration   time.Duration
-	DCMI       bool
-	NPUSMI     bool
-	NPUSMIExt  bool
-	System     bool
-	PIDs       []int
-	Cgroups    []string
-	Prometheus []prometheusSpec
-	Include    []string
-	JSON       bool
+	Out             string
+	Interval        time.Duration
+	Duration        time.Duration
+	Driver          bool
+	DCMI            bool
+	NPUSMI          bool
+	NPUSMIExt       bool
+	DCMIExt         bool
+	DCMIExtInterval time.Duration
+	HCCS            bool
+	HCCSInterval    time.Duration
+	System          bool
+	PIDs            []int
+	Cgroups         []string
+	Prometheus      []prometheusSpec
+	Include         []string
+	JSON            bool
 }
 
 // cmdSample implements `cann-ebpf sample`, the independent metrics collector.
@@ -124,8 +129,13 @@ func parseSampleArgs(args []string) (*sampleConfig, error) {
 	interval := fs.Duration("interval", time.Second, "base sampling interval")
 	duration := fs.Duration("duration", 0, "collection duration; 0 means until SIGINT/SIGTERM")
 	dcmi := fs.Bool("dcmi", false, "sample the dcmi_probe backend")
+	driver := fs.Bool("driver", false, "sample NPU driver-layer eBPF metrics (kprobes + ioctl tracepoints; requires --pid)")
 	npuSMI := fs.Bool("npu-smi", false, "sample npu-smi info (minimum interval 5s)")
 	npuSMIExt := fs.Bool("npu-smi-ext", false, "sample extended npu-smi fields: clocks, HBM bandwidth util, ECC, voltage, PCIe errors (30s interval)")
+	dcmiExt := fs.Bool("dcmi-ext", false, "sample extended DCMI fields: AIVector/AICPU/CtrlCPU/NPU utilisation, clocks, HBM bandwidth/temperature, ECC, voltage, PCIe errors, health error count (10s interval)")
+	dcmiExtInterval := fs.Duration("dcmi-ext-interval", 10*time.Second, "DCMI extended sampling interval (minimum 5s)")
+	hccs := fs.Bool("hccs", false, "sample passive HCCS lane counters via npu-smi info -t hccs -i N -c 0 (30s interval)")
+	hccsInterval := fs.Duration("hccs-interval", 30*time.Second, "HCCS passive sampling interval (minimum 10s; 10s is diagnostic only)")
 	system := fs.Bool("system", false, "sample host metrics from procfs and sysfs")
 	var pids repeatInts
 	fs.Var(&pids, "pid", "process id to sample from /proc (repeatable)")
@@ -148,6 +158,12 @@ func parseSampleArgs(args []string) (*sampleConfig, error) {
 	if *duration < 0 {
 		return nil, fmt.Errorf("--duration must be >= 0")
 	}
+	if *dcmiExtInterval <= 0 {
+		return nil, fmt.Errorf("--dcmi-ext-interval must be > 0")
+	}
+	if *hccsInterval <= 0 {
+		return nil, fmt.Errorf("--hccs-interval must be > 0")
+	}
 	for _, pattern := range include {
 		if _, err := regexp.Compile(pattern); err != nil {
 			return nil, fmt.Errorf("--include %q: %w", pattern, err)
@@ -168,7 +184,10 @@ func parseSampleArgs(args []string) (*sampleConfig, error) {
 	}
 	return &sampleConfig{
 		Out: *out, Interval: *interval, Duration: *duration,
-		DCMI: *dcmi, NPUSMI: *npuSMI, NPUSMIExt: *npuSMIExt, System: *system, PIDs: append([]int(nil), pids...),
+		Driver: *driver,
+		DCMI:   *dcmi, DCMIExt: *dcmiExt, DCMIExtInterval: *dcmiExtInterval,
+		NPUSMI: *npuSMI, NPUSMIExt: *npuSMIExt, HCCS: *hccs, HCCSInterval: *hccsInterval,
+		System: *system, PIDs: append([]int(nil), pids...),
 		Cgroups: append([]string(nil), cgroups...), Prometheus: specs,
 		Include: append([]string(nil), include...), JSON: *jsonOut,
 	}, nil
@@ -202,8 +221,9 @@ func parsePrometheusSpec(value string) (prometheusSpec, error) {
 }
 
 func buildSampleSources(config *sampleConfig) ([]metrics.Source, error) {
-	explicit := config.DCMI || config.NPUSMI || config.NPUSMIExt || config.System || len(config.PIDs) > 0 || len(config.Cgroups) > 0 || len(config.Prometheus) > 0
-	useDCMI := config.DCMI
+	explicit := config.Driver || config.DCMI || config.DCMIExt || config.NPUSMI || config.NPUSMIExt || config.HCCS || config.System || len(config.PIDs) > 0 || len(config.Cgroups) > 0 || len(config.Prometheus) > 0
+	useDCMI := config.DCMI && !config.DCMIExt
+	useDCMIExt := config.DCMIExt
 	useNPUSMI := config.NPUSMI
 	probe := ""
 	if !explicit {
@@ -217,14 +237,14 @@ func buildSampleSources(config *sampleConfig) ([]metrics.Source, error) {
 			return nil, fmt.Errorf("no metrics source available: dcmi_probe and npu-smi are both missing")
 		}
 	}
-	if useDCMI && probe == "" {
+	if (useDCMI || useDCMIExt) && probe == "" {
 		var ok bool
 		probe, ok = metrics.ResolveDCMIProbe()
 		if !ok {
 			return nil, fmt.Errorf("dcmi_probe not found in PATH (set CANN_DCMI_PROBE)")
 		}
 	}
-	if useNPUSMI {
+	if useNPUSMI || config.NPUSMIExt || config.HCCS {
 		if _, err := exec.LookPath("npu-smi"); err != nil {
 			return nil, fmt.Errorf("npu-smi not found in PATH: %w", err)
 		}
@@ -233,16 +253,20 @@ func buildSampleSources(config *sampleConfig) ([]metrics.Source, error) {
 	if useDCMI {
 		sources = append(sources, metrics.NewDCMISource(probe, config.Interval, 2*time.Second))
 	}
+	if useDCMIExt {
+		sources = append(sources, metrics.NewDCMISourceExtended(probe, config.DCMIExtInterval, 10*time.Second))
+	}
 	if useNPUSMI {
 		sources = append(sources, metrics.NewNPUSmiSource("npu-smi", config.Interval, 5*time.Second))
 	}
 	if config.NPUSMIExt {
-		if _, err := exec.LookPath("npu-smi"); err != nil {
-			return nil, fmt.Errorf("npu-smi not found in PATH: %w", err)
-		}
 		// Extended fields require several per-device -t queries; 30s keeps the
 		// 10s/8-card overhead from dominating the sampling window.
 		sources = append(sources, metrics.NewNPUSmiExtendedSource("npu-smi", nil, nil, 30*time.Second, 60*time.Second))
+	}
+	if config.HCCS {
+		// HCCS hccs is passive counter reading, not the active hccs-bw profile.
+		sources = append(sources, metrics.NewNPUSmiHCCSSource("npu-smi", nil, config.HCCSInterval, 60*time.Second))
 	}
 	if len(config.PIDs) > 0 {
 		sources = append(sources, metrics.NewProcSource(config.PIDs, "/proc", config.Interval, 2*time.Second))
@@ -252,6 +276,12 @@ func buildSampleSources(config *sampleConfig) ([]metrics.Source, error) {
 	}
 	if config.System {
 		sources = append(sources, metrics.NewSystemSource("/proc", "/sys", config.Interval, 2*time.Second))
+	}
+	if config.Driver {
+		if len(config.PIDs) == 0 {
+			return nil, fmt.Errorf("--driver requires at least one --pid")
+		}
+		sources = append(sources, metrics.NewDriverEBPFSource(config.PIDs, config.Interval, 3*time.Second))
 	}
 	for _, spec := range config.Prometheus {
 		source, err := metrics.NewPrometheusSource(metrics.PrometheusConfig{

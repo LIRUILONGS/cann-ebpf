@@ -1,0 +1,8 @@
+dcmi_probe: warning: device 0 VectorCore frequency failed: -8255
+dcmi_probe: warning: device 1 VectorCore frequency failed: -8255
+dcmi_probe: warning: device 2 VectorCore frequency failed: -8255
+dcmi_probe: warning: device 3 VectorCore frequency failed: -8255
+dcmi_probe: warning: device 4 VectorCore frequency failed: -8255
+dcmi_probe: warning: device 5 VectorCore frequency failed: -8255
+dcmi_probe: warning: device 6 VectorCore frequency failed: -8255
+dcmi_probe: warning: device 7 VectorCore frequency failed: -8255
