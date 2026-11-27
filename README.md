@@ -22,6 +22,8 @@
 > 标记为 `attribution.level=thread`；纯 eBPF batch span 单独标记为
 > `attribution.source=ebpf_scheduler_output_dict`，不会伪造 request 级数据。
 
+指标作用、`attach` 字段到图表的映射、全部图表、命令参数和降级语义见后文“指标、图表与功能总览”。
+
 ## 当前状态
 
 | 能力 | 状态 |
@@ -195,6 +197,8 @@ cann-ebpf version         版本和平台
 ```
 
 ### vLLM 十视图报告
+
+指标作用、全部图表和功能索引见后文“指标、图表与功能总览”。
 
 十视图并存于原有仪表盘 `views_v2` 字段，报告只读原始证据。常用参数：
 
@@ -408,6 +412,241 @@ OUT="runs/ebpf-m2-$(date -u +%Y%m%dT%H%M%SZ)"
 
 部署部分的 `server_auto_capture.sh` 封装了完整的采集流程（health 检查、
 数据收集、服务确认、uprobe 残留检查），详见[部署 > 使用模式](#部署)。
+
+## 指标、图表与功能总览
+
+这一节是 README 的功能索引。所有图都只读派生自 `spans.jsonl`、`device.jsonl`、
+`hardware.jsonl`、`metrics.jsonl` 和显式传入的旁路证据；没有证据时显示
+`unavailable` / `partial` / `inferred`，不插值、不补点、不把 host 时间冒充设备时间。
+
+### 先判断要回答什么问题
+
+| 问题 | 主指标 | 报告入口 | 需要的证据 |
+|---|---|---|---|
+| 时间花在哪个函数、线程、时间段 | `end_ns - start_ns`、function、category、PID/TID | 线程时间轴、延迟散点、时间热力图、TopN、函数分位带 | `spans.jsonl` |
+| 是否存在长尾和慢调用 | p50/p95/p99、max、slow count、CDF | KPI、延迟 CDF、延迟热图、尾 cohort | `spans.jsonl`，慢阈值 |
+| host 是在跑还是在等锁/等调度 | `offcpu_ns`、`futex_ns` | off-CPU ribbon、尾 cohort、`diagnose` | `attach --blocking on` |
+| 是 host 慢还是设备慢 | host API 时长、device busy、KERNEL/MEMCPY/HCCL | 设备四象限、设备忙率、算子 Treemap、关键路径 | `device.jsonl` + host span 关联 |
+| 并发升高后何时开始劣化 | concurrency、QPS、TTFT/E2E、running/waiting、KV、AICore | 负载-延迟拐点 | `sweep.json` + 每档 metrics |
+| 版本或配置是否回归 | 两次同 workload run 的函数和 metric 差分 | A/B 差分 | 两个完整 run，workload_id 一致 |
+| 指标什么时候发生结构变化 | 长时序 metrics + 事件 | 变化点/异常带 | 至少 5 分钟、30 个有效点 |
+| 异常从一个服务传到哪个服务 | trace_id、parent_span_id、service | 服务拓扑 | `otel.jsonl`；缺失时只能显示进程级拓扑 |
+| NPU 是否有 HBM、功耗、温度压力 | `npu_*` series 或 `hardware.jsonl` | 多指标小倍数、指标统计、`diagnose` | DCMI/npu-smi 或 metrics 采集 |
+
+### attach 字段到图表
+
+| 字段/证据 | 指标作用 | 直接驱动的图表 | 边界 |
+|---|---|---|---|
+| `start_ns`、`end_ns`，报告计算 `duration = end_ns - start_ns` | 单次调用的 wall duration，是延迟、时间轴、分位统计的基础 | KPI、线程时间轴、延迟散点、延迟热图、函数分位带、延迟 CDF | 是 host 调用持续期，不是 request 延迟，也不是 NPU kernel 时间 |
+| `function`、`category` | 识别 ACL、event、sync、memory、submit、HCCL、batch 等调用类型 | TopN 函数、时间轴颜色、函数分位带、算子 Treemap 的 host fallback | host fallback 必须标 `inferred`，不能称 msPTI 算子 |
+| `pid`、`tid` | 进程/线程归因和并发观察 | 线程时间轴泳道、时间热力图 TID 行、KPI 的 PID/TID 数 | TID 归因只证明调用线程，不等价于 request 归因 |
+| `batch_id`、`request_ids` | 把 batch 窗口和 request ID 关联起来 | 关键路径、Trace KPI、batch trace、vLLM 视图 | batch 是 `SchedulerOutput.num_scheduled_tokens` 窗口，不是逐 request 函数耗时 |
+| `trace.trace_id`、`span_id`、`parent_span_id` | 构建父子链路和跨进程下钻 | `trace` 链路树、服务拓扑、关键路径的父子关系 | 没有上游 trace 时不能宣称端到端 |
+| `offcpu_ns`、`futex_ns` | 调用线程在 CANN 调用期间的 off-CPU 和 futex 等待 | off-CPU ribbon、尾 cohort、`diagnose` 阻塞判定 | 只对最外层 span 采样；off-CPU 不等于一定在等锁 |
+| `device.jsonl` 的 `API`、`KERNEL`、`MEMCPY`、`HCCL`、`correlationId`、`streamId` | 设备侧时间线、host/device 关联和设备忙率 | 设备四象限、设备忙率、算子 Treemap、关键路径、A/B 设备指标 | 没有真实关联时，相关视图必须不可用或标 `inferred` |
+| `hardware.jsonl` 的 AICore、HBM、功耗、温度、health | run 级 NPU 资源快照 | `diagnose` 硬件表、报告 JSON、Prometheus exporter；不直接生成逐调用图 | wall-clock 采样不能和 monotonic host span 逐调用 join |
+| `metrics.jsonl` 的 gauge/counter/histogram | 资源、队列、延迟分位和长期趋势 | 多指标小倍数、指标统计、负载-延迟、变化点、A/B | 采样值不是 request 级关键路径；histogram 需按窗口增量计算 |
+| `manifest.json` 的 status、warnings、dropped_events | 证明采集是否完整 | KPI 的 dropped/errors、采集告警、报告边界说明 | 有丢失或未完成时不能把结果当成完整证据 |
+| 可选 `sweep.json`、`ops.jsonl`、`events.jsonl`、`offcpu.jsonl`、`otel.jsonl` | 负载扫描、Roofline、变更注释、精确 off-CPU、跨服务 trace | 对应 vLLM 十视图或精确模式 | 文件缺失时对应视图 unavailable，不能用近似数据替代 |
+
+### 固定报告区块（全部）
+
+报告没有外部 CDN，Canvas/SVG 和模板都内嵌在单个 HTML 中，可离线打开。
+
+| 区块 | 指标/算法 | 回答什么 | 无数据/降级 |
+|---|---|---|---|
+| KPI 卡片 | spans、PID/TID、p50/p95/p99、max、slow、device match、device busy、dropped、trace | 10 秒内判断这次 run 是否完整、慢不慢、有没有设备关联 | 缺 device 时设备 KPI 显示 `--`；缺 trace 时明确不能按 request 下钻 |
+| vLLM 十视图 | 见下一节 | 负载、关键路径、等待、算子、Roofline、A/B、变化和拓扑 | 每个卡片独立显示 `available`、`source`、`confidence` 和原因 |
+| 线程时间轴 | span 起止时间、TID/PID、function/category；有 device 时叠加 stream 轨道 | 看时间重叠、调用顺序、慢调用落在哪个线程和窗口 | 没有 span 时不画空时间轴 |
+| 延迟散点 | x = 时间，y = 对数 duration；点击可聚焦时间轴 | 找离群点、周期性尖刺和慢调用集中区 | 没有 span 时显示空态 |
+| 时间热力图 | 时间桶 × TID 行；可切换 p95 或慢调用数 | 看哪个线程在什么时间持续慢，而不是只能看单个点 | 行数受 `--max-lanes` 限制，截断会写 warning |
+| TopN 函数 | 按 function 聚合 total、count、p50、p95、max、slow | 直接定位贡献最大的 CANN 调用 | 无函数数据时显示空态；采样函数仍按样本统计 |
+| 延迟热图 | 时间桶 × 对数延迟桶，统计 count 和每列 p50/p95/p99 | 看延迟分布如何随时间迁移、是否出现双峰或长尾 | 无 span 时不可用 |
+| 次秒偏移热图 | `(start_ns - window_start_ns) mod 1s` 分桶 | 看调用是否踩在秒边界的周期性尖刺上 | run 小于 2 秒或样本不足时不可用；这不是延迟图 |
+| 函数分位带 | 每函数每时间桶的 p50 实线、p95 阴影、p99 虚线 | 看不同函数的长尾是否同时恶化 | 只显示总耗时前 12 个函数；空桶不插值 |
+| 尾 cohort 对比 | slow（p99 以上）与 typical（p45–p55）的函数/类别/等待占比差 | 比较“慢请求多做了什么”，而不是只看平均值 | 样本不足时标 `insufficient sample`；没有 blocking 时标注无等待数据 |
+| 多指标小倍数 | 多个 gauge/counter/histogram 共用时间轴，每图独立 Y 轴和单位 | 把 NPU、vLLM、进程、cgroup、主机指标与 span 窗口对照 | 没有 metrics 时不画空图；间隔过粗会标 `coarse` |
+| 指标统计表 | 每个 series 的 last、mean、p95、max、counter rate、source、device | 快速看当前值、峰值和高频变化，定位资源或队列压力 | 只展示有统计的 series；p50/p99 保留在报告 JSON；统计基于 downsampling 前原始点 |
+| 延迟 CDF | 全部 span 的 duration 累积分布 | 看整体分布和 p50/p95/p99，不被单个最大值带偏 | 没有 span 时显示空态 |
+| 设备四象限 | x = host 等待（对数），y = device busy%；颜色 = verdict | 区分 `device_bound`、`launch_starvation`、host 等待和普通调用 | 没有 host/device 关联时显示不可用 |
+| 设备忙率 | 时间桶内设备区间并集，叠加 kernel/memcpy/HCCL 分量 | 看设备是否持续忙、忙在什么类型的操作上 | 没有 `device.jsonl` 或未匹配时不可用 |
+| 采集告警与边界 | warnings、notes、unknowns、不可判定原因 | 解释为什么某张图不能给出结论 | 必须保留真实错误和降级原因，不伪造成功 |
+
+### vLLM 十视图
+
+| 视图 | 用到的指标/字段 | 图表作用 | 可用门槛与置信度 |
+|---|---|---|---|
+| `load_latency` 负载-延迟拐点 | 每档 concurrency、QPS、TTFT p50/p95、latency p50/p95/p99、running/waiting、KV cache、AICore | 并发升高时延迟和吞吐如何变化，观察容量拐点 | 至少 4 个并发档；背景 running 高于客户端并发时标 `partial` 且不计算 knee |
+| `critical_path` 关键路径瀑布 | batch/trace 节点、host start/duration、设备关联节点 | 看一个 batch/request 中哪些节点在关键链上 | 需要 batch/trace 上下文和可关联 device；没有 stream 依赖时只能是 `inferred` |
+| `summed_delay` | 叶子节点总时长、critical path、overlap、parallelism、分类汇总 | 判断串行关键路径和并行重叠哪个是主要成本 | 依赖关键路径；只汇总叶子，避免父子重复计算 |
+| `slack_cdf` | 每个节点的 earliest/latest start、slack_ms | 看多少节点没有时间余量，负 slack 表示约束冲突 | DAG 不完整或样本少于 30 时不可用 |
+| `off_cpu` off-CPU ribbon | `offcpu_ns`、`futex_ns`、span 窗口；可选精确区间 | 区分 CPU 执行、非 futex 阻塞和 futex 锁等待 | 只有精确 `offcpu.jsonl` 才画区间；否则 `aggregate` + `partial` |
+| `operator_treemap` 算子 Treemap | msPTI KERNEL/MEMCPY/HCCL 的 duration、count、device、stream | 看设备时间由哪些算子、拷贝或通信贡献 | 优先 msPTI `exact`；没有设备证据时只能 host fallback `inferred` |
+| `roofline` | `ops.jsonl` 的 flops、bytes、duration，显式 peak TFLOPS/GB/s、dtype | 判断算子是算力受限还是带宽受限 | 没有 per-op FLOPs/bytes 或显式峰值时不画点 |
+| `ab_diff` | 两个 run 的 metrics、function、component、slow count | 比较 B 相对 A 的吞吐、延迟、函数和资源变化 | workload_id 必须一致；不同 workload 或 run 不完整时拒绝比较 |
+| `change_point` 变化点/异常带 | 长时序 metrics、events 标注 | 找出均值/方差发生变化的时刻，并关联部署、扩缩容或故障 | 少于 5 分钟或少于 30 个有效点时不可用 |
+| `service_topology` 服务拓扑 | OTel trace 的 service、parent_span_id；无 OTel 时使用 host PID | 查看调用链拓扑和上下游关系 | 没有 OTel 时只能 `scope=process`，不能宣称端到端 |
+
+### metrics 指标族与作用
+
+| 指标族/来源 | 关键指标 | 指标作用 | 主要图表 |
+|---|---|---|---|
+| vLLM 队列与显存 | `vllm:num_requests_running`、`vllm:num_requests_waiting`、`vllm:kv_cache_usage_perc`、`vllm:gpu_cache_usage_perc` | 判断是否有排队、KV cache 压力和背景负载 | 多指标小倍数、指标统计、负载-延迟 |
+| vLLM 请求延迟 histogram | `vllm:time_to_first_token_seconds`、`vllm:e2e_request_latency_seconds` | 观察 TTFT/E2E 的窗口 p50/p95/p99，而不是进程启动以来的累计值 | 多指标小倍数、指标统计、负载-延迟 |
+| vLLM token/请求计数 | `vllm:prompt_tokens_total`、`vllm:generation_tokens_total`、`vllm:request_success_total`、`vllm:request_prompt_tokens`、`vllm:request_generation_tokens` | 计算 token/请求速率、成功/abort/error 变化，辅助 A/B 和变化点 | 多指标小倍数、指标统计、A/B |
+| NPU 资源 | `npu_aicore_utilization_ratio`、`npu_hbm_used_ratio`、`npu_hbm_free_bytes`、`npu_memory_used_bytes`、`npu_power_watts`、`npu_temperature_celsius`、`npu_health` | 判断算力利用率、HBM 余量、功耗墙和热限 | 多指标小倍数、指标统计、负载-延迟、变化点、A/B |
+| 进程级（`sample --pid`） | `proc_cpu_*`、`proc_rss_bytes`、`proc_vm_size_bytes`、`proc_threads`、`proc_fds`、`proc_sched_run_delay_seconds`、`proc_context_switches_*`、`proc_io_*` | 判断 Worker 自身 CPU、内存、线程、fd、调度延迟和 I/O | 多指标小倍数、指标统计、A/B |
+| cgroup v2（`sample --cgroup`） | `cgroup_cpu_usage_seconds`、`cgroup_cpu_throttled_seconds`、`cgroup_cpu_nr_throttled`、`cgroup_memory_*`、`cgroup_pids_*`、`cgroup_*_pressure_*` | 判断容器 CPU 配额、内存上限、OOM 事件和 PSI 压力 | 多指标小倍数、指标统计、变化点 |
+| 主机整体（`sample --system`） | `node_cpu_seconds_total`、`node_load1/5/15`、`node_memory_*`、`node_pressure_*`、`node_disk_*`、`node_network_*`、`node_thermal_celsius`、`node_cpu_frequency_hz` | 提供主机 CPU、内存、PSI、磁盘、网络、温度和频率背景 | 多指标小倍数、指标统计、变化点 |
+| 任意 Prometheus | `sample --prometheus` 解析出的低基数 gauge/counter/histogram | 接入 LiteLLM、网关或其他 exporter；不硬编码业务指标名 | 多指标小倍数、指标统计、变化点、A/B |
+| `hardware.jsonl` | `aicore_pct`、`hbm_used/total/free`、`power_w`、`temp_c`、`health` | run 级 NPU 快照和 `hbm_pressure` 线索 | `diagnose` 硬件表、报告 JSON、Prometheus exporter；无逐调用硬件图 |
+
+### 指标口径（不要混用）
+
+- span 指标是函数级 wall time；metrics 是采样序列；batch 是调度窗口；device 是设备时间线。四者不能互相冒充。
+- span 的 p50/p95/p99 是 nearest-rank；metrics histogram 的 `:p50/:p95/:p99` 来自相邻累计快照差值的桶内插值。
+- Prometheus histogram 首帧只作为基线；首个快照不生成窗口点，`_created` 时间戳不参与延迟统计。
+- gauge 直接保留观测值；counter 的 `rate_last/rate_mean` 只用正增量，reset 不解释成负速率；histogram 不作为 counter 计算 rate。
+- 指标统计基于 downsampling 前的完整样本；绘图可以降采样，但不会改变统计表。
+- 缺失点不插值、不填零；窗口外点被丢弃并写 warning；tracing 缺失时保留 `unknown`，不生成虚假因果。
+- `--python-batch` 只读取 `SchedulerOutput.num_scheduled_tokens` 的 request ID 键，不能推导单 request 执行时长。
+- `hardware.jsonl` 是 wall-clock run 级采样；不能和 monotonic host span 做逐调用 join；需要逐调用设备证据时使用 `device.jsonl`。
+- 没有调用栈采样就不叫火焰图；没有 per-op FLOPs/bytes 就不画 Roofline 点；没有 OTel 就不宣称端到端拓扑。
+
+### attach 开关与证据
+
+| 开关 | 产生的证据 | 对应图表 | 关闭/失败时 |
+|---|---|---|---|
+| `--blocking auto/on/off` | 最外层 span 的 `offcpu_ns`/`futex_ns` | off-CPU ribbon、尾 cohort、`diagnose` | `off` 或 attach 失败时 off-CPU 视图 unavailable，主 span 采集继续 |
+| `--python-batch` | batch span、`batch_id`、`request_ids`、逐 Worker JSON | 关键路径、Trace KPI、batch 覆盖 | 不开启就没有 batch 维度的真实关联 |
+| `--hardware auto/on/off` | `hardware.jsonl`（AICore/HBM/功耗/温度/health） | `diagnose` 硬件表、报告 JSON、exporter | `off` 或失败时 `hardware.available=false` |
+| `--device-jsonl <path>` | 导入外部 msPTI `device.jsonl`、meta 和 pidmap artifact | 设备四象限、设备忙率、算子 Treemap、关键路径 | 没有 device 文件时不生成设备级结论 |
+| `--no-context` | 不启动插件 socket，只保留 eBPF span 和可选 python batch | 线程时间轴、batch 视图 | 没有插件上下文时不能按 request 下钻 |
+| `--hardware-backend npu-smi/dcmi` | 选择硬件采样后端 | 硬件采样与 exporter | 后端不可用时只写 warning，不影响 host span |
+
+### 全部 CLI 功能
+
+| 命令 | 产出 | 在报告中的位置/用途 | 是否形成图表 |
+|---|---|---|---|
+| `validate` | profile/config 校验结果 | 防止错误 profile 进入 attach | 否 |
+| `preflight` | 根权限、tracefs、BTF、BPF、NPU 工具检查 | 判断当前主机能不能采 | 否 |
+| `discover` | target PID、库、符号、offset JSON | 解释 attach 覆盖了哪些目标 | 否 |
+| `attach` | `spans.jsonl`、`manifest.json`、`summary.json/md`、可选 `hardware.jsonl`、`python-batch-*` | 所有 attach 图表和十视图的基础证据 | 是，经 `report` |
+| `attach-tracefs` | tracefs 后备 span 证据 | 无 uprobe 条件时的降级采集 | 是，格式允许时经 `report` |
+| `trace` | trace_id、batch、CANN span 的链路树 | 从 batch/request 下钻到调用链 | 文本/JSON 链路树，不是 Canvas 图 |
+| `diagnose` | JSON/Markdown 的命中 PID/TID/batch、slow 函数、blocking、hardware、device verdict、unknowns | 只读定位和判定；与报告互补 | 表格/文本，不是图表 |
+| `report` | 单文件离线 HTML，含全部固定区块和十视图 | 本文所有图表的统一入口 | 是 |
+| `sample` | `metrics.jsonl`、`metrics.meta.json`；支持 DCMI/npu-smi/proc/cgroup/system/Prometheus | 多指标小倍数、指标统计、负载-延迟、变化点、A/B 的数据源 | 是，经 `report` |
+| `metrics` | `cann_ebpf_*` Prometheus text 或 `/metrics` | 交给 Prometheus/Grafana 做长期存储和告警 | 外部看板，不是内置 HTML |
+| `version` | 版本、平台、构建信息 | 证据可复现性 | 否 |
+
+### 命令参数速查
+
+以下参数均以当前 `cmd/cann-ebpf` 的 `flag` 定义为准；重复出现的参数可用重复 flag 传入。
+
+**`attach`：host span、batch、blocking、hardware 和设备证据**
+
+| 参数 | 默认值/取值 | 作用 | 对应证据和图表 |
+|---|---|---|---|
+| `--pid` | 空（等价 `auto`） | 指定逗号分隔 PID；`auto` 按 profile 自动发现 | 决定 `spans.jsonl` 的目标范围和线程时间轴 |
+| `--all` | `false` | attach 所有匹配 profile 的进程 | 扩大 host span、PID/TID 和 batch 覆盖 |
+| `--profile` | `vllm-ascend` | profile 名或路径 | 决定函数、采样率、blocking/hardware 默认值 |
+| `--profiles-dir` | `profiles` | profile 搜索目录 | 影响可用的采集 profile |
+| `--proc-root` | `/proc` | 只读进程发现使用的 procfs 根 | 影响自动发现和 PID 归因 |
+| `--duration` | `10s` | 采集时长 | 决定所有 run 证据的时间窗口 |
+| `--output` | `runs/ebpf-<unix>` | 输出目录，不覆盖旧证据 | `spans.jsonl`、`manifest.json`、`summary.*` 的落盘位置 |
+| `--min-duration` | `0` | 丢弃短于该时长的 span | 影响时间轴、TopN、CDF 和所有 span 统计 |
+| `--context-socket` | 空（使用 profile socket） | 覆盖 vLLM batch/request 上下文 socket | batch 关联、关键路径、Trace KPI 和 vLLM 视图 |
+| `--no-context` | `false` | 不启动插件 socket，仅保留 eBPF span 和可选 python batch | 关闭后不能按插件 batch/request 下钻 |
+| `--python-batch` | `false` | 启用只读纯 eBPF `SchedulerOutput` batch 探针 | 写 `python-batch-<pid>.json` 和 `category=batch` span |
+| `--python-batch-lib` | 自动解析 | 显式指定 `libpython3.12.so` | 影响 python batch 探针能否 attach |
+| `--python-batch-offsets` | 内嵌固定 profile | CPython/vLLM offset bundle JSON | 影响 python batch 对象读取和类型确认 |
+| `--python-batch-max-events` | `20000` | 每个 Worker 保留的最大 batch ring-buffer 事件数 | 影响 batch 覆盖和 `python-batch-<pid>.json` |
+| `--python-batch-require-type` | `SchedulerOutput` | 要求 batch owner 类型包含的字符串 | 防止把非调度对象误记为 batch |
+| `--blocking` | `auto`（`auto/on/off`） | off-CPU/futex 采样开关；`auto` 跟随 profile | 产生 `offcpu_ns`/`futex_ns`，驱动 off-CPU ribbon 和阻塞判定 |
+| `--hardware` | `auto`（`auto/on/off`） | 粗粒度 NPU 硬件采样开关；`auto` 跟随 profile | 写 `hardware.jsonl`，驱动硬件表、exporter 和资源判断 |
+| `--hardware-interval` | `0`（使用 profile 值） | 覆盖硬件采样间隔 | 影响硬件采样密度和报告中的资源时间分辨率 |
+| `--hardware-backend` | 空（默认 `npu-smi`） | 选择 `npu-smi` 或 `dcmi` | 影响 `hardware.jsonl` 和 NPU metrics 的来源 |
+| `--device-jsonl` | 空 | 导入外部 msPTI `device.jsonl` 及同名 meta/pidmap | 驱动设备四象限、设备忙率、Treemap 和关键路径 |
+| `--preflight` | `enforce`（`enforce/warn/off`） | attach 前执行环境门禁 | 决定失败时中止、告警还是跳过 |
+| `--json` | `false` | 输出 JSON 采集摘要 | 便于自动化读取 pids、spans、warnings 和设备导入状态 |
+
+**`report`：单文件 HTML 与其数据源**
+
+| 参数 | 默认值/取值 | 作用 | 对应图表 |
+|---|---|---|---|
+| `--input` | 空；与 `--metrics` 至少给一个 | run 目录或 `spans.jsonl` | KPI、时间轴、散点、热力图、TopN、CDF、cohort 和设备图 |
+| `--metrics` | 空；也可指向 metrics run 目录；省略时自动尝试 input 同目录 `metrics.jsonl` | `metrics.jsonl` 或包含它的目录 | 多指标小倍数、指标统计、负载-延迟、变化点和 A/B |
+| `--out` | `report.html` | 单文件离线 HTML 输出路径 | 全部内置图表 |
+| `--title` | 空（自动标题） | 报告标题 | 报告页眉 |
+| `--min-duration` | `50us` | 时间轴最小显示时长 | 线程时间轴 |
+| `--slow-threshold` | `1ms` | slow span 阈值 | 延迟 CDF、延迟热图、slow KPI 和证据计数 |
+| `--top` | `15` | TopN 函数数量 | TopN 函数 |
+| `--max-lanes` | `64` | 时间轴最多嵌入的 TID 泳道数 | 线程时间轴；截断会写 warning |
+| `--buckets` | `160` | 时间桶数量 | 时间热力图、延迟热图、次秒偏移热图、函数分位带和设备忙率 |
+| `--device-mode` | `matched`（`matched/none`） | 是否嵌入匹配的设备时间线 | 设备四象限、设备忙率和 stream 轨道 |
+| `--device-container-id` | 空 | 无 pidmap 时用容器 ID 翻译 device PID/TID | 设备 join；影响 quadrants、busy 和关键路径的匹配结果 |
+| `--max-series` | `256` | 最多嵌入的 metric series 数 | 多指标小倍数和指标统计 |
+| `--sweep` | 空 | `sweep.json` 负载扫描清单 | 负载-延迟拐点 |
+| `--ops` | 空 | 含 per-op FLOPs/bytes 的 `ops.jsonl` | Roofline |
+| `--events` | 空 | 部署、扩缩容或故障标注 `events.jsonl` | 变化点/异常带 |
+| `--offcpu` | 空 | 精确 off-CPU 区间 `offcpu.jsonl` | off-CPU ribbon 的精确模式 |
+| `--otel` | 空 | 跨服务 OTel span `otel.jsonl` | 服务拓扑；缺失时只能显示进程级拓扑 |
+| `--ab-a`、`--ab-b` | 空；必须成对 | A/B 两个 run 目录 | A/B 差分 |
+| `--ab-workload-id` | 空 | 两侧共享的固定 workload ID | A/B 差分；不一致时拒绝比较 |
+| `--roofline-peak-tflops` | `0` | 已验证的参考峰值 TFLOPS | Roofline；必须显式提供才画点 |
+| `--roofline-peak-gbps` | `0` | 已验证的参考峰值 GB/s | Roofline；必须显式提供才画点 |
+| `--roofline-dtype` | 空 | 与峰值参数对应的 dtype | Roofline 标注和解释 |
+| `--topology-root-service` | 空 | 可选的观测根服务 | 服务拓扑的根节点 |
+
+**`sample`：独立 metrics 采集**
+
+| 参数 | 默认值/取值 | 作用 | 对应证据和图表 |
+|---|---|---|---|
+| `--out` | 必填 | `metrics.jsonl`、`metrics.meta.json` 的输出目录 | `report --metrics` 的数据源 |
+| `--interval` | `1s` | 基础采样间隔 | 影响所有指标序列的时间分辨率 |
+| `--duration` | `0` | 采集时长；`0` 表示直到 SIGINT/SIGTERM | 决定长期趋势和变化点的可观测窗口 |
+| `--dcmi` | `false` | 使用 DCMI helper | NPU 利用率、HBM、功耗、温度、health |
+| `--npu-smi` | `false` | 使用 `npu-smi` 采 NPU 利用率/HBM/功耗/温度；最小间隔 5s | NPU 硬件指标小倍数、指标统计和变化点 |
+| `--system` | `false` | 从 procfs/sysfs 采主机 CPU、load、内存、PSI、磁盘、网络、温度、频率 | 多指标小倍数、统计和变化点的系统背景 |
+| `--pid` | 可重复 | 从 `/proc` 采进程 CPU、RSS、线程、fd、调度延迟、上下文切换和 I/O | 进程级小倍数、A/B 和资源归因 |
+| `--cgroup` | 可重复，cgroup v2 路径 | 采容器 CPU、throttle、内存、OOM、PID 和 PSI | cgroup 资源压力、变化点和容量分析 |
+| `--prometheus` | 可重复，`[name=]http(s)://.../metrics` | 接入 vLLM、LiteLLM、网关或其他 exporter | 任意 gauge/counter/histogram 小倍数、统计、变化点和 A/B |
+| `--include` | 可重复，正则 | Prometheus 指标名 allowlist | 降低 series 基数，控制报告体积 |
+| `--json` | `false` | 输出 JSON 采集摘要 | 自动化读取 points、status、bytes、SHA-256 和 warnings |
+
+**其余命令参数**
+
+| 命令 | 关键参数 | 说明 |
+|---|---|---|
+| `validate` | `--config`、`--json` | 校验配置/profile；不产生运行证据 |
+| `preflight` | `--json` | 只读检查根权限、tracefs、BTF、BPF 和 NPU 工具 |
+| `discover` | `--pid`、`--profile`、`--profiles-dir`、`--config`、`--proc-root`、`--max-processes`、`--json`、`--dry-run` | 只读列出 PID、库、符号和 offset |
+| `attach-tracefs` | `--pid`、`--profile`、`--profiles-dir`、`--duration`、`--output`、`--only`、`--dry-run`、`--json` | 无 uprobe 条件下的 tracefs 后备采集 |
+| `trace` | `--input`、`--trace-id`、`--limit`、`--json` | 按 trace_id/batch/parent 聚合链路树 |
+| `diagnose` | `--input`、`--run`、`--start-ns`、`--end-ns`、`--last`、`--pid`、`--tid`、`--batch-id`、`--request-id`、`--trace-id`、`--top`、`--slow-threshold`、`--offcpu-ratio`、`--futex-ratio`、`--hbm-free-pct`、`--device-tolerance`、`--device-container-id`、`--json`、`--out` | 只读定位：慢函数、阻塞、硬件和 device verdict |
+| `metrics` | `--input`、`--listen`、`--out` | 把已完成 run 导出为 Prometheus text，或启动 `/metrics` 服务 |
+| `version` | 无 | 输出版本、平台和构建信息 |
+
+### 推荐抓取组合
+
+| 目标 | 采集 | 报告 |
+|---|---|---|
+| 只看 host 调用和线程 | `attach --duration 10s` | `report --input <run>` |
+| 看 host 锁等待 | `attach --blocking on` | off-CPU ribbon、尾 cohort、`diagnose` |
+| 看设备时间和按调用等待 | `attach --device-jsonl <device.jsonl>` | 设备四象限、设备忙率、关键路径、Treemap |
+| 看容量和拐点 | 每档 `sample --prometheus ...` + 负载脚本 + `sweep.json` | `report --sweep ... --metrics ...` |
+| 看版本 A/B | 两个同 workload、同窗口的完整 run | `report --ab-a ... --ab-b ... --ab-workload-id ...` |
+| 看长期变化 | `sample --system --pid ... --cgroup ... --duration 10m` | 多指标小倍数、指标统计、变化点 |
+| 看跨服务拓扑 | `otel.jsonl` 或网关/LiteLLM trace | `report --otel ...` |
+| 只有 metrics、没有 spans | `sample` 独立运行 | `report --metrics <run>` 的 metrics-only 降级报告 |
+
+### 无数据与置信度语义
+
+- `available=true` 表示视图的数据前提满足；`confidence=exact` 才表示有精确设备/区间证据，`inferred` 表示由 host 或时间关系推断，`partial` 表示窗口、背景负载或样本不完整。
+- `available=false` 必须同时给出 `reason`；不显示空坐标轴、不生成示意曲线、不把 0 当作“没发生”。
+- 背景负载高于客户端并发时，`load_latency` 保留真实观测但拒绝 capacity knee；必须等 `running=0` 的窗口才能宣称干净容量。
+- 缺少 `device.jsonl`、`ops.jsonl`、`otel.jsonl`、`events.jsonl` 或精确 `offcpu.jsonl` 时，对应依赖视图保持不可用。
 
 ## 输出
 
