@@ -4,9 +4,11 @@
 
 ## B1 真实 V4/Orinfer 设备时间线
 
-- **已尝试，失败**（2026-11-27）：通过 V4 env-file `LD_PRELOAD` 注入 collector 后，容器入口
-  `bash` 与 vLLM `python3` 进程均 SIGSEGV；加 `CANN_MSPTI_ONLY_COMM` 仅修复 shell，python 仍崩溃。
-  已回滚 collector env，V4 恢复。详见 `docs/B-STATUS.md` 的窗口结果。
+- **根因已定位并修复（2026-11-27）**：不是 vLLM/Orinfer、也不是 msPTI API 缺失，而是
+  collector 的 `__attribute__((constructor))` 在全局 `std::string` 构造前执行，写 `g_run_id`
+  空指针导致 SIGSEGV。已改为文件末尾 `AutoLifecycle` 对象；9.0.1/9.2 构建+selftest 通过，
+  bash/python `LD_PRELOAD` 不再崩溃；**真实 torch_npu 进程已采到 109 API + 1 MEMCPY**。
+  剩余：进程退出析构 SIGSEGV、真实 V4 验证。详见 `docs/B1-COLLECTOR-FIX.md`。
 - 已准备：`m3/mspti_collector` 可从当前源码构建并通过 selftest；`attach --device-jsonl`
   可导入 collector 产物、抓 pidmap 并封存 artifact。
 - 进一步准备（2026-11-26）：`deploy/b1/stage-collector.sh --stage` 已把

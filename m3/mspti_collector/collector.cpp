@@ -881,14 +881,29 @@ extern "C" int cann_mspti_start(const char *output_path, const char *run_id,
     }
     std::setvbuf(g_file, nullptr, _IOFBF, 1024 * 1024);
 
+    // NOTE: CANN msPTI has no msptiInitialize()/msptiFinalize(). mspti.h only
+    // exposes the subscriber API (verified on CANN 9.2.0: nm -D libmspti.so
+    // shows msptiSubscribe/msptiUnsubscribe but no *Initialize/*Finalize, and
+    // mspti_result.h has no ALREADY_INITIALIZED code). msPTI is initialized
+    // implicitly by msptiSubscribe inside a process that already has
+    // libmspti.so loaded through LD_PRELOAD; that is the whole "init" step.
     const msptiResult subscribe_result = msptiSubscribe(&g_subscriber, nullptr, nullptr);
     if (subscribe_result != MSPTI_SUCCESS) {
+        const char *hint = "";
+        switch (static_cast<int>(subscribe_result)) {
+            // MSPTI_ERROR_MULTIPLE_SUBSCRIBERS_NOT_SUPPORTED: another msPTI
+            // client (e.g. ms_service_profiler) already owns this process.
+            case 2: hint = " (another msPTI subscriber is already registered)"; break;
+            case 6: hint = " (libmspti.so must be listed first in LD_PRELOAD)"; break;
+            // MSPTI_ERROR_NOT_INITIALIZED exists only in CANN >= 9.2 and means
+            // msPTI could not bootstrap from the preloaded libmspti.so.
+            case 7: hint = " (msPTI is not initialized; check LD_PRELOAD order)"; break;
+            default: break;
+        }
         std::fprintf(stderr,
                      "cann-mspti: msptiSubscribe failed: %d%s\n",
                      static_cast<int>(subscribe_result),
-                     subscribe_result == MSPTI_ERROR_WITHOUT_LD_PRELOAD
-                         ? " (libmspti.so must be in LD_PRELOAD)"
-                         : "");
+                     hint);
         std::fclose(g_file);
         g_file = nullptr;
         return 6;
@@ -1062,7 +1077,15 @@ extern "C" int cann_mspti_stop(void) {
 
 extern "C" int cann_mspti_is_active(void) { return g_running.load() ? 1 : 0; }
 
-__attribute__((constructor)) static void CannMsptiAutoStart() {
+// Auto-start is deliberately NOT __attribute__((constructor)). GCC emits such
+// a function into .init_array ahead of this translation unit's
+// _GLOBAL__sub_I_collector.cpp, so it ran before the std::string / std::map
+// globals were constructed. The first `g_run_id = ...` then stored the empty
+// string terminator through an uninitialized (null) _M_p and every
+// LD_PRELOADed process died with SIGSEGV before main. A namespace-scope object
+// declared after every global is constructed after them (ordered dynamic
+// initialization within the TU) and destroyed before them.
+static void CannMsptiAutoStart() {
     const char *output = std::getenv("CANN_MSPTI_OUTPUT");
     if (output == nullptr || *output == '\0') {
         return;
@@ -1106,8 +1129,21 @@ __attribute__((constructor)) static void CannMsptiAutoStart() {
     }
 }
 
-__attribute__((destructor)) static void CannMsptiAutoStop() {
+static void CannMsptiAutoStop() {
     if (g_auto_started.load()) {
         cann_mspti_stop();
     }
 }
+
+namespace {
+
+struct AutoLifecycle {
+    AutoLifecycle() { CannMsptiAutoStart(); }
+    ~AutoLifecycle() { CannMsptiAutoStop(); }
+};
+
+// Declared last on purpose: it must be constructed after g_output_path,
+// g_run_id, g_activity_spec, ... (and therefore destroyed before them).
+AutoLifecycle g_auto_lifecycle;
+
+}  // namespace

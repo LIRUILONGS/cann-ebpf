@@ -1,10 +1,9 @@
 # B1 准备：把 msPTI collector 接入 V4
 
-状态（2026-11-27 更新）：**尝试激活失败，已回滚**。V4 已恢复正常。
-失败现象：env-file LD_PRELOAD 注入后容器入口 `bash`、以及 vLLM 的 `python3` 进程均 SIGSEGV；
-加 `CANN_MSPTI_ONLY_COMM=vllm,python` 只解决了 shell，python 仍崩溃。当前 collector 不能直接
-LD_PRELOAD 进 V4 运行时；需要入口 wrapper 只包住 vLLM 主进程或修复 collector 初始化。详见
-`docs/B-STATUS.md` 的窗口结果。
+状态（2026-11-27 更新）：**根因已修复，真实 torch_npu 进程可采到 API/MEMCPY；退出析构仍崩。**
+根因是 C++ 静态初始化顺序：`__attribute__((constructor))` 在全局 `std::string` 构造前执行，
+`g_run_id=""` 往空指针写终止符导致 SIGSEGV。已改为文件末尾 `AutoLifecycle` 对象。
+详见 `docs/B1-COLLECTOR-FIX.md`。
 
 ## 1. 原理
 
