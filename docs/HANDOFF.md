@@ -266,8 +266,9 @@ span_id, seq
 - **验证**：`go test ./internal/report ./cmd/cann-ebpf`、`node --check` 生成页面 JS、
   Chrome headless 截图检查；样本见 `.analysis/report-samples/report-m4.html`（6,991 spans，
   18 TID，无 device）与 `report-final7-m1m2.html`（11,859 spans，305 device intervals）。
-  独立 QA 记录见 `.analysis/report-samples/QA-REPORT.md`；metrics-only 样本见
-  `.analysis/report-samples/report-metrics-only.html`（42 points、7 series、无 span 证据）。
+  独立 QA 记录见 `.analysis/report-samples/QA-REPORT.md` 与 `.analysis/report-samples/QA-REPORT-STATS.md`；
+  metrics-only + 指标统计样本见 `.analysis/report-samples/report-metrics-only-stats-final.html`
+  （42 points、7 series、无 span 证据）；system 合成样本见 `.analysis/report-samples/report-system-stats.html`。
 
 ### 3.15 独立 metrics 与 M1/M2 可视化增强
 
